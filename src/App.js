@@ -29,6 +29,8 @@ import {
   Shield,
   Download,
   Store,
+  ArrowLeft,
+  Layers,
 } from 'lucide-react';
 
 // ── Firebase ──────────────────────────────────────────────
@@ -77,22 +79,36 @@ const SEED_ORDERS = [
 ];
 
 const SEED_PURCHASES = [
-  { id: 'P-01', item: 'Tomato', supplier: 'Ramesh Farms', qty: 300, unit: 'kg', cost: 9000, source: 'Manual' },
-  { id: 'P-02', item: 'Onion', supplier: 'Patil Traders', qty: 500, unit: 'kg', cost: 12500, source: 'Manual' },
-  { id: 'P-03', item: 'Banana', supplier: 'Kadam Orchards', qty: 150, unit: 'dozen', cost: 6750, source: 'Manual' },
+  { id: 'P-01', item: 'Tomato', supplier: 'Ramesh Farms', qty: 300, unit: 'kg', cost: 9000, source: 'Manual', date: '2026-09-10' },
+  { id: 'P-02', item: 'Onion', supplier: 'Patil Traders', qty: 500, unit: 'kg', cost: 12500, source: 'Manual', date: '2026-09-11' },
+  { id: 'P-03', item: 'Banana', supplier: 'Kadam Orchards', qty: 150, unit: 'dozen', cost: 6750, source: 'Manual', date: '2026-09-12' },
 ];
 
-const EMPTY_CHANNELS = { Blinkit: { code: '', packSize: '', packUnit: 'kg' }, Flipkart: { code: '', packSize: '', packUnit: 'kg' } };
+function findAlias(item, channel) {
+  return item?.aliases?.find((a) => a.channel === channel);
+}
+function newAliasId() {
+  return `AL-${Date.now().toString(36).toUpperCase().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
+}
 
 const SEED_ITEMS = [
-  { id: 'IT-001', name: 'Tomato', productCode: 'FNV-TOM-01', uom: 'kg', category: 'VEGETABLES', channelCodes: { Blinkit: { code: 'BLK-TOM-240', packSize: '0.5', packUnit: 'kg' }, Flipkart: { code: 'FKT-TOM-01', packSize: '1', packUnit: 'kg' } } },
-  { id: 'IT-002', name: 'Onion', productCode: 'FNV-ONI-01', uom: 'kg', category: 'VEGETABLES', channelCodes: { Blinkit: { code: '', packSize: '', packUnit: 'kg' }, Flipkart: { code: 'FKT-ONI-500', packSize: '0.5', packUnit: 'kg' } } },
-  { id: 'IT-003', name: 'Banana', productCode: 'FNV-BAN-01', uom: 'dozen', category: 'FRUITS', channelCodes: { Blinkit: { code: 'BLK-BAN-DZ', packSize: '1', packUnit: 'pieces' }, Flipkart: { code: '', packSize: '', packUnit: 'kg' } } },
-  { id: 'IT-004', name: 'Cauliflower', productCode: 'FNV-CAU-01', uom: 'piece', category: 'VEGETABLES', channelCodes: EMPTY_CHANNELS },
-  { id: 'IT-005', name: 'Carrot', productCode: 'FNV-CAR-01', uom: 'kg', category: 'VEGETABLES', channelCodes: EMPTY_CHANNELS },
-  { id: 'IT-006', name: 'Green Beans', productCode: 'FNV-BEN-01', uom: 'kg', category: 'VEGETABLES', channelCodes: EMPTY_CHANNELS },
-  { id: 'IT-007', name: 'Green Pea', productCode: 'FNV-PEA-01', uom: 'kg', category: 'VEGETABLES', channelCodes: EMPTY_CHANNELS },
-  { id: 'IT-008', name: 'Pulao Veggie Mix', productCode: 'FNV-PVM-01', uom: 'pack', category: 'VEGETABLES', channelCodes: { Blinkit: { code: 'BLK-PVM-01', packSize: '1', packUnit: 'pack' }, Flipkart: { code: '', packSize: '', packUnit: 'pack' } } },
+  { id: 'IT-001', name: 'Tomato', uom: 'kg', category: 'VEGETABLES', aliases: [
+    { id: 'AL-1001', channel: 'Blinkit', code: 'BLK-TOM-240', packSize: '0.5', packUnit: 'kg' },
+    { id: 'AL-1002', channel: 'Flipkart', code: 'FKT-TOM-01', packSize: '1', packUnit: 'kg' },
+  ] },
+  { id: 'IT-002', name: 'Onion', uom: 'kg', category: 'VEGETABLES', aliases: [
+    { id: 'AL-1003', channel: 'Flipkart', code: 'FKT-ONI-500', packSize: '0.5', packUnit: 'kg' },
+  ] },
+  { id: 'IT-003', name: 'Banana', uom: 'dozen', category: 'FRUITS', aliases: [
+    { id: 'AL-1004', channel: 'Blinkit', code: 'BLK-BAN-DZ', packSize: '1', packUnit: 'pieces' },
+  ] },
+  { id: 'IT-004', name: 'Cauliflower', uom: 'piece', category: 'VEGETABLES', aliases: [] },
+  { id: 'IT-005', name: 'Carrot', uom: 'kg', category: 'VEGETABLES', aliases: [] },
+  { id: 'IT-006', name: 'Green Beans', uom: 'kg', category: 'VEGETABLES', aliases: [] },
+  { id: 'IT-007', name: 'Green Pea', uom: 'kg', category: 'VEGETABLES', aliases: [] },
+  { id: 'IT-008', name: 'Pulao Veggie Mix', uom: 'pack', category: 'VEGETABLES', aliases: [
+    { id: 'AL-1005', channel: 'Blinkit', code: 'BLK-PVM-01', packSize: '1', packUnit: 'pack' },
+  ] },
 ];
 
 const SEED_RECIPES = [
@@ -115,6 +131,7 @@ const PERMISSION_SECTIONS = [
   { key: 'cutprocess', label: 'Cut & Process' },
   { key: 'orders', label: 'Orders' },
   { key: 'purchase', label: 'Purchases' },
+  { key: 'stockcount', label: 'Stock Count' },
   { key: 'packaging', label: 'Packaging' },
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'crates', label: 'Crates & boxes' },
@@ -125,17 +142,17 @@ const SEED_ROLES = [
   {
     id: 'ROLE-ADMIN',
     name: 'Admin',
-    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, packaging: true, dispatch: true, crates: true, users: true },
+    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, packaging: true, dispatch: true, crates: true, users: true },
   },
   {
     id: 'ROLE-WAREHOUSE',
     name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, cutprocess: false, orders: false, purchase: false, packaging: true, dispatch: true, crates: true, users: false },
+    permissions: { dashboard: true, items: false, cutprocess: false, orders: false, purchase: false, stockcount: true, packaging: true, dispatch: true, crates: true, users: false },
   },
   {
     id: 'ROLE-PURCHASE',
     name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, packaging: false, dispatch: false, crates: false, users: false },
+    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, packaging: false, dispatch: false, crates: false, users: false },
   },
 ];
 
@@ -158,6 +175,7 @@ const NAV = [
   { key: 'cutprocess', label: 'Cut & Process', icon: Scissors },
   { key: 'orders', label: 'Orders', icon: ClipboardList },
   { key: 'purchase', label: 'Purchases', icon: ShoppingBag },
+  { key: 'stockcount', label: 'Stock Count', icon: Layers },
   { key: 'packaging', label: 'Packaging', icon: PackageCheck },
   { key: 'dispatch', label: 'Dispatch', icon: Truck },
   { key: 'crates', label: 'Crates & boxes', icon: Boxes },
@@ -179,6 +197,7 @@ export default function AdminPanel() {
   const [crates,        setCrates]        = useState({ crates: 180, boxes: 260 });
   const [crateLog,      setCrateLog]      = useState([]);
   const [dispatchLog,   setDispatchLog]   = useState([]);
+  const [stockCounts,   setStockCounts]   = useState([]); // nightly closing-stock entries, one per item per date
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
   const [dbReady,       setDbReady]       = useState(false);
 
@@ -197,8 +216,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','indentBatches','crateLog','dispatchLog'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','indentBatches','crateLog','dispatchLog','stockCounts'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -235,9 +254,29 @@ export default function AdminPanel() {
   const addItemsBulk = (rows) => { const b = writeBatch(db); rows.forEach((r) => b.set(doc(db,'items',r.id), r)); b.commit(); };
   const deleteItem   = (id)   => fbDelete('items', id);
   const updateItem   = (id, patch) => fbUpdate('items', id, patch);
-  const mapChannelField = (itemId, channel, field, value) => {
+  const mapChannelField = (itemId, channel, patch) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
-    fbUpdate('items', itemId, { channelCodes: { ...it.channelCodes, [channel]: { ...it.channelCodes[channel], [field]: value } } });
+    const existing = findAlias(it, channel);
+    const nextAliases = existing
+      ? it.aliases.map((a) => (a.channel === channel ? { ...a, ...patch } : a))
+      : [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: '', packUnit: 'kg', ...patch }];
+    fbUpdate('items', itemId, { aliases: nextAliases });
+  };
+  // Different articles from the same channel can map to the same base item but have
+  // their own pack size (e.g. "Baby Banana" 500g vs "Banana 3pc" 600g, both on Blinkit,
+  // both = item "Banana"). So each distinct article code gets its OWN alias entry —
+  // never share one alias between two different codes on the same channel.
+  const ensureAliasForCode = (itemId, channel, code) => {
+    const it = items.find((x) => x.id === itemId); if (!it) return;
+    const exists = (it.aliases || []).some((a) => a.channel === channel && a.code && code && a.code.toLowerCase() === code.toLowerCase());
+    if (exists) return;
+    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code: code || '', packSize: '', packUnit: 'kg' }];
+    fbUpdate('items', itemId, { aliases: nextAliases });
+  };
+  const updateAliasById = (itemId, aliasId, patch) => {
+    const it = items.find((x) => x.id === itemId); if (!it) return;
+    const nextAliases = (it.aliases || []).map((a) => (a.id === aliasId ? { ...a, ...patch } : a));
+    fbUpdate('items', itemId, { aliases: nextAliases });
   };
 
   // ── Recipes ─────────────────────────────────────────────
@@ -245,9 +284,16 @@ export default function AdminPanel() {
   const deleteRecipe = (id) => fbDelete('recipes', id);
 
   // ── Purchases ───────────────────────────────────────────
-  const addPurchase            = (p)   => fbSetDoc('purchases', p.id, p);
-  const addPurchaseRequirements = (rows) => { const b = writeBatch(db); rows.forEach((r) => b.set(doc(db,'purchases',r.id), r)); b.commit(); };
+  // "purchased" rows are real, completed transactions and count toward stock.
+  // "requirement" rows are just a to-buy queue (from indent release / recipe push) — they do NOT count as stock until actually purchased.
+  const addPurchase            = (p)   => fbSetDoc('purchases', p.id, { date: new Date().toISOString().split('T')[0], type: 'purchased', ...p });
+  const addPurchaseRequirements = (rows) => { const b = writeBatch(db); const today = new Date().toISOString().split('T')[0]; rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r })); b.commit(); };
   const removePurchasesByIds   = (ids) => { const b = writeBatch(db); ids.forEach((id) => b.delete(doc(db,'purchases',id))); b.commit(); };
+
+  // ── Stock count (nightly closing stock) ─────────────────
+  const recordStockCount = (itemId, itemName, unit, date, closingQty) => {
+    fbSetDoc('stockCounts', `${itemId}__${date}`, { id: `${itemId}__${date}`, itemId, itemName, unit, date, closingQty: Number(closingQty) || 0 });
+  };
 
   // ── Indent batches ──────────────────────────────────────
   const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, batch);
@@ -299,7 +345,7 @@ export default function AdminPanel() {
   const addLedgerEntry = (entry) => {
     fbSetDoc('vendorLedger', entry.id, entry);
     const pid = `P-${Date.now().toString(36).toUpperCase().slice(-5)}`;
-    addPurchase({ id: pid, item: entry.itemName, supplier: entry.vendorName, qty: entry.qty, unit: entry.unit, cost: entry.total, source: entry.payment === 'credit' ? `Credit — ${entry.vendorName}` : entry.payment });
+    addPurchase({ id: pid, item: entry.itemName, supplier: entry.vendorName, qty: entry.qty, unit: entry.unit, cost: entry.total, source: entry.payment === 'credit' ? `Credit — ${entry.vendorName}` : entry.payment, date: entry.date });
   };
   const settleEntries = (ids, paymentMode, note, edits = {}) => {
     const b = writeBatch(db);
@@ -329,12 +375,36 @@ export default function AdminPanel() {
   };
 
   // ── Dispatch ────────────────────────────────────────────
-  const dispatchBatch = async ({ orderIds, vehicleNo, driverName, cratesUsed, boxesUsed }) => {
-    advanceMany(orderIds, 'dispatched');
+  // Supports partial dispatch: an order's full qty doesn't have to go out in one
+  // trip. Each entry carries how much is actually leaving now (dispatchQty) and how
+  // much is permanently short (shortQty) — whatever's left over stays "packed" for
+  // the next trip rather than being wrongly counted as short.
+  const dispatchBatch = ({ items: dispatchItems, vehicleNo, driverName, cratesUsed, boxesUsed }) => {
+    const b = writeBatch(db);
+    let totalDispatchQty = 0;
+    const logItems = [];
+    dispatchItems.forEach(({ orderId, dispatchQty, shortQty }) => {
+      const o = orders.find((x) => x.id === orderId);
+      if (!o) return;
+      const dQty = Number(dispatchQty) || 0;
+      const sQty = Number(shortQty) || 0;
+      if (dQty <= 0 && sQty <= 0) return;
+      const prevDispatched = o.dispatchedQty || 0;
+      const prevShort = o.shortQty || 0;
+      const newDispatched = prevDispatched + dQty;
+      const newShort = prevShort + sQty;
+      const remaining = Math.round((o.qty - newDispatched - newShort) * 100) / 100;
+      const patch = { dispatchedQty: newDispatched, shortQty: newShort };
+      patch.status = remaining > 0.01 ? 'packed' : 'dispatched';
+      b.update(doc(db, 'orders', orderId), patch);
+      totalDispatchQty += dQty;
+      logItems.push({ orderId, product: o.articleName || o.product, unit: o.unit, dispatchQty: dQty, shortQty: sQty, remaining: Math.max(0, remaining) });
+    });
+    b.commit();
     if (cratesUsed > 0) adjustCrates('crates', -cratesUsed, `Dispatch ${vehicleNo || ''}`.trim());
     if (boxesUsed > 0)  adjustCrates('boxes',  -boxesUsed,  `Dispatch ${vehicleNo || ''}`.trim());
     const did = `DSP-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    fbSetDoc('dispatchLog', did, { id: did, orderIds, vehicleNo: vehicleNo || '—', driverName: driverName || '—', cratesUsed, boxesUsed, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) });
+    fbSetDoc('dispatchLog', did, { id: did, items: logItems, orderIds: logItems.map((li) => li.orderId), totalDispatchQty, vehicleNo: vehicleNo || '—', driverName: driverName || '—', cratesUsed, boxesUsed, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) });
   };
 
   const pendingCount = orders.filter((o) => o.status === 'pending').length;
@@ -432,12 +502,14 @@ export default function AdminPanel() {
               indentBatches={indentBatches}
               onImport={importOrder}
               onAddItem={addItem}
-              onMapChannel={mapChannelField}
+              onEnsureAlias={ensureAliasForCode}
+              onUpdateAlias={updateAliasById}
               onCreateIndentBatch={createIndentBatch}
               onToggleReleaseBatch={toggleReleaseBatch}
             />
           )}
-          {tab === 'purchase' && <PurchasePanel purchases={purchases} orders={orders} items={items} recipes={recipes} vendors={vendors} vendorLedger={vendorLedger} totalSpend={totalSpend} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} />}
+          {tab === 'purchase' && <PurchasePanel purchases={purchases} orders={orders} items={items} recipes={recipes} vendors={vendors} vendorLedger={vendorLedger} totalSpend={totalSpend} stockCounts={stockCounts} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} />}
+          {tab === 'stockcount' && <StockCountPanel items={items} stockCounts={stockCounts} onRecord={recordStockCount} />}
           {tab === 'packaging' && <PackagingPanel orders={orders} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
           {tab === 'dispatch' && <DispatchPanel orders={orders} crates={crates} dispatchLog={dispatchLog} onAdvance={advanceStatus} onDispatchBatch={dispatchBatch} />}
           {tab === 'crates' && <CratesPanel crates={crates} log={crateLog} onAdjust={adjustCrates} />}
@@ -507,7 +579,7 @@ function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend,
               {orders.slice(0, 5).map((o) => (
                 <tr key={o.id}>
                   <Td style={{ borderTop: 'none' }}>{o.id}</Td>
-                  <Td style={{ borderTop: 'none' }}>{o.product} · {o.qty}{o.unit}</Td>
+                  <Td style={{ borderTop: 'none' }}>{o.articleName || o.product} · {o.qty}{o.unit}</Td>
                   <Td style={{ borderTop: 'none' }}><StatusPill status={o.status} /></Td>
                 </tr>
               ))}
@@ -542,7 +614,6 @@ function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend,
 const ITEM_TEMPLATE_ROWS = [
   {
     'Item Name': 'Tomato',
-    'Product Code': 'FNV-TOM-01',
     UOM: 'kg',
     Category: 'VEGETABLES',
     'Blinkit Code': 'BLK-TOM-240',
@@ -574,8 +645,7 @@ function parseBulkItemRows(json) {
   const results = { valid: [], skipped: 0 };
   json.forEach((r) => {
     const name = String(pickField(r, ['itemname', 'name', 'article', 'product']) || '').trim();
-    const productCode = String(pickField(r, ['productcode', 'internalsku', 'sku', 'code']) || '').trim();
-    if (!name || !productCode) {
+    if (!name) {
       results.skipped += 1;
       return;
     }
@@ -587,16 +657,15 @@ function parseBulkItemRows(json) {
     const flipkartCode = String(pickField(r, ['flipkartcode']) || '').trim();
     const flipkartPackSize = String(pickField(r, ['flipkartpacksize']) || '').trim();
     const flipkartPackUnit = String(pickField(r, ['flipkartpackunit']) || 'kg').trim() || 'kg';
+    const aliases = [];
+    if (blinkitCode || blinkitPackSize) aliases.push({ id: newAliasId(), channel: 'Blinkit', code: blinkitCode, packSize: blinkitPackSize, packUnit: blinkitPackUnit });
+    if (flipkartCode || flipkartPackSize) aliases.push({ id: newAliasId(), channel: 'Flipkart', code: flipkartCode, packSize: flipkartPackSize, packUnit: flipkartPackUnit });
     results.valid.push({
       id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}-${results.valid.length}`,
       name,
-      productCode,
       uom,
       category,
-      channelCodes: {
-        Blinkit: { code: blinkitCode, packSize: blinkitPackSize, packUnit: blinkitPackUnit },
-        Flipkart: { code: flipkartCode, packSize: flipkartPackSize, packUnit: flipkartPackUnit },
-      },
+      aliases,
     });
   });
   return results;
@@ -928,17 +997,136 @@ function VendorsPanel({ items, vendors, vendorLedger, onAdd, onDelete, onToggleI
     </div>
   );
 }
+const UOM_OPTIONS = ['kg', 'dozen', 'bunch', 'piece', 'pack', 'box', 'crate'];
+const CATEGORY_OPTIONS = ['FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
+const label13 = { margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 };
+
+function AliasChip({ alias }) {
+  return (
+    <span style={{ display: 'inline-block', background: '#EAF3DE', color: LEAF_DARK, fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 999, marginRight: 4, marginBottom: 4 }}>
+      {alias.channel}{alias.code ? `: ${alias.code}` : ''}{alias.packSize ? ` (${alias.packSize}${alias.packUnit || ''})` : ''}
+    </span>
+  );
+}
+
+function AliasRow({ alias, onChange, onRemove }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+      <input placeholder="Channel (e.g. Blinkit)" value={alias.channel} onChange={(e) => onChange({ ...alias, channel: e.target.value })} style={{ flex: 1.2, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
+      <input placeholder="Item code" value={alias.code} onChange={(e) => onChange({ ...alias, code: e.target.value })} style={{ flex: 1.4, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
+      <input placeholder="Pack size" type="number" value={alias.packSize} onChange={(e) => onChange({ ...alias, packSize: e.target.value })} style={{ width: 66, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }} />
+      <select value={alias.packUnit || 'kg'} onChange={(e) => onChange({ ...alias, packUnit: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
+        <option value="kg">kg</option>
+        <option value="g">g</option>
+        <option value="pieces">pieces</option>
+        <option value="pack">pack</option>
+      </select>
+      <button onClick={onRemove} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+}
+
+function ItemForm({ initial, onSave, onCancel }) {
+  const isEdit = !!initial;
+  const [name, setName] = useState(initial?.name || '');
+  const [uom, setUom] = useState(initial?.uom || 'kg');
+  const [category, setCategory] = useState(initial?.category || 'VEGETABLES');
+  const [aliases, setAliases] = useState((initial?.aliases || []).map((a) => ({ ...a })));
+
+  const addAliasRow = () => setAliases((p) => [...p, { id: newAliasId(), channel: '', code: '', packSize: '', packUnit: 'kg' }]);
+  const updateAliasRow = (id, next) => setAliases((p) => p.map((a) => (a.id === id ? next : a)));
+  const removeAliasRow = (id) => setAliases((p) => p.filter((a) => a.id !== id));
+
+  const canSave = name.trim();
+
+  const submit = () => {
+    if (!canSave) return;
+    onSave({
+      name: name.trim(),
+      uom,
+      category,
+      aliases: aliases.filter((a) => a.channel.trim()).map((a) => ({ ...a, channel: a.channel.trim(), code: a.code.trim() })),
+    });
+  };
+
+  return (
+    <div>
+      <button onClick={onCancel} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 14, padding: 0 }}>
+        <ArrowLeft size={15} /> Back to items
+      </button>
+      <Panel style={{ maxWidth: 640 }}>
+        <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 16, color: INK }}>{isEdit ? `Edit ${initial.name}` : 'Create item'}</p>
+        <p style={{ margin: '0 0 18px', fontSize: 12, color: MUTED }}>
+          Items are generic — add an alias for each channel it's sold on (Blinkit, Flipkart, Zepto, etc.), with that channel's own item name/code and pack size.
+        </p>
+
+        <p style={label13}>ITEM NAME</p>
+        <input placeholder="e.g. Tomato" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
+          <div style={{ flex: 1 }}>
+            <p style={label13}>UOM (unit it's purchased in)</p>
+            <select value={uom} onChange={(e) => setUom(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+              {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={label13}>CATEGORY</p>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+              {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14, marginTop: 8 }}>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Channel aliases</p>
+          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
+            e.g. Blinkit's 1kg Tomato pack, Flipkart's 500g pack, Zepto's 350g pack — each with its own channel item code.
+          </p>
+          {aliases.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 4, fontSize: 10, color: MUTED, fontWeight: 700 }}>
+              <div style={{ flex: 1.2 }}>CHANNEL</div>
+              <div style={{ flex: 1.4 }}>ITEM CODE / NAME</div>
+              <div style={{ width: 66 }}>PACK SIZE</div>
+              <div style={{ width: 62 }}>UNIT</div>
+              <div style={{ width: 19 }} />
+            </div>
+          )}
+          {aliases.map((a) => (
+            <AliasRow key={a.id} alias={a} onChange={(next) => updateAliasRow(a.id, next)} onRemove={() => removeAliasRow(a.id)} />
+          ))}
+          <button onClick={addAliasRow} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: `1px dashed ${LINE}`, borderRadius: 8, padding: '7px 10px', fontSize: 12, color: MUTED, cursor: 'pointer', width: '100%', justifyContent: 'center', marginTop: 4 }}>
+            <Plus size={12} /> Add alias
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+          <button
+            onClick={submit}
+            disabled={!canSave}
+            style={{ flex: 1, background: !canSave ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: !canSave ? 'default' : 'pointer' }}
+          >
+            {isEdit ? 'Save changes' : 'Create item'}
+          </button>
+          <button onClick={onCancel} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 20px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            Cancel
+          </button>
+        </div>
+      </Panel>
+    </div>
+  );
+}
 
 function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete }) {
-  const [name, setName] = useState('');
-  const [productCode, setProductCode] = useState('');
-  const [uom, setUom] = useState('kg');
-  const [category, setCategory] = useState('VEGETABLES');
-  const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState(null);
+  const [view, setView] = useState('list'); // 'list' | 'form'
+  const [editingItem, setEditingItem] = useState(null); // null while creating
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [bulkSummary, setBulkSummary] = useState(null);
   const [bulkError, setBulkError] = useState('');
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const bulkFileRef = useRef(null);
 
   const handleBulkFile = (e) => {
@@ -963,191 +1151,118 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
     e.target.value = '';
   };
 
-  const startEdit = (it) => {
-    setEditingId(it.id);
-    setDraft({ name: it.name, productCode: it.productCode, uom: it.uom, category: it.category });
-  };
-  const cancelEdit = () => {
-    setEditingId(null);
-    setDraft(null);
-  };
-  const saveEdit = (id) => {
-    if (!draft.name.trim() || !draft.productCode.trim()) return;
-    onUpdate(id, { name: draft.name.trim(), productCode: draft.productCode.trim(), uom: draft.uom, category: draft.category });
-    setEditingId(null);
-    setDraft(null);
+  const openCreate = () => { setEditingItem(null); setView('form'); };
+  const openEdit = (it) => { setEditingItem(it); setView('form'); };
+  const closeForm = () => { setView('list'); setEditingItem(null); };
+
+  const saveItem = (data) => {
+    if (editingItem) {
+      onUpdate(editingItem.id, data);
+    } else {
+      onAdd({ id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}`, ...data });
+    }
+    closeForm();
   };
 
-  const submit = () => {
-    if (!name.trim() || !productCode.trim()) return;
-    onAdd({
-      id: `IT-${String(items.length + 1).padStart(3, '0')}`,
-      name: name.trim(),
-      productCode: productCode.trim(),
-      uom,
-      category,
-      channelCodes: { Blinkit: { code: '', packSize: '', packUnit: 'kg' }, Flipkart: { code: '', packSize: '', packUnit: 'kg' } },
-    });
-    setName('');
-    setProductCode('');
-  };
+  const categoryChips = ['ALL', ...CATEGORY_OPTIONS];
+
+  const filteredItems = items.filter((it) => {
+    const matchesCategory = categoryFilter === 'ALL' || it.category === categoryFilter;
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q);
+    return matchesCategory && matchesSearch;
+  });
+
+  if (view === 'form') {
+    return <ItemForm initial={editingItem} onSave={saveItem} onCancel={closeForm} />;
+  }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 18 }}>
       <div>
-      <Panel style={{ alignSelf: 'start' }}>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Tag size={14} /> Add item
-        </p>
-        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-          Items are generic — you'll map each one to Blinkit / Flipkart codes separately, on the right.
-        </p>
-        <input placeholder="Item name (e.g. Tomato)" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
-        <input placeholder="Product code (internal SKU)" value={productCode} onChange={(e) => setProductCode(e.target.value)} style={inputStyle} />
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-          <select value={uom} onChange={(e) => setUom(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px', flex: 1 }}>
-            <option value="kg">kg</option>
-            <option value="dozen">dozen</option>
-            <option value="bunch">bunch</option>
-            <option value="piece">piece</option>
-            <option value="pack">pack</option>
-            <option value="box">box</option>
-            <option value="crate">crate</option>
-          </select>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px', flex: 1 }}>
-            <option value="FRUITS">FRUITS</option>
-            <option value="VEGETABLES">VEGETABLES</option>
-            <option value="FLOWER">FLOWER</option>
-            <option value="EXOTIC">EXOTIC</option>
-            <option value="GRAINS">GRAINS</option>
-            <option value="CUT">CUT</option>
-          </select>
-        </div>
-        <button onClick={submit} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-          Add item
-        </button>
-      </Panel>
-
-      <Panel style={{ alignSelf: 'start', marginTop: 18 }}>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Bulk import</p>
-        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-          Add many items at once from a spreadsheet. Download the format first if you're not sure what columns to use.
-        </p>
-        <button
-          onClick={downloadItemsTemplate}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 8 }}
-        >
-          <Download size={14} /> Download format
-        </button>
-        <button
-          onClick={() => bulkFileRef.current?.click()}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-        >
-          <Upload size={14} /> Bulk import items
-        </button>
-        <input ref={bulkFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleBulkFile} style={{ display: 'none' }} />
-        {bulkSummary && (
-          <p style={{ margin: '10px 0 0', fontSize: 12, color: LEAF, fontWeight: 600 }}>
-            {bulkSummary.added} item{bulkSummary.added !== 1 ? 's' : ''} added{bulkSummary.skipped > 0 ? `, ${bulkSummary.skipped} skipped (missing name or product code)` : ''}.
+        <Panel style={{ alignSelf: 'start' }}>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Bulk import</p>
+          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
+            Add many items at once from a spreadsheet. Download the format first if you're not sure what columns to use.
           </p>
-        )}
-        {bulkError && (
-          <p style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 0', fontSize: 12, color: TOMATO }}>
-            <AlertCircle size={13} /> {bulkError}
-          </p>
-        )}
-      </Panel>
+          <button
+            onClick={downloadItemsTemplate}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 8 }}
+          >
+            <Download size={14} /> Download format
+          </button>
+          <button
+            onClick={() => bulkFileRef.current?.click()}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+          >
+            <Upload size={14} /> Bulk import items
+          </button>
+          <input ref={bulkFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleBulkFile} style={{ display: 'none' }} />
+          {bulkSummary && (
+            <p style={{ margin: '10px 0 0', fontSize: 12, color: LEAF, fontWeight: 600 }}>
+              {bulkSummary.added} item{bulkSummary.added !== 1 ? 's' : ''} added{bulkSummary.skipped > 0 ? `, ${bulkSummary.skipped} skipped (missing name or product code)` : ''}.
+            </p>
+          )}
+          {bulkError && (
+            <p style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 0', fontSize: 12, color: TOMATO }}>
+              <AlertCircle size={13} /> {bulkError}
+            </p>
+          )}
+        </Panel>
       </div>
 
-      <Panel>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <Th>Item ID</Th><Th>Name</Th><Th>Product code</Th><Th>UOM</Th><Th>Category</Th><Th>Blinkit mapping</Th><Th>Flipkart mapping</Th><Th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it) => {
-              const isEditing = editingId === it.id;
-              return (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {categoryChips.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCategoryFilter(c)}
+                style={{ padding: '6px 12px', borderRadius: 999, border: `1px solid ${categoryFilter === c ? LEAF : LINE}`, background: categoryFilter === c ? LEAF : '#fff', color: categoryFilter === c ? '#fff' : INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+              >
+                {c === 'ALL' ? 'All' : c}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: BG, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 10px', width: 200 }}>
+              <Search size={14} color={MUTED} />
+              <input placeholder="Search items..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12, width: '100%' }} />
+            </div>
+            <button
+              onClick={openCreate}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+            >
+              <Plus size={14} /> Create item
+            </button>
+          </div>
+        </div>
+
+        <Panel>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>Item ID</Th><Th>Name</Th><Th>UOM</Th><Th>Category</Th><Th>Aliases</Th><Th />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredItems.map((it) => (
                 <tr key={it.id}>
                   <Td>{it.id}</Td>
-                  <Td style={{ fontWeight: 700 }}>
-                    {isEditing ? (
-                      <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 120 }} />
-                    ) : (
-                      it.name
-                    )}
-                  </Td>
+                  <Td style={{ fontWeight: 700 }}>{it.name}</Td>
+                  <Td>{it.uom}</Td>
+                  <Td>{it.category}</Td>
                   <Td>
-                    {isEditing ? (
-                      <input value={draft.productCode} onChange={(e) => setDraft({ ...draft, productCode: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 110 }} />
-                    ) : (
-                      it.productCode
-                    )}
-                  </Td>
-                  <Td>
-                    {isEditing ? (
-                      <select value={draft.uom} onChange={(e) => setDraft({ ...draft, uom: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 4px' }}>
-                        <option value="kg">kg</option>
-                        <option value="dozen">dozen</option>
-                        <option value="bunch">bunch</option>
-                        <option value="piece">piece</option>
-                        <option value="pack">pack</option>
-                        <option value="box">box</option>
-                        <option value="crate">crate</option>
-                      </select>
-                    ) : (
-                      it.uom
-                    )}
-                  </Td>
-                  <Td>
-                    {isEditing ? (
-                      <select value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 4px' }}>
-                        <option value="FRUITS">FRUITS</option>
-                        <option value="VEGETABLES">VEGETABLES</option>
-                        <option value="FLOWER">FLOWER</option>
-                        <option value="EXOTIC">EXOTIC</option>
-                        <option value="GRAINS">GRAINS</option>
-                        <option value="CUT">CUT</option>
-                      </select>
-                    ) : (
-                      it.category
-                    )}
-                  </Td>
-                  <Td>
-                    <ChannelMapping
-                      mapping={it.channelCodes.Blinkit}
-                      onChangeCode={(v) => onMapChannel(it.id, 'Blinkit', 'code', v)}
-                      onChangePackSize={(v) => onMapChannel(it.id, 'Blinkit', 'packSize', v)}
-                      onChangePackUnit={(v) => onMapChannel(it.id, 'Blinkit', 'packUnit', v)}
-                    />
-                  </Td>
-                  <Td>
-                    <ChannelMapping
-                      mapping={it.channelCodes.Flipkart}
-                      onChangeCode={(v) => onMapChannel(it.id, 'Flipkart', 'code', v)}
-                      onChangePackSize={(v) => onMapChannel(it.id, 'Flipkart', 'packSize', v)}
-                      onChangePackUnit={(v) => onMapChannel(it.id, 'Flipkart', 'packUnit', v)}
-                    />
-                  </Td>
-                  <Td>
-                    {isEditing ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <button
-                          onClick={() => saveEdit(it.id)}
-                          style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={cancelEdit}
-                          style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          Cancel
-                        </button>
+                    {(it.aliases && it.aliases.length > 0) ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', maxWidth: 260 }}>
+                        {it.aliases.map((a) => <AliasChip key={a.id} alias={a} />)}
                       </div>
-                    ) : confirmDeleteId === it.id ? (
+                    ) : (
+                      <span style={{ fontSize: 11, color: MUTED }}>No aliases yet</span>
+                    )}
+                  </Td>
+                  <Td>
+                    {confirmDeleteId === it.id ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <button
                           onClick={() => { onDelete(it.id); setConfirmDeleteId(null); }}
@@ -1165,7 +1280,7 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <button
-                          onClick={() => startEdit(it)}
+                          onClick={() => openEdit(it)}
                           style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }}
                           aria-label={`Edit ${it.name}`}
                         >
@@ -1182,57 +1297,13 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
                     )}
                   </Td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Panel>
-    </div>
-  );
-}
-
-function ChannelMapping({ mapping, onChangeCode, onChangePackSize, onChangePackUnit }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <input
-        placeholder="Not mapped"
-        value={mapping.code}
-        onChange={(e) => onChangeCode(e.target.value)}
-        style={{
-          width: 130,
-          boxSizing: 'border-box',
-          padding: '5px 8px',
-          borderRadius: 6,
-          border: `1px solid ${LINE}`,
-          fontSize: 12,
-          color: mapping.code ? INK : MUTED,
-        }}
-      />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <input
-          placeholder="Pack size"
-          type="number"
-          value={mapping.packSize}
-          onChange={(e) => onChangePackSize(e.target.value)}
-          style={{
-            width: 62,
-            boxSizing: 'border-box',
-            padding: '5px 6px',
-            borderRadius: 6,
-            border: `1px solid ${mapping.packSize ? LINE : AMBER}`,
-            fontSize: 12,
-            color: mapping.packSize ? INK : MUTED,
-          }}
-        />
-        <select
-          value={mapping.packUnit || 'kg'}
-          onChange={(e) => onChangePackUnit(e.target.value)}
-          style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 4px' }}
-        >
-          <option value="kg">kg</option>
-          <option value="pieces">pieces</option>
-          <option value="pack">pack</option>
-        </select>
+              ))}
+              {filteredItems.length === 0 && (
+                <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No items match this filter/search.</Td></tr>
+              )}
+            </tbody>
+          </table>
+        </Panel>
       </div>
     </div>
   );
@@ -1712,7 +1783,7 @@ function parseIndentRows(json) {
     .filter((r) => r.rawName && r.qty > 0);
 }
 
-function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapChannel, onCreateIndentBatch, onToggleReleaseBatch }) {
+function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch }) {
   const [platform, setPlatform] = useState('Blinkit');
   const [product, setProduct] = useState('');
   const [qty, setQty] = useState('');
@@ -1751,9 +1822,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
         const rows = rawRows.map((r) => {
           const match = items.find(
             (it) =>
-              (r.rawCode && it.channelCodes[indentPlatform] && it.channelCodes[indentPlatform].code && it.channelCodes[indentPlatform].code.toLowerCase() === r.rawCode.toLowerCase()) ||
+              (r.rawCode && (it.aliases || []).some((a) => a.channel === indentPlatform && a.code && a.code.toLowerCase() === r.rawCode.toLowerCase())) ||
               it.name.toLowerCase() === r.rawName.toLowerCase()
           );
+          // Each distinct article code gets its own alias — even when it shares a base
+          // item with another article on the same channel (e.g. two different pack sizes).
+          if (match) onEnsureAlias(match.id, indentPlatform, r.rawCode);
           return { ...r, mappedItemId: match ? match.id : '' };
         });
         setPendingIndent({ platform: indentPlatform, fileName: file.name, rows, fulfilmentDate: indentFulfilmentDate });
@@ -1774,34 +1848,31 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
           const newItem = {
             id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}`,
             name: r.rawName,
-            productCode: `FNV-${r.rawName.slice(0, 3).toUpperCase()}-${Math.floor(10 + Math.random() * 89)}`,
             uom: r.unit || 'kg',
             category: normalizeCategory(r.rawCategory),
-            channelCodes: {
-              Blinkit: { code: '', packSize: '', packUnit: 'kg' },
-              Flipkart: { code: '', packSize: '', packUnit: 'kg' },
-              [prev.platform]: { code: r.rawCode || '', packSize: '', packUnit: 'kg' },
-            },
+            aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', packSize: '', packUnit: 'kg' }],
           };
           onAddItem(newItem);
           return { ...r, mappedItemId: newItem.id };
         }
-        const item = items.find((it) => it.id === value);
-        if (item && r.rawCode && !item.channelCodes[prev.platform].code) {
-          onMapChannel(item.id, prev.platform, 'code', r.rawCode);
-        }
+        onEnsureAlias(value, prev.platform, r.rawCode);
         return { ...r, mappedItemId: value };
       }),
     }));
   };
 
   const getMappedItem = (itemId) => items.find((it) => it.id === itemId);
-  const getPackSize = (itemId) => {
-    const item = getMappedItem(itemId);
-    if (!item || !pendingIndent) return '';
-    return item.channelCodes[pendingIndent.platform]?.packSize || '';
+  // Two different articles (different codes) can map to the same item on the same
+  // channel with different pack sizes — so pack size is looked up per-row, matched by
+  // this row's own article code, not just by item+channel.
+  const getRowAlias = (r) => {
+    const item = getMappedItem(r.mappedItemId);
+    if (!item) return null;
+    const byCode = (item.aliases || []).find((a) => a.channel === pendingIndent?.platform && a.code && r.rawCode && a.code.toLowerCase() === r.rawCode.toLowerCase());
+    return byCode || (item.aliases || []).find((a) => a.channel === pendingIndent?.platform) || null;
   };
-  const isRowReady = (r) => !!r.mappedItemId && Number(getPackSize(r.mappedItemId)) > 0;
+  const getPackSize = (r) => getRowAlias(r)?.packSize || '';
+  const isRowReady = (r) => !!r.mappedItemId && Number(getPackSize(r)) > 0;
 
   const mappedCount = pendingIndent ? pendingIndent.rows.filter(isRowReady).length : 0;
 
@@ -1819,13 +1890,15 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
         remaining.push(r);
         return;
       }
-      const packSize = Number(item.channelCodes[pendingIndent.platform].packSize) || 1;
-      const packUnit = item.channelCodes[pendingIndent.platform].packUnit || item.uom;
+      const alias = getRowAlias(r);
+      const packSize = Number(alias?.packSize) || 1;
+      const packUnit = alias?.packUnit || item.uom;
       const finalQty = Math.round(r.qty * packSize * 100) / 100;
       onImport({
         id: `${pendingIndent.platform.slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
         platform: pendingIndent.platform,
         product: item.name,
+        articleName: r.rawName,
         qty: finalQty,
         unit: item.uom,
         status: 'pending',
@@ -1950,7 +2023,8 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
               <tbody>
                 {pendingIndent.rows.map((r) => {
                   const mappedItem = getMappedItem(r.mappedItemId);
-                  const packSize = getPackSize(r.mappedItemId);
+                  const rowAlias = getRowAlias(r);
+                  const packSize = rowAlias?.packSize || '';
                   return (
                     <tr key={r.key}>
                       <Td>{r.rawName}</Td>
@@ -1966,24 +2040,24 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
                         >
                           <option value="">Not mapped</option>
                           {items.map((it) => (
-                            <option key={it.id} value={it.id}>{it.name} ({it.productCode})</option>
+                            <option key={it.id} value={it.id}>{it.name} ({it.id})</option>
                           ))}
                           <option value="__new__">+ Create new item "{r.rawName}"</option>
                         </select>
                       </Td>
                       <Td>
-                        {mappedItem ? (
+                        {mappedItem && rowAlias ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <input
                               placeholder="e.g. 0.5"
                               type="number"
                               value={packSize}
-                              onChange={(e) => onMapChannel(mappedItem.id, pendingIndent.platform, 'packSize', e.target.value)}
+                              onChange={(e) => onUpdateAlias(mappedItem.id, rowAlias.id, { packSize: e.target.value })}
                               style={{ width: 58, boxSizing: 'border-box', padding: '5px 6px', borderRadius: 6, border: `1px solid ${packSize ? LINE : AMBER}`, fontSize: 12 }}
                             />
                             <select
-                              value={mappedItem.channelCodes[pendingIndent.platform].packUnit || 'kg'}
-                              onChange={(e) => onMapChannel(mappedItem.id, pendingIndent.platform, 'packUnit', e.target.value)}
+                              value={rowAlias.packUnit || 'kg'}
+                              onChange={(e) => onUpdateAlias(mappedItem.id, rowAlias.id, { packUnit: e.target.value })}
                               style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 4px' }}
                             >
                               <option value="kg">kg</option>
@@ -2047,15 +2121,16 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
         <Panel>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr><Th>Order ID</Th><Th>Platform</Th><Th>Product</Th><Th>Qty</Th><Th>Fulfilment date</Th><Th>Status</Th></tr>
+              <tr><Th>Order ID</Th><Th>Platform</Th><Th>Product</Th><Th>Qty</Th><Th>UOM</Th><Th>Fulfilment date</Th><Th>Status</Th></tr>
             </thead>
             <tbody>
               {orders.map((o) => (
                 <tr key={o.id}>
                   <Td>{o.id}</Td>
                   <Td>{o.platform}</Td>
-                  <Td>{o.product}</Td>
-                  <Td>{o.qty} {o.unit}</Td>
+                  <Td>{o.articleName || o.product}</Td>
+                  <Td>{o.qty}</Td>
+                  <Td>{o.unit}</Td>
                   <Td>{o.fulfilmentDate || <span style={{ color: MUTED }}>—</span>}</Td>
                   <Td><StatusPill status={o.status} /></Td>
                 </tr>
@@ -2070,12 +2145,14 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
 
 const PURCHASE_CATEGORY_OPTIONS = ['ALL', 'FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
 
-function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, onAdd, onAddLedgerEntry }) {
+function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, onAdd, onAddLedgerEntry }) {
   const [selectedDate, setSelectedDate] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [bufferPercent, setBufferPercent] = useState('0');
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [selectedVendorId, setSelectedVendorId] = useState('');
   const [showAllVendorItems, setShowAllVendorItems] = useState(false);
+  const [purchasedDate, setPurchasedDate] = useState('');
 
   // Purchase form
   const [purchaseQty, setPurchaseQty] = useState('');
@@ -2131,9 +2208,27 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
 
   const stockByItem = useMemo(() => {
     const map = {};
-    purchases.forEach((p) => { map[p.item] = (map[p.item] || 0) + p.qty; });
+    // Latest closing-stock count per item (from a nightly stock count) becomes the baseline.
+    const latestCount = {};
+    (stockCounts || []).forEach((sc) => {
+      if (!latestCount[sc.itemName] || sc.date > latestCount[sc.itemName].date) {
+        latestCount[sc.itemName] = { date: sc.date, qty: sc.closingQty };
+      }
+    });
+    Object.entries(latestCount).forEach(([name, c]) => { map[name] = c.qty; });
+    // Only actual completed purchases count toward stock — "requirement" rows (from
+    // released indents / recipe pushes) are just a to-buy queue, not stock on hand.
+    // Purchases made after the latest count date add on top of that baseline.
+    purchases
+      .filter((p) => p.type !== 'requirement')
+      .forEach((p) => {
+        const lc = latestCount[p.item];
+        if (!lc || !p.date || p.date > lc.date) {
+          map[p.item] = (map[p.item] || 0) + p.qty;
+        }
+      });
     return map;
-  }, [purchases]);
+  }, [purchases, stockCounts]);
 
   const neededByProduct = useMemo(() => {
     const map = {};
@@ -2160,6 +2255,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
   }, [orders, selectedDate, recipes, items]);
 
   const filteredItems = useMemo(() => {
+    const buffer = Number(bufferPercent) || 0;
     return items
       .filter((it) => neededByProduct[it.name])
       .filter((it) => categoryFilter === 'ALL' || it.category === categoryFilter)
@@ -2169,11 +2265,21 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         const stock = stockByItem[it.name] || 0;
         const toBuy = Math.max(0, Math.round((needed - stock) * 100) / 100);
         return { ...it, needed, unit, stock, toBuy };
-      });
-  }, [items, neededByProduct, categoryFilter, stockByItem]);
+      })
+      // Already sufficiently stocked (stock beats needed by more than the buffer %) — no need to buy.
+      .filter((it) => it.stock <= it.needed * (1 + buffer / 100));
+  }, [items, neededByProduct, categoryFilter, stockByItem, bufferPercent]);
 
-  const hasActiveFilters = !!selectedDate || categoryFilter !== 'ALL';
-  const clearFilters = () => { setSelectedDate(''); setCategoryFilter('ALL'); };
+  const hasActiveFilters = !!selectedDate || categoryFilter !== 'ALL' || Number(bufferPercent) !== 0;
+  const clearFilters = () => { setSelectedDate(''); setCategoryFilter('ALL'); setBufferPercent('0'); };
+
+  const purchasedList = useMemo(() => {
+    return purchases
+      .filter((p) => p.type !== 'requirement')
+      .filter((p) => !purchasedDate || p.date === purchasedDate)
+      .slice()
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [purchases, purchasedDate]);
 
   // Item detail side-panel
   const selectedItemData = selectedItemId ? filteredItems.find((x) => x.id === selectedItemId) : null;
@@ -2206,7 +2312,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div>
             <p style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>{it?.name}</p>
-            <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>{it?.category} · {it?.productCode}</p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>{it?.category} · {it?.id}</p>
           </div>
           <button onClick={() => setSelectedItemId(null)} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer', fontSize: 18 }}>✕</button>
         </div>
@@ -2366,7 +2472,21 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
                   {PURCHASE_CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>STOCK BUFFER %</p>
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={bufferPercent}
+                  onChange={(e) => setBufferPercent(e.target.value)}
+                  style={{ ...inputStyle, marginBottom: 0 }}
+                  title="Hide items whose stock already exceeds what's needed by more than this %"
+                />
+              </div>
             </div>
+            <p style={{ margin: '0 0 12px', fontSize: 11, color: MUTED }}>
+              Items are hidden here once stock covers demand plus this buffer — they don't need buying right now.
+            </p>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr><Th>Item</Th><Th>Category</Th><Th>Stock</Th><Th>To buy</Th></tr></thead>
               <tbody>
@@ -2384,12 +2504,21 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
           </Panel>
 
           <Panel>
-            <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Purchase log</p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Purchased{purchasedDate ? ` on ${purchasedDate}` : ''} ({purchasedList.length})</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="date" value={purchasedDate} onChange={(e) => setPurchasedDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+                {purchasedDate && (
+                  <button onClick={() => setPurchasedDate('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
+                )}
+              </div>
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><Th>Item</Th><Th>Supplier</Th><Th>Qty</Th><Th>Cost</Th><Th>Source</Th></tr></thead>
+              <thead><tr><Th>Date</Th><Th>Item</Th><Th>Supplier</Th><Th>Qty</Th><Th>Cost</Th><Th>Source</Th></tr></thead>
               <tbody>
-                {purchases.map((p) => (
+                {purchasedList.map((p) => (
                   <tr key={p.id}>
+                    <Td>{p.date || <span style={{ color: MUTED }}>—</span>}</Td>
                     <Td>{p.item}</Td>
                     <Td>{p.supplier || <span style={{ color: MUTED }}>—</span>}</Td>
                     <Td>{p.qty} {p.unit || 'kg'}</Td>
@@ -2397,7 +2526,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
                     <Td>{p.source || 'Manual'}</Td>
                   </tr>
                 ))}
-                {purchases.length === 0 && <tr><Td colSpan={5} style={{ textAlign: 'center', color: MUTED }}>No purchases recorded yet.</Td></tr>}
+                {purchasedList.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>{purchasedDate ? 'Nothing purchased on this date.' : 'No purchases recorded yet.'}</Td></tr>}
               </tbody>
             </table>
           </Panel>
@@ -2406,6 +2535,120 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         <ItemDetailPanel />
       </div>
     </div>
+  );
+}
+
+function StockCountRow({ item, existingCount, lastKnown, unit, onSave }) {
+  const [value, setValue] = useState(existingCount !== undefined ? String(existingCount) : '');
+  useEffect(() => { setValue(existingCount !== undefined ? String(existingCount) : ''); }, [existingCount]);
+
+  return (
+    <tr>
+      <Td style={{ fontWeight: 700 }}>{item.name}</Td>
+      <Td>{item.category}</Td>
+      <Td>
+        {lastKnown ? (
+          <span style={{ color: MUTED }}>{lastKnown.closingQty} {unit} <span style={{ fontSize: 11 }}>({lastKnown.date})</span></span>
+        ) : (
+          <span style={{ color: MUTED }}>Never counted</span>
+        )}
+      </Td>
+      <Td>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="number"
+            placeholder="Closing qty"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            style={{ width: 90, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${existingCount !== undefined ? LEAF : LINE}`, fontSize: 12, padding: '5px 8px' }}
+          />
+          <span style={{ fontSize: 12, color: MUTED }}>{unit}</span>
+          <button
+            onClick={() => onSave(value)}
+            disabled={value === ''}
+            style={{ background: value === '' ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: value === '' ? 'default' : 'pointer' }}
+          >
+            Save
+          </button>
+        </div>
+      </Td>
+    </tr>
+  );
+}
+
+function StockCountPanel({ items, stockCounts, onRecord }) {
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
+
+  const countsForDate = useMemo(() => {
+    const map = {};
+    stockCounts.filter((sc) => sc.date === date).forEach((sc) => { map[sc.itemId] = sc.closingQty; });
+    return map;
+  }, [stockCounts, date]);
+
+  const latestCountByItem = useMemo(() => {
+    const map = {};
+    stockCounts.forEach((sc) => {
+      if (!map[sc.itemId] || sc.date > map[sc.itemId].date) map[sc.itemId] = sc;
+    });
+    return map;
+  }, [stockCounts]);
+
+  const filteredItems = items
+    .filter((it) => categoryFilter === 'ALL' || it.category === categoryFilter)
+    .filter((it) => !search.trim() || it.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  const countedToday = filteredItems.filter((it) => countsForDate[it.id] !== undefined).length;
+
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Layers size={16} /> Nightly stock count
+      </p>
+      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>
+        Record the actual closing stock for each item at the end of the day. This becomes the new stock baseline — purchases recorded after this date add on top of it.
+      </p>
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>DATE</p>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
+            {['ALL', ...CATEGORY_OPTIONS].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SEARCH ITEM</p>
+          <input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+        </div>
+        <div style={{ paddingBottom: 8, fontSize: 12, color: MUTED, whiteSpace: 'nowrap' }}>
+          {countedToday} / {filteredItems.length} counted for {date}
+        </div>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr><Th>Item</Th><Th>Category</Th><Th>Last known count</Th><Th>Closing stock for {date}</Th></tr></thead>
+        <tbody>
+          {filteredItems.map((it) => (
+            <StockCountRow
+              key={it.id}
+              item={it}
+              unit={it.uom}
+              existingCount={countsForDate[it.id]}
+              lastKnown={latestCountByItem[it.id]}
+              onSave={(val) => onRecord(it.id, it.name, it.uom, date, val)}
+            />
+          ))}
+          {filteredItems.length === 0 && (
+            <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>No items match this filter.</Td></tr>
+          )}
+        </tbody>
+      </table>
+    </Panel>
   );
 }
 
@@ -2422,7 +2665,7 @@ function PackagingRow({ target, packedQty, onSave, onAdvanceMany }) {
   if (!target.hasPack) {
     return (
       <tr>
-        <Td style={{ fontWeight: 700 }}>{target.product}</Td>
+        <Td style={{ fontWeight: 700 }}>{target.articleName || target.product}</Td>
         <Td>{[...target.platforms].join(' + ')}</Td>
         <Td>—</Td>
         <Td style={{ color: LEAF, fontWeight: 800 }}>{target.qty} {target.unit}</Td>
@@ -2448,7 +2691,7 @@ function PackagingRow({ target, packedQty, onSave, onAdvanceMany }) {
 
   return (
     <tr>
-      <Td style={{ fontWeight: 700 }}>{target.product}</Td>
+      <Td style={{ fontWeight: 700 }}>{target.articleName || target.product}</Td>
       <Td>{[...target.platforms].join(' + ')}</Td>
       <Td>{target.packSize}{target.packUnit}/pack</Td>
       <Td style={{ color: LEAF, fontWeight: 800 }}>{target.targetPacks} packs</Td>
@@ -2495,7 +2738,7 @@ function PackagingPanel({ orders, onAdvanceMany, packingProgress, onUpdatePacked
       const hasPack = !!(o.packQty && o.packSize);
       const key = hasPack ? `${dateKey}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}` : `${dateKey}__${o.product}__${o.unit}`;
       map[dateKey][key] = map[dateKey][key] || {
-        key, product: o.product, unit: o.unit, qty: 0, platforms: new Set(),
+        key, product: o.product, articleName: o.articleName || o.product, unit: o.unit, qty: 0, platforms: new Set(),
         orderIds: [], pendingIds: [], hasPack, packSize: o.packSize, packUnit: o.packUnit, targetPacks: 0,
       };
       map[dateKey][key].qty += o.qty;
@@ -2564,28 +2807,46 @@ function PackagingPanel({ orders, onAdvanceMany, packingProgress, onUpdatePacked
 
 function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch }) {
   const pending = orders.filter((o) => o.status === 'pending');
-  const packed = orders.filter((o) => o.status === 'packed');
+  const packed = useMemo(() => orders
+    .filter((o) => o.status === 'packed')
+    .map((o) => ({ ...o, remaining: Math.max(0, Math.round((o.qty - (o.dispatchedQty || 0) - (o.shortQty || 0)) * 100) / 100) })),
+  [orders]);
   const dispatched = orders.filter((o) => o.status === 'dispatched');
 
   const [selected, setSelected] = useState([]);
+  const [dispatchQtyById, setDispatchQtyById] = useState({});
+  const [shortQtyById, setShortQtyById] = useState({});
   const [vehicleNo, setVehicleNo] = useState('');
   const [driverName, setDriverName] = useState('');
   const [cratesUsed, setCratesUsed] = useState('');
   const [boxesUsed, setBoxesUsed] = useState('');
+
+  const dispatchQtyFor = (o) => dispatchQtyById[o.id] !== undefined ? dispatchQtyById[o.id] : String(o.remaining);
+  const shortQtyFor = (o) => shortQtyById[o.id] !== undefined ? shortQtyById[o.id] : '';
 
   const toggleSelect = (id) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const submitDispatch = () => {
     if (selected.length === 0) return;
+    const items = selected.map((id) => {
+      const o = packed.find((x) => x.id === id);
+      return {
+        orderId: id,
+        dispatchQty: dispatchQtyById[id] !== undefined ? dispatchQtyById[id] : o?.remaining,
+        shortQty: shortQtyById[id] || 0,
+      };
+    });
     onDispatchBatch({
-      orderIds: selected,
+      items,
       vehicleNo: vehicleNo.trim(),
       driverName: driverName.trim(),
       cratesUsed: Number(cratesUsed) || 0,
       boxesUsed: Number(boxesUsed) || 0,
     });
     setSelected([]);
+    setDispatchQtyById({});
+    setShortQtyById({});
     setVehicleNo('');
     setDriverName('');
     setCratesUsed('');
@@ -2602,7 +2863,7 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
             <tbody>
               {pending.map((o) => (
                 <tr key={o.id}>
-                  <Td>{o.id}</Td><Td>{o.product}</Td><Td>{o.qty} {o.unit}</Td>
+                  <Td>{o.id}</Td><Td>{o.articleName || o.product}</Td><Td>{o.qty} {o.unit}</Td>
                   <Td>
                     <button onClick={() => onAdvance(o.id, 'packed')} style={{ background: '#E6F1FB', color: '#1B5E8C', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                       Mark packed
@@ -2617,19 +2878,41 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 18 }}>
         <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Packed — ready to dispatch ({packed.length})</p>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Packed — ready to dispatch ({packed.length})</p>
+          <p style={{ margin: '0 0 12px', fontSize: 11, color: MUTED }}>
+            Dispatch qty defaults to what's left on the order — lower it if only part is going out now. Whatever isn't dispatched stays "packed" for the next trip, unless you mark it short.
+          </p>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th /><Th>Order ID</Th><Th>Product</Th><Th>Qty</Th></tr></thead>
+            <thead><tr><Th /><Th>Order ID</Th><Th>Product</Th><Th>Remaining</Th><Th>Dispatch qty</Th><Th>Short qty</Th></tr></thead>
             <tbody>
               {packed.map((o) => (
                 <tr key={o.id}>
                   <Td>
                     <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelect(o.id)} />
                   </Td>
-                  <Td>{o.id}</Td><Td>{o.product}</Td><Td>{o.qty} {o.unit}</Td>
+                  <Td>{o.id}</Td>
+                  <Td>{o.articleName || o.product}</Td>
+                  <Td style={{ fontWeight: 700 }}>{o.remaining} {o.unit}</Td>
+                  <Td>
+                    <input
+                      type="number"
+                      value={dispatchQtyFor(o)}
+                      onChange={(e) => setDispatchQtyById((p) => ({ ...p, [o.id]: e.target.value }))}
+                      style={{ width: 64, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
+                    />
+                  </Td>
+                  <Td>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={shortQtyFor(o)}
+                      onChange={(e) => setShortQtyById((p) => ({ ...p, [o.id]: e.target.value }))}
+                      style={{ width: 64, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${Number(shortQtyFor(o)) > 0 ? TOMATO : LINE}`, fontSize: 12, padding: '5px 6px', color: Number(shortQtyFor(o)) > 0 ? TOMATO : INK }}
+                    />
+                  </Td>
                 </tr>
               ))}
-              {packed.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>Nothing packed yet.</Td></tr>}
+              {packed.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>Nothing packed yet.</Td></tr>}
             </tbody>
           </table>
         </Panel>
@@ -2664,7 +2947,7 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
             {dispatchLog.map((d) => (
               <tr key={d.id}>
                 <Td>{d.id}</Td><Td>{d.vehicleNo}</Td><Td>{d.driverName}</Td>
-                <Td>{d.orderIds.length}</Td><Td>{d.cratesUsed}</Td><Td>{d.boxesUsed}</Td><Td>{d.time}</Td>
+                <Td>{(d.items || d.orderIds || []).length}</Td><Td>{d.cratesUsed}</Td><Td>{d.boxesUsed}</Td><Td>{d.time}</Td>
               </tr>
             ))}
             {dispatchLog.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No dispatches yet.</Td></tr>}
@@ -2679,8 +2962,14 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
             <tbody>
               {dispatched.map((o) => (
                 <tr key={o.id}>
-                  <Td>{o.id}</Td><Td>{o.product}</Td><Td>{o.qty} {o.unit}</Td>
-                  <Td><CheckCircle2 size={15} color={LEAF} /></Td>
+                  <Td>{o.id}</Td><Td>{o.articleName || o.product}</Td><Td>{o.qty} {o.unit}</Td>
+                  <Td>
+                    {o.shortQty > 0 ? (
+                      <span style={{ color: TOMATO, fontSize: 11, fontWeight: 700 }}>{o.shortQty} {o.unit} short</span>
+                    ) : (
+                      <CheckCircle2 size={15} color={LEAF} />
+                    )}
+                  </Td>
                 </tr>
               ))}
             </tbody>
