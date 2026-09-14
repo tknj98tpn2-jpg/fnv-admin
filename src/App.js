@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { initializeApp } from 'firebase/app';
 import {
   getFirestore, collection, doc,
-  onSnapshot, addDoc, setDoc, updateDoc, deleteDoc, writeBatch, getDocs
+  onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, getDocs
 } from 'firebase/firestore';
 import {
   LayoutDashboard,
@@ -243,8 +243,6 @@ export default function AdminPanel() {
   // ──────────────────────────────────────────────────────
 
   // ── Write helpers (replace old setState handlers) ──────
-  const fbAdd    = (col, obj)        => addDoc(collection(db, col), obj);
-  const fbSet    = (col, id, obj)    => setDoc(doc(db, col, id), obj, { merge: true });
   const fbUpdate = (col, id, patch)  => updateDoc(doc(db, col, id), patch);
   const fbDelete = (col, id)         => deleteDoc(doc(db, col, id));
   const fbSetDoc = (col, id, obj)    => setDoc(doc(db, col, id), obj);
@@ -362,7 +360,6 @@ export default function AdminPanel() {
 
   // ── Orders ──────────────────────────────────────────────
   const importOrder  = (o)   => fbSetDoc('orders', o.id, o);
-  const importOrders = (arr) => { const b = writeBatch(db); arr.forEach((o) => b.set(doc(db,'orders',o.id), o)); b.commit(); };
   const advanceStatus = (id, next) => fbUpdate('orders', id, { status: next });
   const advanceMany   = (ids, next) => { const b = writeBatch(db); ids.forEach((id) => b.update(doc(db,'orders',id), { status: next })); b.commit(); };
 
@@ -1513,8 +1510,6 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
   const [draft, setDraft] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [newRoleName, setNewRoleName] = useState('');
-
-  const roleName = (id) => roles.find((r) => r.id === id)?.name || 'Unknown role';
 
   const submitUser = () => {
     if (!name.trim() || !roleId) return;
