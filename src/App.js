@@ -179,6 +179,7 @@ export default function AdminPanel() {
   const [crates,        setCrates]        = useState({ crates: 180, boxes: 260 });
   const [crateLog,      setCrateLog]      = useState([]);
   const [dispatchLog,   setDispatchLog]   = useState([]);
+  const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
   const [dbReady,       setDbReady]       = useState(false);
 
   useEffect(() => {
@@ -211,7 +212,14 @@ export default function AdminPanel() {
       if (d.exists()) setCrates(d.data());
     });
 
-    return () => { unsubs.forEach((u) => u()); unsub2(); };
+    // packing progress — keyed by target id, stored as a map for O(1) lookup
+    const unsub3 = onSnapshot(collection(db, 'packingProgress'), (snap) => {
+      const map = {};
+      snap.docs.forEach((d) => { map[d.id] = d.data().packedQty || 0; });
+      setPackingProgress(map);
+    });
+
+    return () => { unsubs.forEach((u) => u()); unsub2(); unsub3(); };
   }, []);
   // ──────────────────────────────────────────────────────
 
@@ -243,6 +251,14 @@ export default function AdminPanel() {
 
   // ── Indent batches ──────────────────────────────────────
   const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, batch);
+  const updatePackedQty = (key, packedQty, orderIds, targetPacks) => {
+    fbSetDoc('packingProgress', key, { packedQty });
+    const complete = targetPacks > 0 && packedQty >= targetPacks;
+    orderIds.forEach((id) => {
+      const o = orders.find((x) => x.id === id);
+      if (o && o.status !== 'dispatched') fbUpdate('orders', id, { status: complete ? 'packed' : 'pending' });
+    });
+  };
   const toggleReleaseBatch = async (batchId) => {
     const batch = indentBatches.find((b) => b.id === batchId);
     if (!batch) return;
@@ -395,7 +411,7 @@ export default function AdminPanel() {
           {tab === 'dashboard' && (
             <Dashboard orders={orders} purchases={purchases} items={items} crates={crates} pendingCount={pendingCount} totalSpend={totalSpend} onGo={setTab} />
           )}
-          {tab === 'items' && <ItemsPanel items={items} onAdd={addItem} onAddBulk={addItemsBulk} onMapChannel={mapChannelField} onUpdate={updateItem} />}
+          {tab === 'items' && <ItemsPanel items={items} onAdd={addItem} onAddBulk={addItemsBulk} onMapChannel={mapChannelField} onUpdate={updateItem} onDelete={deleteItem} />}
           {tab === 'vendors' && (
             <VendorsPanel items={items} vendors={vendors} vendorLedger={vendorLedger} onAdd={addVendor} onDelete={deleteVendor} onToggleItem={toggleVendorItem} onSettle={settleEntries} />
           )}
@@ -422,7 +438,7 @@ export default function AdminPanel() {
             />
           )}
           {tab === 'purchase' && <PurchasePanel purchases={purchases} orders={orders} items={items} recipes={recipes} vendors={vendors} vendorLedger={vendorLedger} totalSpend={totalSpend} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} />}
-          {tab === 'packaging' && <PackagingPanel orders={orders} onAdvanceMany={advanceMany} />}
+          {tab === 'packaging' && <PackagingPanel orders={orders} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
           {tab === 'dispatch' && <DispatchPanel orders={orders} crates={crates} dispatchLog={dispatchLog} onAdvance={advanceStatus} onDispatchBatch={dispatchBatch} />}
           {tab === 'crates' && <CratesPanel crates={crates} log={crateLog} onAdjust={adjustCrates} />}
           {tab === 'users' && (
@@ -913,7 +929,7 @@ function VendorsPanel({ items, vendors, vendorLedger, onAdd, onDelete, onToggleI
   );
 }
 
-function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate }) {
+function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete }) {
   const [name, setName] = useState('');
   const [productCode, setProductCode] = useState('');
   const [uom, setUom] = useState('kg');
@@ -922,6 +938,7 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate }) {
   const [draft, setDraft] = useState(null);
   const [bulkSummary, setBulkSummary] = useState(null);
   const [bulkError, setBulkError] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const bulkFileRef = useRef(null);
 
   const handleBulkFile = (e) => {
@@ -1130,14 +1147,38 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate }) {
                           Cancel
                         </button>
                       </div>
+                    ) : confirmDeleteId === it.id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button
+                          onClick={() => { onDelete(it.id); setConfirmDeleteId(null); }}
+                          style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          Yes, delete
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(null)}
+                          style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     ) : (
-                      <button
-                        onClick={() => startEdit(it)}
-                        style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }}
-                        aria-label={`Edit ${it.name}`}
-                      >
-                        <Pencil size={15} />
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <button
+                          onClick={() => startEdit(it)}
+                          style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }}
+                          aria-label={`Edit ${it.name}`}
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(it.id)}
+                          style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }}
+                          aria-label={`Delete ${it.name}`}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     )}
                   </Td>
                 </tr>
@@ -1779,6 +1820,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
         return;
       }
       const packSize = Number(item.channelCodes[pendingIndent.platform].packSize) || 1;
+      const packUnit = item.channelCodes[pendingIndent.platform].packUnit || item.uom;
       const finalQty = Math.round(r.qty * packSize * 100) / 100;
       onImport({
         id: `${pendingIndent.platform.slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -1788,6 +1830,9 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onMapC
         unit: item.uom,
         status: 'pending',
         fulfilmentDate: pendingIndent.fulfilmentDate || '',
+        packQty: r.qty,
+        packSize,
+        packUnit,
       });
       const key = `${item.name}__${item.uom}`;
       if (!compiledMap[key]) compiledMap[key] = { itemName: item.name, unit: item.uom, qty: 0 };
@@ -2364,51 +2409,155 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
   );
 }
 
+function PackagingRow({ target, packedQty, onSave, onAdvanceMany }) {
+  const [value, setValue] = useState(String(packedQty || ''));
+  useEffect(() => { setValue(String(packedQty || '')); }, [packedQty]);
+  const entered = Number(value) || 0;
+  const shortfall = Math.max(0, target.targetPacks - entered);
+  const commit = () => {
+    if (entered === packedQty) return;
+    onSave(Math.max(0, entered));
+  };
 
-function PackagingPanel({ orders, onAdvanceMany }) {
-  const targets = useMemo(() => {
+  if (!target.hasPack) {
+    return (
+      <tr>
+        <Td style={{ fontWeight: 700 }}>{target.product}</Td>
+        <Td>{[...target.platforms].join(' + ')}</Td>
+        <Td>—</Td>
+        <Td style={{ color: LEAF, fontWeight: 800 }}>{target.qty} {target.unit}</Td>
+        <Td>—</Td>
+        <Td>—</Td>
+        <Td>
+          {target.pendingIds.length > 0 ? (
+            <button
+              onClick={() => onAdvanceMany(target.pendingIds, 'packed')}
+              style={{ background: '#E6F1FB', color: '#1B5E8C', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+            >
+              Mark {target.pendingIds.length} packed
+            </button>
+          ) : (
+            <span style={{ fontSize: 11, color: MUTED, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <CheckCircle2 size={13} color={LEAF} /> All packed
+            </span>
+          )}
+        </Td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr>
+      <Td style={{ fontWeight: 700 }}>{target.product}</Td>
+      <Td>{[...target.platforms].join(' + ')}</Td>
+      <Td>{target.packSize}{target.packUnit}/pack</Td>
+      <Td style={{ color: LEAF, fontWeight: 800 }}>{target.targetPacks} packs</Td>
+      <Td>
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commit}
+          style={{ width: 70, borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
+        />
+      </Td>
+      <Td style={{ color: shortfall > 0 ? TOMATO : LEAF, fontWeight: 700 }}>
+        {shortfall > 0 ? `${shortfall} short` : '✓ Met'}
+      </Td>
+      <Td>
+        <button
+          onClick={commit}
+          style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+        >
+          Save
+        </button>
+      </Td>
+    </tr>
+  );
+}
+
+function PackagingPanel({ orders, onAdvanceMany, packingProgress, onUpdatePackedQty }) {
+  const [platformFilter, setPlatformFilter] = useState('All');
+  const [selectedDate, setSelectedDate] = useState('');
+
+  const filteredOrders = useMemo(() => {
+    return orders
+      .filter((o) => o.status !== 'dispatched')
+      .filter((o) => platformFilter === 'All' || o.platform === platformFilter)
+      .filter((o) => !selectedDate || o.fulfilmentDate === selectedDate);
+  }, [orders, platformFilter, selectedDate]);
+
+  const groupedByDate = useMemo(() => {
     const map = {};
-    orders.filter((o) => o.status !== 'dispatched').forEach((o) => {
-      const key = `${o.product}__${o.unit}`;
-      map[key] = map[key] || { product: o.product, unit: o.unit, qty: 0, platforms: new Set(), orderIds: [], pendingIds: [] };
-      map[key].qty += o.qty;
-      map[key].platforms.add(o.platform);
-      map[key].orderIds.push(o.id);
-      if (o.status === 'pending') map[key].pendingIds.push(o.id);
+    filteredOrders.forEach((o) => {
+      const dateKey = o.fulfilmentDate || 'No date';
+      map[dateKey] = map[dateKey] || {};
+      const hasPack = !!(o.packQty && o.packSize);
+      const key = hasPack ? `${dateKey}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}` : `${dateKey}__${o.product}__${o.unit}`;
+      map[dateKey][key] = map[dateKey][key] || {
+        key, product: o.product, unit: o.unit, qty: 0, platforms: new Set(),
+        orderIds: [], pendingIds: [], hasPack, packSize: o.packSize, packUnit: o.packUnit, targetPacks: 0,
+      };
+      map[dateKey][key].qty += o.qty;
+      map[dateKey][key].platforms.add(o.platform);
+      map[dateKey][key].orderIds.push(o.id);
+      if (hasPack) map[dateKey][key].targetPacks += o.packQty;
+      if (o.status === 'pending') map[dateKey][key].pendingIds.push(o.id);
     });
-    return Object.values(map);
-  }, [orders]);
+    return Object.entries(map)
+      .map(([date, targetMap]) => ({ date, targets: Object.values(targetMap) }))
+      .sort((a, b) => {
+        if (a.date === 'No date') return 1;
+        if (b.date === 'No date') return -1;
+        return a.date.localeCompare(b.date);
+      });
+  }, [filteredOrders]);
 
   return (
     <Panel>
-      <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>Aggregated from pending and packed orders — what needs to be packed today.</p>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr><Th>Product</Th><Th>Platforms</Th><Th>Target qty</Th><Th /></tr></thead>
-        <tbody>
-          {targets.map((t) => (
-            <tr key={t.product + t.unit}>
-              <Td style={{ fontWeight: 700 }}>{t.product}</Td>
-              <Td>{[...t.platforms].join(' + ')}</Td>
-              <Td style={{ color: LEAF, fontWeight: 800 }}>{t.qty} {t.unit}</Td>
-              <Td>
-                {t.pendingIds.length > 0 ? (
-                  <button
-                    onClick={() => onAdvanceMany(t.pendingIds, 'packed')}
-                    style={{ background: '#E6F1FB', color: '#1B5E8C', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Mark {t.pendingIds.length} packed
-                  </button>
-                ) : (
-                  <span style={{ fontSize: 11, color: MUTED, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <CheckCircle2 size={13} color={LEAF} /> All packed
-                  </span>
-                )}
-              </Td>
-            </tr>
-          ))}
-          {targets.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>Nothing to pack right now.</Td></tr>}
-        </tbody>
-      </table>
+      <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>Aggregated from pending and packed orders — what needs to be packed today. Pack size comes from the indent, so the same product at different pack sizes shows as separate rows.</p>
+
+      <div style={{ display: 'flex', gap: 16, marginBottom: 18, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => setPlatformFilter('All')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${platformFilter === 'All' ? LEAF : LINE}`, background: platformFilter === 'All' ? LEAF : '#fff', color: platformFilter === 'All' ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>All</button>
+            {PLATFORMS.map((p) => (
+              <button key={p} onClick={() => setPlatformFilter(p)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${platformFilter === p ? LEAF : LINE}`, background: platformFilter === p ? LEAF : '#fff', color: platformFilter === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{p}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
+          <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+        </div>
+        {selectedDate && (
+          <button onClick={() => setSelectedDate('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer', paddingBottom: 8 }}>Clear date</button>
+        )}
+      </div>
+
+      {groupedByDate.map(({ date, targets }) => (
+        <div key={date} style={{ marginBottom: 20 }}>
+          <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13, color: INK }}>{date === 'No date' ? 'No fulfilment date' : date}</p>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Product</Th><Th>Platforms</Th><Th>Pack size</Th><Th>Target</Th><Th>Packed</Th><Th>Shortfall</Th><Th /></tr></thead>
+            <tbody>
+              {targets.map((t) => (
+                <PackagingRow
+                  key={t.key}
+                  target={t}
+                  packedQty={packingProgress[t.key] || 0}
+                  onSave={(packedQty) => onUpdatePackedQty(t.key, packedQty, t.orderIds, t.targetPacks)}
+                  onAdvanceMany={onAdvanceMany}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      {groupedByDate.length === 0 && (
+        <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>Nothing to pack right now.</p>
+      )}
     </Panel>
   );
 }
