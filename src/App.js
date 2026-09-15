@@ -72,20 +72,9 @@ const BG = '#F6F3EA';
 
 const PLATFORMS = ['Blinkit', 'Flipkart'];
 
-const SEED_ORDERS = [
-  { id: 'BLK-1042', platform: 'Blinkit', product: 'Tomato', articleName: 'Tomato Hybrid(Pack)', qty: 240, unit: 'kg', status: 'pending', packQty: 480, packSize: 0.5, packUnit: 'kg' },
-  { id: 'FKT-3391', platform: 'Flipkart', product: 'Onion', qty: 500, unit: 'kg', status: 'pending' },
-  { id: 'BLK-1043', platform: 'Blinkit', product: 'Banana', qty: 120, unit: 'dozen', status: 'packed' },
-  { id: 'FKT-3402', platform: 'Flipkart', product: 'Potato', qty: 350, unit: 'kg', status: 'dispatched' },
-  { id: 'BLK-1048', platform: 'Blinkit', product: 'Spinach', qty: 80, unit: 'bunch', status: 'pending' },
-  { id: 'BLK-1050', platform: 'Blinkit', product: 'Pulao Veggie Mix', qty: 10, unit: 'pack', status: 'pending' },
-];
+const SEED_ORDERS = [];
 
-const SEED_PURCHASES = [
-  { id: 'P-01', item: 'Tomato', supplier: 'Ramesh Farms', qty: 300, unit: 'kg', cost: 9000, source: 'Manual', date: '2026-09-10' },
-  { id: 'P-02', item: 'Onion', supplier: 'Patil Traders', qty: 500, unit: 'kg', cost: 12500, source: 'Manual', date: '2026-09-11' },
-  { id: 'P-03', item: 'Banana', supplier: 'Kadam Orchards', qty: 150, unit: 'dozen', cost: 6750, source: 'Manual', date: '2026-09-12' },
-];
+const SEED_PURCHASES = [];
 
 function findAlias(item, channel) {
   return item?.aliases?.find((a) => a.channel === channel);
@@ -94,39 +83,9 @@ function newAliasId() {
   return `AL-${Date.now().toString(36).toUpperCase().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
 }
 
-const SEED_ITEMS = [
-  { id: 'IT-001', name: 'Tomato', uom: 'kg', category: 'VEGETABLES', aliases: [
-    { id: 'AL-1001', channel: 'Blinkit', code: 'BLK-TOM-240', packSize: '0.5', packUnit: 'kg' },
-    { id: 'AL-1002', channel: 'Flipkart', code: 'FKT-TOM-01', packSize: '1', packUnit: 'kg' },
-  ] },
-  { id: 'IT-002', name: 'Onion', uom: 'kg', category: 'VEGETABLES', aliases: [
-    { id: 'AL-1003', channel: 'Flipkart', code: 'FKT-ONI-500', packSize: '0.5', packUnit: 'kg' },
-  ] },
-  { id: 'IT-003', name: 'Banana', uom: 'dozen', category: 'FRUITS', aliases: [
-    { id: 'AL-1004', channel: 'Blinkit', code: 'BLK-BAN-DZ', packSize: '1', packUnit: 'pieces' },
-  ] },
-  { id: 'IT-004', name: 'Cauliflower', uom: 'piece', category: 'VEGETABLES', aliases: [] },
-  { id: 'IT-005', name: 'Carrot', uom: 'kg', category: 'VEGETABLES', aliases: [] },
-  { id: 'IT-006', name: 'Green Beans', uom: 'kg', category: 'VEGETABLES', aliases: [] },
-  { id: 'IT-007', name: 'Green Pea', uom: 'kg', category: 'VEGETABLES', aliases: [] },
-  { id: 'IT-008', name: 'Pulao Veggie Mix', uom: 'pack', category: 'VEGETABLES', aliases: [
-    { id: 'AL-1005', channel: 'Blinkit', code: 'BLK-PVM-01', packSize: '1', packUnit: 'pack' },
-  ] },
-];
+const SEED_ITEMS = [];
 
-const SEED_RECIPES = [
-  {
-    id: 'RCP-001',
-    name: 'Pulao Veggie Mix',
-    outputItemId: 'IT-008',
-    ingredients: [
-      { id: 'ing-1', itemId: 'IT-004', qtyPerUnit: 0.5, unit: 'piece' },
-      { id: 'ing-2', itemId: 'IT-005', qtyPerUnit: 100, unit: 'g' },
-      { id: 'ing-3', itemId: 'IT-006', qtyPerUnit: 100, unit: 'g' },
-      { id: 'ing-4', itemId: 'IT-007', qtyPerUnit: 100, unit: 'g' },
-    ],
-  },
-];
+const SEED_RECIPES = [];
 
 const PERMISSION_SECTIONS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -161,17 +120,9 @@ const SEED_ROLES = [
   },
 ];
 
-const SEED_USERS = [
-  { id: 'U-001', name: 'Rohit Sharma', contact: '98765 43210', roleId: 'ROLE-ADMIN', status: 'active', username: 'rohit', password: 'admin123' },
-  { id: 'U-002', name: 'Suresh Patil', contact: '91234 56780', roleId: 'ROLE-WAREHOUSE', status: 'active', username: 'suresh', password: 'warehouse123' },
-  { id: 'U-003', name: 'Anita Verma', contact: '99887 76655', roleId: 'ROLE-PURCHASE', status: 'active', username: 'anita', password: 'purchase123' },
-];
+const SEED_USERS = [];
 
-const SEED_VENDORS = [
-  { id: 'VEN-001', name: 'Ramesh Farms', contact: '98765 11111', itemIds: ['IT-001', 'IT-005'] },
-  { id: 'VEN-002', name: 'Patil Traders', contact: '98765 22222', itemIds: ['IT-002', 'IT-006', 'IT-007'] },
-  { id: 'VEN-003', name: 'Kadam Orchards', contact: '98765 33333', itemIds: ['IT-003'] },
-];
+const SEED_VENDORS = [];
 
 const NAV = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
