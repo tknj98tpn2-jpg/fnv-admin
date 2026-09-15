@@ -189,65 +189,6 @@ const NAV = [
   { key: 'users', label: 'Users & Roles', icon: Users },
 ];
 
-function LoginScreen({ onLogin, error }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
-  const submit = () => {
-    if (!username.trim() || !password.trim()) return;
-    onLogin(username, password);
-  };
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: BG }}>
-      <div style={{ width: 360, maxWidth: '90vw', background: '#fff', borderRadius: 18, padding: 32, boxShadow: '0 20px 50px rgba(0,0,0,0.10)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 24 }}>
-          <Sprout size={32} color={LEAF} />
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: INK }}>FNV Business App</p>
-          <p style={{ margin: 0, fontSize: 12, color: MUTED }}>Sign in to continue</p>
-        </div>
-        <input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          style={inputStyle}
-          autoFocus
-        />
-        <div style={{ position: 'relative' }}>
-          <input
-            placeholder="Password"
-            type={showPassword ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-            style={{ ...inputStyle, paddingRight: 60 }}
-          />
-          <button
-            onClick={() => setShowPassword((s) => !s)}
-            style={{ position: 'absolute', right: 10, top: 9, background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-          >
-            {showPassword ? 'Hide' : 'Show'}
-          </button>
-        </div>
-        {error && (
-          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 12px' }}>
-            <AlertCircle size={13} /> {error}
-          </p>
-        )}
-        <button
-          onClick={submit}
-          disabled={!username.trim() || !password.trim()}
-          style={{ width: '100%', background: (!username.trim() || !password.trim()) ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: (!username.trim() || !password.trim()) ? 'default' : 'pointer' }}
-        >
-          Sign in
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function AdminPanel() {
   const [tab, setTab] = useState('dashboard');
   // ── Firebase real-time state ───────────────────────────
@@ -268,8 +209,6 @@ export default function AdminPanel() {
   const [grnReports,    setGrnReports]    = useState([]); // uploaded GRN (goods received note) files per channel
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
   const [dbReady,       setDbReady]       = useState(false);
-  const [currentUser,   setCurrentUser]   = useState(null);
-  const [loginError,    setLoginError]    = useState('');
 
   useEffect(() => {
     // Seed collections on first load, then subscribe
@@ -311,32 +250,6 @@ export default function AdminPanel() {
     return () => { unsubs.forEach((u) => u()); unsub2(); unsub3(); };
   }, []);
   // ──────────────────────────────────────────────────────
-
-  // ── Session — restore a saved login once the users list has loaded ──
-  useEffect(() => {
-    if (!dbReady || currentUser) return;
-    const savedId = window.localStorage.getItem('fnv_current_user_id');
-    if (!savedId) return;
-    const u = users.find((x) => x.id === savedId && x.status === 'active');
-    if (u) setCurrentUser(u);
-  }, [dbReady, users, currentUser]);
-
-  const handleLogin = (usernameInput, passwordInput) => {
-    const uname = usernameInput.trim().toLowerCase();
-    const match = users.find((u) => (u.username || '').toLowerCase() === uname && u.password === passwordInput && u.status === 'active');
-    if (!match) {
-      setLoginError('Incorrect username or password, or this account is inactive.');
-      return;
-    }
-    setLoginError('');
-    setCurrentUser(match);
-    window.localStorage.setItem('fnv_current_user_id', match.id);
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    window.localStorage.removeItem('fnv_current_user_id');
-  };
 
   // ── Write helpers (replace old setState handlers) ──────
   const fbUpdate = (col, id, patch)  => updateDoc(doc(db, col, id), patch);
@@ -527,11 +440,6 @@ export default function AdminPanel() {
     </div>
   );
 
-  if (!currentUser) return <LoginScreen onLogin={handleLogin} error={loginError} />;
-
-  const currentRole = roles.find((r) => r.id === currentUser.roleId);
-  const visibleNav = NAV.filter((n) => !currentRole || currentRole.permissions[n.key] !== false);
-
   return (
     <div style={{ display: 'flex', minHeight: 640, background: BG, fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', border: `1px solid ${LINE}`, borderRadius: 16, overflow: 'hidden' }}>
       {/* Sidebar */}
@@ -541,7 +449,7 @@ export default function AdminPanel() {
           <span style={{ fontWeight: 800, fontSize: 15 }}>FNV Admin</span>
         </div>
         <div style={{ padding: '14px 10px', flex: 1 }}>
-          {visibleNav.map((n) => (
+          {NAV.map((n) => (
             <button
               key={n.key}
               onClick={() => setTab(n.key)}
@@ -573,10 +481,6 @@ export default function AdminPanel() {
           ))}
         </div>
         <div style={{ padding: '12px 20px 18px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-          <p style={{ margin: '0 0 8px', fontSize: 11, color: '#8A968A' }}>Signed in as <strong style={{ color: '#fff' }}>{currentUser.name}</strong></p>
-          <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0, marginBottom: 8 }}>
-            <ArrowLeft size={14} /> Log out
-          </button>
           <button style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0 }}>
             <Settings size={14} /> Settings
           </button>
@@ -2370,6 +2274,50 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
 
 const PURCHASE_CATEGORY_OPTIONS = ['ALL', 'FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
 
+function downloadPurchasePdf(rows) {
+  const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const rowsHtml = rows.map((it) => `
+    <tr>
+      <td>${it.name}</td>
+      <td>${it.category}</td>
+      <td>${it.stock} ${it.unit}</td>
+      <td style="font-weight:700;">${it.toBuy} ${it.unit}</td>
+    </tr>
+  `).join('');
+  const html = `<!DOCTYPE html>
+    <html>
+      <head>
+        <title>Purchase List — ${dateStr}</title>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: -apple-system, Arial, sans-serif; padding: 24px; color: #20241E; }
+          h1 { font-size: 18px; margin-bottom: 4px; }
+          p.sub { color: #6b7a63; font-size: 12px; margin-top: 0; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 13px; }
+          th { background: #F6F3EA; font-size: 11px; text-transform: uppercase; color: #6b7a63; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <h1>Purchase List</h1>
+        <p class="sub">Generated on ${dateStr} · ${rows.length} item(s)</p>
+        <table>
+          <thead><tr><th>Item</th><th>Category</th><th>Stock</th><th>To buy</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </body>
+    </html>`;
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return;
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.onload = () => {
+    printWindow.focus();
+    printWindow.print();
+  };
+}
+
 function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, onAdd, onAddLedgerEntry }) {
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [bufferPercent, setBufferPercent] = useState('0');
@@ -2748,7 +2696,16 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 18 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             <Panel>
-              <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Items needing purchase ({filteredItems.length})</p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Items needing purchase ({filteredItems.length})</p>
+                <button
+                  onClick={() => downloadPurchasePdf(filteredItems)}
+                  disabled={filteredItems.length === 0}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, background: filteredItems.length === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: filteredItems.length === 0 ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  <Download size={13} /> Download purchase PDF
+                </button>
+              </div>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr><Th>Item</Th><Th>Category</Th><Th>Stock</Th><Th>To buy</Th></tr></thead>
                 <tbody>
@@ -3119,15 +3076,70 @@ function PricingPanel({ orders, items, purchases, pricingConfig, onUpdate }) {
 }
 
 function parseGrnRows(json) {
+  // Column-name order matters: Excel exports like Hyperpure's often have BOTH a
+  // "PO" and a "GRN" version of quantity/rate (and "Product UPC" alongside
+  // "Product Description") — the more specific "...GRN" / "...Description"
+  // candidates must be checked before the generic ones, or a generic match
+  // (e.g. "quantity") would grab the wrong column ("Quantity - PO") first.
   return json
     .map((r) => {
-      const code = String(pickField(r, ['code', 'sku', 'itemcode', 'articlecode', 'fsn']) || '').trim();
-      const name = String(pickField(r, ['itemname', 'name', 'article', 'product', 'description']) || '').trim();
-      const qty = Number(pickField(r, ['receivedqty', 'qty', 'quantity', 'accepted']) || 0);
-      const price = Number(pickField(r, ['price', 'rate', 'unitprice', 'unitrate']) || 0);
+      const code = String(pickField(r, ['itemcode', 'code', 'sku', 'articlecode', 'fsn']) || '').trim();
+      const name = String(pickField(r, ['productdescription', 'itemname', 'name', 'description', 'article', 'product']) || '').trim();
+      const qty = Number(pickField(r, ['quantitygrn', 'grnqty', 'receivedqty', 'accepted', 'qty', 'quantity']) || 0);
+      const price = Number(pickField(r, ['landingrategrn', 'grnlandingrate', 'rategrn', 'receivedprice', 'unitprice', 'unitrate', 'price', 'rate', 'landingrate']) || 0);
       return { code, name, qty, price };
     })
     .filter((r) => (r.code || r.name) && r.qty > 0);
+}
+
+// ── Hyperpure / Blinkit GRN report PDFs — parsed client-side via pdf.js ──
+// Each article row in these PDFs follows a fixed column order once all the
+// text is flattened onto one line: row# / item code / UPC / description /
+// MRP / tax / landing rate (PO avg, then GRN) / qty (PO, then GRN) /
+// fill rate% / total GRN amount / GMV loss. We only need the item code,
+// description, GRN qty and GRN landing rate.
+let pdfJsLoadPromise = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfJsLoadPromise) return pdfJsLoadPromise;
+  pdfJsLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    script.onerror = () => reject(new Error('Could not load the PDF reader.'));
+    document.head.appendChild(script);
+  });
+  return pdfJsLoadPromise;
+}
+
+async function extractPdfText(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    fullText += content.items.map((item) => item.str).join(' ') + '\n';
+  }
+  return fullText;
+}
+
+function parseGrnPdfText(text) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const pattern = /(\d+) (\d{6,8}) (\d{6,10}) (\d{3,4}) (.*?) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}|-) (\d+) (\d+) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2})/g;
+  const rows = [];
+  let match;
+  while ((match = pattern.exec(flat)) !== null) {
+    const [, , code, , , desc, , , , rateGrn, , qtyGrn] = match;
+    const qty = Number(qtyGrn) || 0;
+    const price = rateGrn === '-' ? 0 : Number(rateGrn) || 0;
+    if (qty > 0) rows.push({ code: code.trim(), name: desc.trim(), qty, price });
+  }
+  return rows;
 }
 
 function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGrn }) {
@@ -3142,6 +3154,23 @@ function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGr
     const file = e.target.files[0];
     if (!file) return;
     setFileError('');
+
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      extractPdfText(file)
+        .then((text) => {
+          const rows = parseGrnPdfText(text);
+          if (rows.length === 0) {
+            setFileError('Could not find any GRN rows in this PDF. If this keeps happening, try exporting the report as Excel/CSV instead.');
+            return;
+          }
+          onUploadGrn(channel, day.date, file.name, rows);
+        })
+        .catch(() => setFileError('Could not read this PDF. Please try again or use an Excel/CSV export instead.'));
+      e.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -3155,7 +3184,7 @@ function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGr
         }
         onUploadGrn(channel, day.date, file.name, rows);
       } catch (err) {
-        setFileError('Could not read this file. Please upload a valid .xlsx, .xls, or .csv GRN report.');
+        setFileError('Could not read this file. Please upload a valid .xlsx, .xls, .csv, or .pdf GRN report.');
       }
     };
     reader.readAsArrayBuffer(file);
@@ -3245,7 +3274,7 @@ function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGr
           <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14 }}>
             <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Upload GRN report — {channel}, {day.date}</p>
             <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-              Upload the channel's Goods Received Note for this day (item code/name, received qty, received price) to compare against our calculated numbers.
+              Upload the channel's Goods Received Note for this day — the Blinkit/Hyperpure PDF works directly, or an Excel/CSV export (item code/name, received qty, received price) — to compare against our calculated numbers.
             </p>
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -3253,7 +3282,7 @@ function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGr
             >
               <Upload size={14} /> Upload GRN report for {day.date}
             </button>
-            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleGrnFile} style={{ display: 'none' }} />
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
             {fileError && (
               <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 10px' }}>
                 <AlertCircle size={13} /> {fileError}
