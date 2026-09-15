@@ -31,6 +31,9 @@ import {
   Store,
   ArrowLeft,
   Layers,
+  IndianRupee,
+  TrendingUp,
+  ChevronRight,
 } from 'lucide-react';
 
 // ── Firebase ──────────────────────────────────────────────
@@ -70,7 +73,7 @@ const BG = '#F6F3EA';
 const PLATFORMS = ['Blinkit', 'Flipkart'];
 
 const SEED_ORDERS = [
-  { id: 'BLK-1042', platform: 'Blinkit', product: 'Tomato', qty: 240, unit: 'kg', status: 'pending' },
+  { id: 'BLK-1042', platform: 'Blinkit', product: 'Tomato', articleName: 'Tomato Hybrid(Pack)', qty: 240, unit: 'kg', status: 'pending', packQty: 480, packSize: 0.5, packUnit: 'kg' },
   { id: 'FKT-3391', platform: 'Flipkart', product: 'Onion', qty: 500, unit: 'kg', status: 'pending' },
   { id: 'BLK-1043', platform: 'Blinkit', product: 'Banana', qty: 120, unit: 'dozen', status: 'packed' },
   { id: 'FKT-3402', platform: 'Flipkart', product: 'Potato', qty: 350, unit: 'kg', status: 'dispatched' },
@@ -132,6 +135,8 @@ const PERMISSION_SECTIONS = [
   { key: 'orders', label: 'Orders' },
   { key: 'purchase', label: 'Purchases' },
   { key: 'stockcount', label: 'Stock Count' },
+  { key: 'pricing', label: 'Pricing' },
+  { key: 'profitloss', label: 'Profit & Loss' },
   { key: 'packaging', label: 'Packaging' },
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'crates', label: 'Crates & boxes' },
@@ -142,24 +147,24 @@ const SEED_ROLES = [
   {
     id: 'ROLE-ADMIN',
     name: 'Admin',
-    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, packaging: true, dispatch: true, crates: true, users: true },
+    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, pricing: true, profitloss: true, packaging: true, dispatch: true, crates: true, users: true },
   },
   {
     id: 'ROLE-WAREHOUSE',
     name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, cutprocess: false, orders: false, purchase: false, stockcount: true, packaging: true, dispatch: true, crates: true, users: false },
+    permissions: { dashboard: true, items: false, cutprocess: false, orders: false, purchase: false, stockcount: true, pricing: false, profitloss: false, packaging: true, dispatch: true, crates: true, users: false },
   },
   {
     id: 'ROLE-PURCHASE',
     name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, packaging: false, dispatch: false, crates: false, users: false },
+    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, pricing: true, profitloss: true, packaging: false, dispatch: false, crates: false, users: false },
   },
 ];
 
 const SEED_USERS = [
-  { id: 'U-001', name: 'Rohit Sharma', contact: '98765 43210', roleId: 'ROLE-ADMIN', status: 'active' },
-  { id: 'U-002', name: 'Suresh Patil', contact: '91234 56780', roleId: 'ROLE-WAREHOUSE', status: 'active' },
-  { id: 'U-003', name: 'Anita Verma', contact: '99887 76655', roleId: 'ROLE-PURCHASE', status: 'active' },
+  { id: 'U-001', name: 'Rohit Sharma', contact: '98765 43210', roleId: 'ROLE-ADMIN', status: 'active', username: 'rohit', password: 'admin123' },
+  { id: 'U-002', name: 'Suresh Patil', contact: '91234 56780', roleId: 'ROLE-WAREHOUSE', status: 'active', username: 'suresh', password: 'warehouse123' },
+  { id: 'U-003', name: 'Anita Verma', contact: '99887 76655', roleId: 'ROLE-PURCHASE', status: 'active', username: 'anita', password: 'purchase123' },
 ];
 
 const SEED_VENDORS = [
@@ -176,11 +181,72 @@ const NAV = [
   { key: 'orders', label: 'Orders', icon: ClipboardList },
   { key: 'purchase', label: 'Purchases', icon: ShoppingBag },
   { key: 'stockcount', label: 'Stock Count', icon: Layers },
+  { key: 'pricing', label: 'Pricing', icon: IndianRupee },
+  { key: 'profitloss', label: 'Profit & Loss', icon: TrendingUp },
   { key: 'packaging', label: 'Packaging', icon: PackageCheck },
   { key: 'dispatch', label: 'Dispatch', icon: Truck },
   { key: 'crates', label: 'Crates & boxes', icon: Boxes },
   { key: 'users', label: 'Users & Roles', icon: Users },
 ];
+
+function LoginScreen({ onLogin, error }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const submit = () => {
+    if (!username.trim() || !password.trim()) return;
+    onLogin(username, password);
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: BG }}>
+      <div style={{ width: 360, maxWidth: '90vw', background: '#fff', borderRadius: 18, padding: 32, boxShadow: '0 20px 50px rgba(0,0,0,0.10)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 24 }}>
+          <Sprout size={32} color={LEAF} />
+          <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: INK }}>FNV Business App</p>
+          <p style={{ margin: 0, fontSize: 12, color: MUTED }}>Sign in to continue</p>
+        </div>
+        <input
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          style={inputStyle}
+          autoFocus
+        />
+        <div style={{ position: 'relative' }}>
+          <input
+            placeholder="Password"
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            style={{ ...inputStyle, paddingRight: 60 }}
+          />
+          <button
+            onClick={() => setShowPassword((s) => !s)}
+            style={{ position: 'absolute', right: 10, top: 9, background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+          >
+            {showPassword ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {error && (
+          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 12px' }}>
+            <AlertCircle size={13} /> {error}
+          </p>
+        )}
+        <button
+          onClick={submit}
+          disabled={!username.trim() || !password.trim()}
+          style={{ width: '100%', background: (!username.trim() || !password.trim()) ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: (!username.trim() || !password.trim()) ? 'default' : 'pointer' }}
+        >
+          Sign in
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function AdminPanel() {
   const [tab, setTab] = useState('dashboard');
@@ -198,8 +264,12 @@ export default function AdminPanel() {
   const [crateLog,      setCrateLog]      = useState([]);
   const [dispatchLog,   setDispatchLog]   = useState([]);
   const [stockCounts,   setStockCounts]   = useState([]); // nightly closing-stock entries, one per item per date
+  const [pricingConfig, setPricingConfig] = useState([]); // editable per-article pricing inputs (grading %, margins, etc.)
+  const [grnReports,    setGrnReports]    = useState([]); // uploaded GRN (goods received note) files per channel
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
   const [dbReady,       setDbReady]       = useState(false);
+  const [currentUser,   setCurrentUser]   = useState(null);
+  const [loginError,    setLoginError]    = useState('');
 
   useEffect(() => {
     // Seed collections on first load, then subscribe
@@ -216,8 +286,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','indentBatches','crateLog','dispatchLog','stockCounts'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -241,6 +311,32 @@ export default function AdminPanel() {
     return () => { unsubs.forEach((u) => u()); unsub2(); unsub3(); };
   }, []);
   // ──────────────────────────────────────────────────────
+
+  // ── Session — restore a saved login once the users list has loaded ──
+  useEffect(() => {
+    if (!dbReady || currentUser) return;
+    const savedId = window.localStorage.getItem('fnv_current_user_id');
+    if (!savedId) return;
+    const u = users.find((x) => x.id === savedId && x.status === 'active');
+    if (u) setCurrentUser(u);
+  }, [dbReady, users, currentUser]);
+
+  const handleLogin = (usernameInput, passwordInput) => {
+    const uname = usernameInput.trim().toLowerCase();
+    const match = users.find((u) => (u.username || '').toLowerCase() === uname && u.password === passwordInput && u.status === 'active');
+    if (!match) {
+      setLoginError('Incorrect username or password, or this account is inactive.');
+      return;
+    }
+    setLoginError('');
+    setCurrentUser(match);
+    window.localStorage.setItem('fnv_current_user_id', match.id);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    window.localStorage.removeItem('fnv_current_user_id');
+  };
 
   // ── Write helpers (replace old setState handlers) ──────
   const fbUpdate = (col, id, patch)  => updateDoc(doc(db, col, id), patch);
@@ -285,12 +381,24 @@ export default function AdminPanel() {
   // "purchased" rows are real, completed transactions and count toward stock.
   // "requirement" rows are just a to-buy queue (from indent release / recipe push) — they do NOT count as stock until actually purchased.
   const addPurchase            = (p)   => fbSetDoc('purchases', p.id, { date: new Date().toISOString().split('T')[0], type: 'purchased', ...p });
-  const addPurchaseRequirements = (rows) => { const b = writeBatch(db); const today = new Date().toISOString().split('T')[0]; rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r })); b.commit(); };
+  const addPurchaseRequirements = (rows, dateOverride) => { const b = writeBatch(db); const today = dateOverride || new Date().toISOString().split('T')[0]; rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r })); b.commit(); };
   const removePurchasesByIds   = (ids) => { const b = writeBatch(db); ids.forEach((id) => b.delete(doc(db,'purchases',id))); b.commit(); };
 
   // ── Stock count (nightly closing stock) ─────────────────
   const recordStockCount = (itemId, itemName, unit, date, closingQty) => {
     fbSetDoc('stockCounts', `${itemId}__${date}`, { id: `${itemId}__${date}`, itemId, itemName, unit, date, closingQty: Number(closingQty) || 0 });
+  };
+
+  // ── Pricing ─────────────────────────────────────────────
+  const updatePricingConfig = (key, patch) => {
+    const existing = pricingConfig.find((p) => p.id === key);
+    fbSetDoc('pricingConfig', key, { id: key, ...(existing || {}), ...patch });
+  };
+
+  // ── GRN reports (Goods Received Note — uploaded per channel + day to reconcile) ─
+  const uploadGrnReport = (channel, date, fileName, rows) => {
+    const id = `GRN-${channel.slice(0, 3).toUpperCase()}-${date}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+    fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: new Date().toISOString().split('T')[0], rows });
   };
 
   // ── Indent batches ──────────────────────────────────────
@@ -303,7 +411,7 @@ export default function AdminPanel() {
       if (o && o.status !== 'dispatched') fbUpdate('orders', id, { status: complete ? 'packed' : 'pending' });
     });
   };
-  const toggleReleaseBatch = async (batchId) => {
+  const toggleReleaseBatch = async (batchId, purchaseDate) => {
     const batch = indentBatches.find((b) => b.id === batchId);
     if (!batch) return;
     if (batch.released) {
@@ -314,8 +422,8 @@ export default function AdminPanel() {
         id: `P-REL-${batchId}-${i}`, item: c.itemName, supplier: '', qty: c.qty, unit: c.unit, cost: 0,
         source: `Released: ${batch.platform} indent (${batch.fileName})`,
       }));
-      addPurchaseRequirements(newRows);
-      fbUpdate('indentBatches', batchId, { released: true, purchaseRowIds: newRows.map((r) => r.id) });
+      addPurchaseRequirements(newRows, purchaseDate);
+      fbUpdate('indentBatches', batchId, { released: true, purchaseRowIds: newRows.map((r) => r.id), purchaseDate });
     }
   };
 
@@ -395,13 +503,17 @@ export default function AdminPanel() {
       patch.status = remaining > 0.01 ? 'packed' : 'dispatched';
       b.update(doc(db, 'orders', orderId), patch);
       totalDispatchQty += dQty;
-      logItems.push({ orderId, product: o.articleName || o.product, unit: o.unit, dispatchQty: dQty, shortQty: sQty, remaining: Math.max(0, remaining) });
+      logItems.push({
+        orderId, product: o.articleName || o.product, unit: o.unit, dispatchQty: dQty, shortQty: sQty, remaining: Math.max(0, remaining),
+        platform: o.platform, baseProduct: o.product, packSize: o.packSize || null, packUnit: o.packUnit || null,
+      });
     });
     b.commit();
+    const dispatchDate = new Date().toISOString().split('T')[0];
     if (cratesUsed > 0) adjustCrates('crates', -cratesUsed, `Dispatch ${vehicleNo || ''}`.trim());
     if (boxesUsed > 0)  adjustCrates('boxes',  -boxesUsed,  `Dispatch ${vehicleNo || ''}`.trim());
     const did = `DSP-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    fbSetDoc('dispatchLog', did, { id: did, items: logItems, orderIds: logItems.map((li) => li.orderId), totalDispatchQty, vehicleNo: vehicleNo || '—', driverName: driverName || '—', cratesUsed, boxesUsed, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) });
+    fbSetDoc('dispatchLog', did, { id: did, date: dispatchDate, items: logItems, orderIds: logItems.map((li) => li.orderId), totalDispatchQty, vehicleNo: vehicleNo || '—', driverName: driverName || '—', cratesUsed, boxesUsed, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) });
   };
 
   const pendingCount = orders.filter((o) => o.status === 'pending').length;
@@ -415,6 +527,11 @@ export default function AdminPanel() {
     </div>
   );
 
+  if (!currentUser) return <LoginScreen onLogin={handleLogin} error={loginError} />;
+
+  const currentRole = roles.find((r) => r.id === currentUser.roleId);
+  const visibleNav = NAV.filter((n) => !currentRole || currentRole.permissions[n.key] !== false);
+
   return (
     <div style={{ display: 'flex', minHeight: 640, background: BG, fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', border: `1px solid ${LINE}`, borderRadius: 16, overflow: 'hidden' }}>
       {/* Sidebar */}
@@ -424,7 +541,7 @@ export default function AdminPanel() {
           <span style={{ fontWeight: 800, fontSize: 15 }}>FNV Admin</span>
         </div>
         <div style={{ padding: '14px 10px', flex: 1 }}>
-          {NAV.map((n) => (
+          {visibleNav.map((n) => (
             <button
               key={n.key}
               onClick={() => setTab(n.key)}
@@ -456,6 +573,10 @@ export default function AdminPanel() {
           ))}
         </div>
         <div style={{ padding: '12px 20px 18px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <p style={{ margin: '0 0 8px', fontSize: 11, color: '#8A968A' }}>Signed in as <strong style={{ color: '#fff' }}>{currentUser.name}</strong></p>
+          <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0, marginBottom: 8 }}>
+            <ArrowLeft size={14} /> Log out
+          </button>
           <button style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0 }}>
             <Settings size={14} /> Settings
           </button>
@@ -507,8 +628,10 @@ export default function AdminPanel() {
           )}
           {tab === 'purchase' && <PurchasePanel purchases={purchases} orders={orders} items={items} recipes={recipes} vendors={vendors} vendorLedger={vendorLedger} totalSpend={totalSpend} stockCounts={stockCounts} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} />}
           {tab === 'stockcount' && <StockCountPanel items={items} stockCounts={stockCounts} onRecord={recordStockCount} />}
+          {tab === 'pricing' && <PricingPanel orders={orders} items={items} purchases={purchases} pricingConfig={pricingConfig} onUpdate={updatePricingConfig} />}
+          {tab === 'profitloss' && <ProfitLossPanel orders={orders} items={items} purchases={purchases} pricingConfig={pricingConfig} dispatchLog={dispatchLog} grnReports={grnReports} onUploadGrn={uploadGrnReport} />}
           {tab === 'packaging' && <PackagingPanel orders={orders} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
-          {tab === 'dispatch' && <DispatchPanel orders={orders} crates={crates} dispatchLog={dispatchLog} onAdvance={advanceStatus} onDispatchBatch={dispatchBatch} />}
+          {tab === 'dispatch' && <DispatchPanel orders={orders} items={items} crates={crates} dispatchLog={dispatchLog} onAdvance={advanceStatus} onDispatchBatch={dispatchBatch} />}
           {tab === 'crates' && <CratesPanel crates={crates} log={crateLog} onAdjust={adjustCrates} />}
           {tab === 'users' && (
             <UsersRolesPanel
@@ -1505,32 +1628,46 @@ function CutProcessPanel({ items, recipes, orders, onAddRecipe, onDeleteRecipe, 
 function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, onAddRole, onDeleteRole, onToggleRolePermission }) {
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [roleId, setRoleId] = useState(roles[0]?.id || '');
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [newRoleName, setNewRoleName] = useState('');
+  const [visiblePasswordId, setVisiblePasswordId] = useState(null);
+  const [usernameError, setUsernameError] = useState('');
 
   const submitUser = () => {
-    if (!name.trim() || !roleId) return;
+    if (!name.trim() || !roleId || !username.trim() || !password.trim()) return;
+    const uname = username.trim().toLowerCase();
+    if (users.some((u) => (u.username || '').toLowerCase() === uname)) {
+      setUsernameError('This username is already taken.');
+      return;
+    }
+    setUsernameError('');
     onAddUser({
       id: `U-${Date.now().toString(36).toUpperCase().slice(-5)}`,
       name: name.trim(),
       contact: contact.trim(),
       roleId,
       status: 'active',
+      username: uname,
+      password: password.trim(),
     });
     setName('');
     setContact('');
+    setUsername('');
+    setPassword('');
   };
 
   const startEdit = (u) => {
     setEditingId(u.id);
-    setDraft({ name: u.name, contact: u.contact });
+    setDraft({ name: u.name, contact: u.contact, username: u.username || '', password: u.password || '' });
   };
   const saveEdit = (id) => {
-    if (!draft.name.trim()) return;
-    onUpdateUser(id, { name: draft.name.trim(), contact: draft.contact.trim() });
+    if (!draft.name.trim() || !draft.username.trim() || !draft.password.trim()) return;
+    onUpdateUser(id, { name: draft.name.trim(), contact: draft.contact.trim(), username: draft.username.trim().toLowerCase(), password: draft.password.trim() });
     setEditingId(null);
     setDraft(null);
   };
@@ -1557,6 +1694,10 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
           </select>
+          <p style={{ margin: '4px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>LOGIN CREDENTIALS</p>
+          <input placeholder="Username" value={username} onChange={(e) => { setUsername(e.target.value); setUsernameError(''); }} style={{ ...inputStyle, borderColor: usernameError ? TOMATO : LINE }} />
+          {usernameError && <p style={{ margin: '-4px 0 8px', fontSize: 11, color: TOMATO }}>{usernameError}</p>}
+          <input placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
           <button onClick={submitUser} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             Add employee
           </button>
@@ -1565,7 +1706,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
         <Panel>
           <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Employees ({users.length})</p>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Name</Th><Th>Contact</Th><Th>Role</Th><Th>Status</Th><Th /></tr></thead>
+            <thead><tr><Th>Name</Th><Th>Contact</Th><Th>Username</Th><Th>Password</Th><Th>Role</Th><Th>Status</Th><Th /></tr></thead>
             <tbody>
               {users.map((u) => {
                 const isEditing = editingId === u.id;
@@ -1573,16 +1714,37 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                   <tr key={u.id}>
                     <Td style={{ fontWeight: 700 }}>
                       {isEditing ? (
-                        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 120 }} />
+                        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 110 }} />
                       ) : (
                         u.name
                       )}
                     </Td>
                     <Td>
                       {isEditing ? (
-                        <input value={draft.contact} onChange={(e) => setDraft({ ...draft, contact: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 120 }} />
+                        <input value={draft.contact} onChange={(e) => setDraft({ ...draft, contact: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 110 }} />
                       ) : (
                         u.contact || <span style={{ color: MUTED }}>—</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {isEditing ? (
+                        <input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 100 }} />
+                      ) : (
+                        u.username || <span style={{ color: MUTED }}>—</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {isEditing ? (
+                        <input value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 100 }} />
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontFamily: 'monospace' }}>{visiblePasswordId === u.id ? (u.password || '—') : '••••••••'}</span>
+                          {u.password && (
+                            <button onClick={() => setVisiblePasswordId(visiblePasswordId === u.id ? null : u.id)} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                              {visiblePasswordId === u.id ? 'Hide' : 'Show'}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </Td>
                     <Td>
@@ -1638,7 +1800,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                   </tr>
                 );
               })}
-              {users.length === 0 && <tr><Td colSpan={5} style={{ textAlign: 'center', color: MUTED }}>No employees added yet.</Td></tr>}
+              {users.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No employees added yet.</Td></tr>}
             </tbody>
           </table>
         </Panel>
@@ -1778,6 +1940,57 @@ function parseIndentRows(json) {
     .filter((r) => r.rawName && r.qty > 0);
 }
 
+function ReleaseBatchRow({ batch: b, onToggleReleaseBatch }) {
+  const [purchaseDate, setPurchaseDate] = useState(b.purchaseDate || '');
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, border: `1px solid ${LINE}`, borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>
+          {b.platform} indent — {b.fileName}
+        </p>
+        <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>
+          {b.compiled.map((c) => `${c.qty} ${c.unit} ${c.itemName}`).join(', ')}
+        </p>
+        {b.released && b.purchaseDate && (
+          <p style={{ margin: '2px 0 0', fontSize: 11, color: LEAF, fontWeight: 700 }}>Purchase date: {b.purchaseDate}</p>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {!b.released && (
+          <div>
+            <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>PURCHASE DATE</p>
+            <input
+              type="date"
+              value={purchaseDate}
+              onChange={(e) => setPurchaseDate(e.target.value)}
+              style={{ borderRadius: 8, border: `1px solid ${purchaseDate ? LINE : AMBER}`, fontSize: 12, padding: '7px 8px' }}
+            />
+          </div>
+        )}
+        <button
+          onClick={() => onToggleReleaseBatch(b.id, purchaseDate)}
+          disabled={!b.released && !purchaseDate}
+          title={!b.released && !purchaseDate ? 'Pick a purchase date first — some articles need buying a day or more before the fulfilment date.' : ''}
+          style={{
+            background: b.released ? '#fff' : (!purchaseDate ? '#C9C2AE' : TOMATO),
+            color: b.released ? TOMATO : '#fff',
+            border: b.released ? `1px solid ${TOMATO}` : 'none',
+            borderRadius: 8,
+            padding: '8px 14px',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: (!b.released && !purchaseDate) ? 'default' : 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {b.released ? 'Withdraw from Purchase Manager' : 'Release to Purchase Manager'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch }) {
   const [platform, setPlatform] = useState('Blinkit');
   const [product, setProduct] = useState('');
@@ -1788,11 +2001,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
   const [indentPlatform, setIndentPlatform] = useState('Blinkit');
   const [indentFulfilmentDate, setIndentFulfilmentDate] = useState('');
   const [pendingIndent, setPendingIndent] = useState(null); // { platform, fileName, rows, fulfilmentDate }
+  const [selectedRowKeys, setSelectedRowKeys] = useState(new Set());
   const [fileError, setFileError] = useState('');
   const fileInputRef = useRef(null);
 
   const submit = () => {
-    if (!product.trim() || !qty || Number(qty) <= 0) return;
+    if (!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate) return;
     onImport({ id: `${platform.slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`, platform, product: product.trim(), qty: Number(qty), unit, status: 'pending', fulfilmentDate });
     setProduct('');
     setQty('');
@@ -1802,6 +2016,11 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (!indentFulfilmentDate) {
+      setFileError('Please set the fulfilment date before uploading an indent.');
+      e.target.value = '';
+      return;
+    }
     setFileError('');
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -1826,6 +2045,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
           return { ...r, mappedItemId: match ? match.id : '' };
         });
         setPendingIndent({ platform: indentPlatform, fileName: file.name, rows, fulfilmentDate: indentFulfilmentDate });
+        setSelectedRowKeys(new Set(rows.map((r) => r.key))); // select all by default
       } catch (err) {
         setFileError('Could not read this file. Please upload a valid .xlsx, .xls, or .csv indent.');
       }
@@ -1833,6 +2053,17 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
     reader.readAsArrayBuffer(file);
     e.target.value = '';
   };
+
+  const toggleRowSelected = (key) => {
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const selectAllRows = () => setSelectedRowKeys(new Set((pendingIndent?.rows || []).map((r) => r.key)));
+  const clearAllRows = () => setSelectedRowKeys(new Set());
 
   const setRowMapping = (key, value) => {
     setPendingIndent((prev) => ({
@@ -1869,14 +2100,15 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
   const getPackSize = (r) => getRowAlias(r)?.packSize || '';
   const isRowReady = (r) => !!r.mappedItemId && Number(getPackSize(r)) > 0;
 
-  const mappedCount = pendingIndent ? pendingIndent.rows.filter(isRowReady).length : 0;
+  const readyCount = pendingIndent ? pendingIndent.rows.filter(isRowReady).length : 0;
+  const importCount = pendingIndent ? pendingIndent.rows.filter((r) => isRowReady(r) && selectedRowKeys.has(r.key)).length : 0;
 
   const importMapped = () => {
     if (!pendingIndent) return;
     const remaining = [];
     const compiledMap = {};
     pendingIndent.rows.forEach((r) => {
-      if (!isRowReady(r)) {
+      if (!isRowReady(r) || !selectedRowKeys.has(r.key)) {
         remaining.push(r);
         return;
       }
@@ -1919,6 +2151,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
     }
     if (!remaining.length) setIndentFulfilmentDate('');
     setPendingIndent(remaining.length ? { ...pendingIndent, rows: remaining } : null);
+    setSelectedRowKeys(new Set(remaining.filter((r) => selectedRowKeys.has(r.key)).map((r) => r.key)));
   };
 
   return (
@@ -1928,32 +2161,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
           <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Release to Purchase Manager</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {indentBatches.map((b) => (
-              <div key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${LINE}`, borderRadius: 10, padding: '10px 14px' }}>
-                <div>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>
-                    {b.platform} indent — {b.fileName}
-                  </p>
-                  <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>
-                    {b.compiled.map((c) => `${c.qty} ${c.unit} ${c.itemName}`).join(', ')}
-                  </p>
-                </div>
-                <button
-                  onClick={() => onToggleReleaseBatch(b.id)}
-                  style={{
-                    background: b.released ? '#fff' : TOMATO,
-                    color: b.released ? TOMATO : '#fff',
-                    border: b.released ? `1px solid ${TOMATO}` : 'none',
-                    borderRadius: 8,
-                    padding: '8px 14px',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {b.released ? 'Withdraw from Purchase Manager' : 'Release to Purchase Manager'}
-                </button>
-              </div>
+              <ReleaseBatchRow key={b.id} batch={b} onToggleReleaseBatch={onToggleReleaseBatch} />
             ))}
           </div>
         </Panel>
@@ -1962,58 +2170,68 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
         <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
           <FileSpreadsheet size={14} /> Import indent (Excel)
         </p>
-        {!pendingIndent ? (
-          <>
-            <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-              Upload the Blinkit or Flipkart indent file — we'll read it and ask you to map each article to an item.
-            </p>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {PLATFORMS.map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setIndentPlatform(p)}
-                    style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${indentPlatform === p ? LEAF : LINE}`, background: indentPlatform === p ? LEAF : '#fff', color: indentPlatform === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
+        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
+          Upload the Blinkit or Flipkart indent file — we'll read it and ask you to map each article to an item. You can upload another indent (e.g. for a different date) even while one is still being mapped below — uploading replaces whatever's currently unfinished in the table.
+        </p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {PLATFORMS.map((p) => (
               <button
-                onClick={() => fileInputRef.current?.click()}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                key={p}
+                onClick={() => setIndentPlatform(p)}
+                style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${indentPlatform === p ? LEAF : LINE}`, background: indentPlatform === p ? LEAF : '#fff', color: indentPlatform === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
               >
-                <Upload size={13} /> Upload {indentPlatform} indent
+                {p}
               </button>
-              <input
-                type="date"
-                value={indentFulfilmentDate}
-                onChange={(e) => setIndentFulfilmentDate(e.target.value)}
-                title="Fulfilment date for this indent"
-                style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '7px 8px' }}
-              />
-              <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: 'none' }} />
-            </div>
-            {fileError && (
-              <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '10px 0 0' }}>
-                <AlertCircle size={13} /> {fileError}
-              </p>
-            )}
-          </>
-        ) : (
+            ))}
+          </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!indentFulfilmentDate}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: !indentFulfilmentDate ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: !indentFulfilmentDate ? 'default' : 'pointer' }}
+          >
+            <Upload size={13} /> Upload {indentPlatform} indent
+          </button>
           <div>
+            <input
+              type="date"
+              value={indentFulfilmentDate}
+              onChange={(e) => setIndentFulfilmentDate(e.target.value)}
+              title="Fulfilment date for this indent (required)"
+              style={{ borderRadius: 8, border: `1px solid ${indentFulfilmentDate ? LINE : AMBER}`, fontSize: 12, padding: '7px 8px' }}
+            />
+          </div>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: 'none' }} />
+        </div>
+        {!indentFulfilmentDate && (
+          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '10px 0 0' }}>
+            <AlertCircle size={13} /> Fulfilment date is required before you can upload an indent.
+          </p>
+        )}
+        {fileError && (
+          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '10px 0 0' }}>
+            <AlertCircle size={13} /> {fileError}
+          </p>
+        )}
+
+        {pendingIndent && (
+          <div style={{ borderTop: `1px solid ${LINE}`, marginTop: 16, paddingTop: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <p style={{ margin: 0, fontSize: 12, color: MUTED }}>
-                <strong style={{ color: INK }}>{pendingIndent.fileName}</strong> · {pendingIndent.platform} · {pendingIndent.rows.length} article{pendingIndent.rows.length !== 1 ? 's' : ''} found, {mappedCount} ready
+                <strong style={{ color: INK }}>{pendingIndent.fileName}</strong> · {pendingIndent.platform} · {pendingIndent.rows.length} article{pendingIndent.rows.length !== 1 ? 's' : ''} found, {readyCount} ready, {selectedRowKeys.size} selected
                 {pendingIndent.fulfilmentDate ? ` · Fulfilment: ${pendingIndent.fulfilmentDate}` : ''}
               </p>
-              <button onClick={() => setPendingIndent(null)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                Cancel
-              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={selectAllRows} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
+                <button onClick={clearAllRows} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
+                <button onClick={() => setPendingIndent(null)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  Cancel
+                </button>
+              </div>
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
               <thead>
-                <tr><Th>Article (from file)</Th><Th>Code</Th><Th>Qty</Th><Th>UOM</Th><Th>Type</Th><Th>Map to item</Th><Th>Pack size</Th></tr>
+                <tr><Th /><Th>Article (from file)</Th><Th>Code</Th><Th>Qty</Th><Th>UOM</Th><Th>Type</Th><Th>Map to item</Th><Th>Pack size</Th></tr>
               </thead>
               <tbody>
                 {pendingIndent.rows.map((r) => {
@@ -2021,7 +2239,10 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
                   const rowAlias = getRowAlias(r);
                   const packSize = rowAlias?.packSize || '';
                   return (
-                    <tr key={r.key}>
+                    <tr key={r.key} style={{ background: selectedRowKeys.has(r.key) ? '#F6F3EA' : 'transparent' }}>
+                      <Td>
+                        <input type="checkbox" checked={selectedRowKeys.has(r.key)} onChange={() => toggleRowSelected(r.key)} />
+                      </Td>
                       <Td>{r.rawName}</Td>
                       <Td>{r.rawCode || <span style={{ color: MUTED }}>—</span>}</Td>
                       <Td>{r.qty}</Td>
@@ -2069,17 +2290,17 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
                 })}
               </tbody>
             </table>
-            {mappedCount < pendingIndent.rows.length && (
+            {readyCount < pendingIndent.rows.length && (
               <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '0 0 10px' }}>
-                <AlertCircle size={13} /> {pendingIndent.rows.length - mappedCount} article(s) still need an item mapping and/or a pack size before they can be imported.
+                <AlertCircle size={13} /> {pendingIndent.rows.length - readyCount} article(s) still need an item mapping and/or a pack size before they can be imported.
               </p>
             )}
             <button
               onClick={importMapped}
-              disabled={mappedCount === 0}
-              style={{ background: mappedCount === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: mappedCount === 0 ? 'default' : 'pointer' }}
+              disabled={importCount === 0}
+              style={{ background: importCount === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: importCount === 0 ? 'default' : 'pointer' }}
             >
-              Import {mappedCount} ready order{mappedCount !== 1 ? 's' : ''}
+              Import {importCount} selected &amp; ready order{importCount !== 1 ? 's' : ''}
             </button>
           </div>
         )}
@@ -2098,7 +2319,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
             ))}
           </div>
           <input placeholder="Product" value={product} onChange={(e) => setProduct(e.target.value)} style={inputStyle} />
-          <input type="date" value={fulfilmentDate} onChange={(e) => setFulfilmentDate(e.target.value)} style={inputStyle} />
+          <input type="date" value={fulfilmentDate} onChange={(e) => setFulfilmentDate(e.target.value)} title="Fulfilment date (required)" style={{ ...inputStyle, border: `1px solid ${fulfilmentDate ? LINE : AMBER}` }} />
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <input placeholder="Quantity" type="number" value={qty} onChange={(e) => setQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
             <select value={unit} onChange={(e) => setUnit(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px' }}>
@@ -2108,7 +2329,16 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
               <option value="crate">crate</option>
             </select>
           </div>
-          <button onClick={submit} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          {!fulfilmentDate && (
+            <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '0 0 8px' }}>
+              <AlertCircle size={12} /> Fulfilment date is required.
+            </p>
+          )}
+          <button
+            onClick={submit}
+            disabled={!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate}
+            style={{ width: '100%', background: (!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate) ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: (!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate) ? 'default' : 'pointer' }}
+          >
             Add order
           </button>
         </Panel>
@@ -2141,9 +2371,9 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
 const PURCHASE_CATEGORY_OPTIONS = ['ALL', 'FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
 
 function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, onAdd, onAddLedgerEntry }) {
-  const [selectedDate, setSelectedDate] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [bufferPercent, setBufferPercent] = useState('0');
+  const [view, setView] = useState('list'); // 'list' | 'purchased'
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [selectedVendorId, setSelectedVendorId] = useState('');
   const [showAllVendorItems, setShowAllVendorItems] = useState(false);
@@ -2230,7 +2460,6 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     const addDemand = (name, qty, unit) => { map[name] = map[name] || { needed: 0, unit }; map[name].needed += qty; };
     orders
       .filter((o) => o.status !== 'dispatched')
-      .filter((o) => !selectedDate || o.fulfilmentDate === selectedDate)
       .forEach((o) => {
         const matchingRecipes = recipes.filter((r) => items.find((it) => it.id === r.outputItemId)?.name === o.product);
         if (matchingRecipes.length > 0) {
@@ -2247,7 +2476,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         }
       });
     return map;
-  }, [orders, selectedDate, recipes, items]);
+  }, [orders, recipes, items]);
 
   const filteredItems = useMemo(() => {
     const buffer = Number(bufferPercent) || 0;
@@ -2265,8 +2494,8 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       .filter((it) => it.stock <= it.needed * (1 + buffer / 100));
   }, [items, neededByProduct, categoryFilter, stockByItem, bufferPercent]);
 
-  const hasActiveFilters = !!selectedDate || categoryFilter !== 'ALL' || Number(bufferPercent) !== 0;
-  const clearFilters = () => { setSelectedDate(''); setCategoryFilter('ALL'); setBufferPercent('0'); };
+  const hasActiveFilters = categoryFilter !== 'ALL' || Number(bufferPercent) !== 0;
+  const clearFilters = () => { setCategoryFilter('ALL'); setBufferPercent('0'); };
 
   const purchasedList = useMemo(() => {
     return purchases
@@ -2275,6 +2504,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       .slice()
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [purchases, purchasedDate]);
+  const allPurchasedCount = useMemo(() => purchases.filter((p) => p.type !== 'requirement').length, [purchases]);
 
   // Item detail side-panel
   const selectedItemData = selectedItemId ? filteredItems.find((x) => x.id === selectedItemId) : null;
@@ -2449,86 +2679,96 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 18 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <Panel>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Items needing purchase ({filteredItems.length})</p>
-              {hasActiveFilters && <button onClick={clearFilters} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear filters</button>}
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
-                <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-                <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
-                  {PURCHASE_CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>STOCK BUFFER %</p>
-                <input
-                  type="number"
-                  placeholder="0"
-                  value={bufferPercent}
-                  onChange={(e) => setBufferPercent(e.target.value)}
-                  style={{ ...inputStyle, marginBottom: 0 }}
-                  title="Hide items whose stock already exceeds what's needed by more than this %"
-                />
-              </div>
-            </div>
-            <p style={{ margin: '0 0 12px', fontSize: 11, color: MUTED }}>
-              Items are hidden here once stock covers demand plus this buffer — they don't need buying right now.
-            </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><Th>Item</Th><Th>Category</Th><Th>Stock</Th><Th>To buy</Th></tr></thead>
-              <tbody>
-                {filteredItems.map((it) => (
-                  <tr key={it.id} onClick={() => openItem(it.id)} style={{ cursor: 'pointer' }}>
-                    <Td style={{ fontWeight: 700, color: selectedItemId === it.id ? LEAF : INK }}>{it.name}</Td>
-                    <Td>{it.category}</Td>
-                    <Td>{it.stock} {it.unit}</Td>
-                    <Td style={{ color: TOMATO, fontWeight: 700 }}>{it.toBuy} {it.unit}</Td>
-                  </tr>
-                ))}
-                {filteredItems.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>No items match these filters.</Td></tr>}
-              </tbody>
-            </table>
-          </Panel>
-
-          <Panel>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Purchased{purchasedDate ? ` on ${purchasedDate}` : ''} ({purchasedList.length})</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="date" value={purchasedDate} onChange={(e) => setPurchasedDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-                {purchasedDate && (
-                  <button onClick={() => setPurchasedDate('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
-                )}
-              </div>
-            </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><Th>Date</Th><Th>Item</Th><Th>Supplier</Th><Th>Qty</Th><Th>Cost</Th><Th>Source</Th></tr></thead>
-              <tbody>
-                {purchasedList.map((p) => (
-                  <tr key={p.id}>
-                    <Td>{p.date || <span style={{ color: MUTED }}>—</span>}</Td>
-                    <Td>{p.item}</Td>
-                    <Td>{p.supplier || <span style={{ color: MUTED }}>—</span>}</Td>
-                    <Td>{p.qty} {p.unit || 'kg'}</Td>
-                    <Td>₹{p.cost.toLocaleString('en-IN')}</Td>
-                    <Td>{p.source || 'Manual'}</Td>
-                  </tr>
-                ))}
-                {purchasedList.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>{purchasedDate ? 'Nothing purchased on this date.' : 'No purchases recorded yet.'}</Td></tr>}
-              </tbody>
-            </table>
-          </Panel>
+      <Panel>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          <div>
+            <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
+              {PURCHASE_CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>STOCK BUFFER %</p>
+            <input
+              type="number"
+              placeholder="0"
+              value={bufferPercent}
+              onChange={(e) => setBufferPercent(e.target.value)}
+              style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 80 }}
+              title="Hide items whose stock already exceeds what's needed by more than this %"
+            />
+          </div>
+          {hasActiveFilters && (
+            <button onClick={clearFilters} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer', paddingBottom: 8 }}>Clear filters</button>
+          )}
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={() => setView('purchased')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            Purchased ({allPurchasedCount})
+          </button>
         </div>
+        <p style={{ margin: '10px 0 0', fontSize: 11, color: MUTED }}>
+          Items are hidden below once stock covers demand plus the buffer % — they don't need buying right now.
+        </p>
+      </Panel>
 
-        <ItemDetailPanel />
-      </div>
+      {view === 'purchased' ? (
+        <Panel>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <button onClick={() => setView('list')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0 }}>
+              <ArrowLeft size={15} /> Back
+            </button>
+            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Purchased{purchasedDate ? ` on ${purchasedDate}` : ''} ({purchasedList.length})</p>
+            <div style={{ flex: 1 }} />
+            <input type="date" value={purchasedDate} onChange={(e) => setPurchasedDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+            {purchasedDate && (
+              <button onClick={() => setPurchasedDate('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
+            )}
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Date</Th><Th>Item</Th><Th>Supplier</Th><Th>Qty</Th><Th>Cost</Th><Th>Source</Th></tr></thead>
+            <tbody>
+              {purchasedList.map((p) => (
+                <tr key={p.id}>
+                  <Td>{p.date || <span style={{ color: MUTED }}>—</span>}</Td>
+                  <Td>{p.item}</Td>
+                  <Td>{p.supplier || <span style={{ color: MUTED }}>—</span>}</Td>
+                  <Td>{p.qty} {p.unit || 'kg'}</Td>
+                  <Td>₹{p.cost.toLocaleString('en-IN')}</Td>
+                  <Td>{p.source || 'Manual'}</Td>
+                </tr>
+              ))}
+              {purchasedList.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>{purchasedDate ? 'Nothing purchased on this date.' : 'No purchases recorded yet.'}</Td></tr>}
+            </tbody>
+          </table>
+        </Panel>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 18 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <Panel>
+              <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Items needing purchase ({filteredItems.length})</p>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><Th>Item</Th><Th>Category</Th><Th>Stock</Th><Th>To buy</Th></tr></thead>
+                <tbody>
+                  {filteredItems.map((it) => (
+                    <tr key={it.id} onClick={() => openItem(it.id)} style={{ cursor: 'pointer' }}>
+                      <Td style={{ fontWeight: 700, color: selectedItemId === it.id ? LEAF : INK }}>{it.name}</Td>
+                      <Td>{it.category}</Td>
+                      <Td>{it.stock} {it.unit}</Td>
+                      <Td style={{ color: TOMATO, fontWeight: 700 }}>{it.toBuy} {it.unit}</Td>
+                    </tr>
+                  ))}
+                  {filteredItems.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>No items match these filters.</Td></tr>}
+                </tbody>
+              </table>
+            </Panel>
+          </div>
+
+          <ItemDetailPanel />
+        </div>
+      )}
     </div>
   );
 }
@@ -2643,6 +2883,537 @@ function StockCountPanel({ items, stockCounts, onRecord }) {
           )}
         </tbody>
       </table>
+    </Panel>
+  );
+}
+
+function computeFinalPrice(basePrice, config) {
+  if (basePrice == null) return null;
+  const gradingPercent = config?.gradingPercent ?? 0;
+  const vendorMarginPercent = config?.vendorMarginPercent ?? 0;
+  const packaging = config?.packaging ?? 0;
+  const labour = config?.labour ?? 0;
+  const transportation = config?.transportation ?? 0;
+  const graded = basePrice * (1 + gradingPercent / 100);
+  return Math.round((graded * (1 + vendorMarginPercent / 100) + packaging + labour + transportation) * 100) / 100;
+}
+
+function buildLatestUnitPriceByItem(purchases) {
+  const map = {};
+  purchases
+    .filter((p) => p.type !== 'requirement' && p.qty > 0)
+    .forEach((p) => {
+      if (!map[p.item] || (p.date || '') >= (map[p.item].date || '')) {
+        map[p.item] = { date: p.date || '', unitPrice: p.cost / p.qty };
+      }
+    });
+  return map;
+}
+
+// One entry per distinct article that has come through an indent — same product can have
+// several pack sizes (e.g. 500g "Baby Banana" vs 600g "Banana 3pc"), each priced separately.
+// Shared by the Pricing tab and the Profit & Loss tab so both agree on cost.
+function buildPricingArticles(orders, items, purchases) {
+  const latestUnitPriceByItem = buildLatestUnitPriceByItem(purchases);
+  const map = {};
+  orders
+    .filter((o) => o.packSize && o.packUnit)
+    .forEach((o) => {
+      const key = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      if (map[key]) return;
+      const item = items.find((it) => it.name === o.product);
+      const unitPriceInfo = latestUnitPriceByItem[o.product];
+      const basePrice = unitPriceInfo ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100 : null;
+      const alias = (item?.aliases || []).find((al) => al.channel === o.platform && String(al.packSize) === String(o.packSize) && al.packUnit === o.packUnit);
+      map[key] = {
+        key,
+        articleName: o.articleName || o.product,
+        product: o.product,
+        category: item?.category || '',
+        platform: o.platform,
+        code: alias?.code || '',
+        packSize: o.packSize,
+        packUnit: o.packUnit,
+        basePrice,
+      };
+    });
+  return Object.values(map).sort((a, b) => a.articleName.localeCompare(b.articleName));
+}
+
+function PricingRow({ article, config, onUpdate }) {
+  const [grading, setGrading] = useState(String(config?.gradingPercent ?? 0));
+  const [vendorMargin, setVendorMargin] = useState(String(config?.vendorMarginPercent ?? 0));
+  const [packaging, setPackaging] = useState(String(config?.packaging ?? 0));
+  const [labour, setLabour] = useState(String(config?.labour ?? 0));
+  const [transportation, setTransportation] = useState(String(config?.transportation ?? 0));
+
+  useEffect(() => {
+    setGrading(String(config?.gradingPercent ?? 0));
+    setVendorMargin(String(config?.vendorMarginPercent ?? 0));
+    setPackaging(String(config?.packaging ?? 0));
+    setLabour(String(config?.labour ?? 0));
+    setTransportation(String(config?.transportation ?? 0));
+  }, [config]);
+
+  const commit = (field, value) => onUpdate(article.key, { [field]: Number(value) || 0 });
+
+  const basePrice = article.basePrice;
+  const finalPrice = computeFinalPrice(basePrice, {
+    gradingPercent: Number(grading) || 0,
+    vendorMarginPercent: Number(vendorMargin) || 0,
+    packaging: Number(packaging) || 0,
+    labour: Number(labour) || 0,
+    transportation: Number(transportation) || 0,
+  });
+
+  const cellInput = (value, setValue, field) => (
+    <input
+      type="number"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={(e) => commit(field, e.target.value)}
+      style={{ width: 68, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
+    />
+  );
+
+  return (
+    <tr>
+      <Td style={{ fontWeight: 700 }}>{article.articleName}</Td>
+      <Td>{article.code || <span style={{ color: MUTED }}>—</span>}</Td>
+      <Td>{article.packSize}{article.packUnit}/pack</Td>
+      <Td style={{ color: LEAF, fontWeight: 700 }}>{basePrice == null ? <span style={{ color: MUTED, fontWeight: 400 }}>No purchase yet</span> : `₹${basePrice.toFixed(2)}`}</Td>
+      <Td>{cellInput(grading, setGrading, 'gradingPercent')}</Td>
+      <Td>{cellInput(vendorMargin, setVendorMargin, 'vendorMarginPercent')}</Td>
+      <Td>{cellInput(packaging, setPackaging, 'packaging')}</Td>
+      <Td>{cellInput(labour, setLabour, 'labour')}</Td>
+      <Td>{cellInput(transportation, setTransportation, 'transportation')}</Td>
+      <Td style={{ fontWeight: 800, color: finalPrice == null ? MUTED : TOMATO }}>{finalPrice == null ? '—' : `₹${finalPrice.toFixed(2)}`}</Td>
+    </tr>
+  );
+}
+
+function downloadPricingSheet(rows) {
+  const sheetRows = rows.map((r) => ({
+    'Product Name': r.articleName,
+    'Category': r.category || '',
+    'Channel': r.platform,
+    'Channel Code (SKU)': r.code || '',
+    'UOM': `${r.packSize}${r.packUnit}/pack`,
+    'Base Price (₹)': r.basePrice ?? '',
+    'Grading %': r.gradingPercent ?? 0,
+    'Vendor Margin %': r.vendorMarginPercent ?? 0,
+    'Packaging (₹)': r.packaging ?? 0,
+    'Labour (₹)': r.labour ?? 0,
+    'Transportation (₹)': r.transportation ?? 0,
+    'Final Price (₹)': r.finalPrice ?? '',
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(sheetRows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Pricing');
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `fnv-pricing-sheet-${new Date().toISOString().split('T')[0]}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function PricingPanel({ orders, items, purchases, pricingConfig, onUpdate }) {
+  const [search, setSearch] = useState('');
+  const [channelFilter, setChannelFilter] = useState('ALL');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases), [orders, items, purchases]);
+
+  const configByKey = useMemo(() => {
+    const map = {};
+    pricingConfig.forEach((c) => { map[c.id] = c; });
+    return map;
+  }, [pricingConfig]);
+
+  const categoriesPresent = useMemo(() => ['ALL', ...Array.from(new Set(articles.map((a) => a.category).filter(Boolean)))], [articles]);
+
+  const filteredArticles = articles
+    .filter((a) => !search.trim() || a.articleName.toLowerCase().includes(search.trim().toLowerCase()))
+    .filter((a) => channelFilter === 'ALL' || a.platform === channelFilter)
+    .filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter);
+
+  const rowsForExport = filteredArticles.map((a) => {
+    const c = configByKey[a.key];
+    const gradingPercent = c?.gradingPercent ?? 0;
+    const vendorMarginPercent = c?.vendorMarginPercent ?? 0;
+    const packaging = c?.packaging ?? 0;
+    const labour = c?.labour ?? 0;
+    const transportation = c?.transportation ?? 0;
+    const finalPrice = computeFinalPrice(a.basePrice, { gradingPercent, vendorMarginPercent, packaging, labour, transportation });
+    return { ...a, gradingPercent, vendorMarginPercent, packaging, labour, transportation, finalPrice };
+  });
+
+  return (
+    <Panel>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <IndianRupee size={16} /> Pricing
+          </p>
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED, maxWidth: 640 }}>
+            Base price is fetched automatically from the item's latest purchase price × pack size — e.g. Tomato at ₹50/kg with a 500g pack gives a ₹25 base price. Grading % and vendor margin % both apply on top of the base price; packaging, labour and transportation are flat amounts added after — all editable per article.
+          </p>
+        </div>
+        <button
+          onClick={() => downloadPricingSheet(rowsForExport)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >
+          <Download size={14} /> Download pricing sheet
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SEARCH</p>
+          <input
+            placeholder="Search article..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0 }}
+          />
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => setChannelFilter('ALL')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${channelFilter === 'ALL' ? LEAF : LINE}`, background: channelFilter === 'ALL' ? LEAF : '#fff', color: channelFilter === 'ALL' ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>All</button>
+            {PLATFORMS.map((p) => (
+              <button key={p} onClick={() => setChannelFilter(p)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${channelFilter === p ? LEAF : LINE}`, background: channelFilter === p ? LEAF : '#fff', color: channelFilter === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{p}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
+            {categoriesPresent.map((c) => <option key={c} value={c}>{c === 'ALL' ? 'All' : c}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <Th>Product name</Th><Th>Channel code (SKU)</Th><Th>UOM</Th><Th>Base price</Th><Th>Grading %</Th><Th>Vendor margin %</Th><Th>Packaging</Th><Th>Labour</Th><Th>Transportation</Th><Th>Final price</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredArticles.map((a) => (
+            <PricingRow key={a.key} article={a} config={configByKey[a.key]} onUpdate={onUpdate} />
+          ))}
+          {filteredArticles.length === 0 && (
+            <tr><Td colSpan={10} style={{ textAlign: 'center', color: MUTED }}>No indent-imported articles match this filter.</Td></tr>
+          )}
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
+function parseGrnRows(json) {
+  return json
+    .map((r) => {
+      const code = String(pickField(r, ['code', 'sku', 'itemcode', 'articlecode', 'fsn']) || '').trim();
+      const name = String(pickField(r, ['itemname', 'name', 'article', 'product', 'description']) || '').trim();
+      const qty = Number(pickField(r, ['receivedqty', 'qty', 'quantity', 'accepted']) || 0);
+      const price = Number(pickField(r, ['price', 'rate', 'unitprice', 'unitrate']) || 0);
+      return { code, name, qty, price };
+    })
+    .filter((r) => (r.code || r.name) && r.qty > 0);
+}
+
+function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGrn }) {
+  const [expanded, setExpanded] = useState(false);
+  const [fileError, setFileError] = useState('');
+  const fileInputRef = useRef(null);
+
+  const totalDispatchQty = records.reduce((s, r) => s + (r.dispatchQty || 0), 0);
+  const totalDispatchValue = records.reduce((s, r) => s + (r.cost || 0), 0);
+
+  const handleGrnFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setFileError('');
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        const rows = parseGrnRows(json);
+        if (rows.length === 0) {
+          setFileError('No rows with a valid code/name and received quantity were found in this file.');
+          return;
+        }
+        onUploadGrn(channel, day.date, file.name, rows);
+      } catch (err) {
+        setFileError('Could not read this file. Please upload a valid .xlsx, .xls, or .csv GRN report.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const latestGrn = grnReportsForDay[0];
+  const grnComparison = useMemo(() => {
+    if (!latestGrn) return [];
+    const ours = {};
+    records.forEach((r) => {
+      const k = (r.code || r.articleName).toLowerCase();
+      ours[k] = ours[k] || { articleName: r.articleName, code: r.code, qty: 0, cost: 0, lastPrice: r.finalPricePerPack };
+      ours[k].qty += r.packsDispatched;
+      ours[k].cost += r.cost || 0;
+    });
+    return latestGrn.rows.map((g) => {
+      const k = (g.code || g.name).toLowerCase();
+      const match = ours[k];
+      const ourQty = match?.qty || 0;
+      const ourPrice = match?.lastPrice ?? null;
+      const ourCost = match?.cost || 0;
+      const grnCost = g.qty * g.price;
+      return {
+        key: k,
+        articleName: match?.articleName || g.name || g.code,
+        code: g.code,
+        grnQty: g.qty,
+        ourQty: Math.round(ourQty * 100) / 100,
+        qtyDiff: Math.round((g.qty - ourQty) * 100) / 100,
+        grnPrice: g.price,
+        ourPrice,
+        priceDiff: ourPrice == null ? null : Math.round((g.price - ourPrice) * 100) / 100,
+        grnCost: Math.round(grnCost * 100) / 100,
+        ourCost: Math.round(ourCost * 100) / 100,
+        costDiff: Math.round((grnCost - ourCost) * 100) / 100,
+      };
+    });
+  }, [latestGrn, records]);
+
+  return (
+    <div style={{ border: `1px solid ${expanded ? LEAF : LINE}`, borderRadius: 12, overflow: 'hidden', marginBottom: 10 }}>
+      <div
+        onClick={() => setExpanded((x) => !x)}
+        style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr auto', gap: 14, alignItems: 'center', padding: '14px 18px', background: expanded ? '#F6F3EA' : '#fff', cursor: 'pointer' }}
+      >
+        <div>
+          <p style={{ margin: 0, fontWeight: 800, fontSize: 14, color: INK }}>{day.date}</p>
+          <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{channel}</p>
+        </div>
+        <div>
+          <p style={{ margin: 0, fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL INDENT QTY</p>
+          <p style={{ margin: '2px 0 0', fontWeight: 700, fontSize: 13, color: INK }}>{day.totalIndentQty}</p>
+        </div>
+        <div>
+          <p style={{ margin: 0, fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL DISPATCH</p>
+          <p style={{ margin: '2px 0 0', fontWeight: 700, fontSize: 13, color: INK }}>{Math.round(totalDispatchQty * 100) / 100}</p>
+        </div>
+        <div>
+          <p style={{ margin: 0, fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL DISPATCH VALUE</p>
+          <p style={{ margin: '2px 0 0', fontWeight: 800, fontSize: 13, color: TOMATO }}>₹{totalDispatchValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+        </div>
+        <ChevronRight size={16} color={MUTED} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+      </div>
+
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${LINE}`, padding: '16px 18px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 18 }}>
+            <thead><tr><Th>Article</Th><Th>Code</Th><Th>Qty dispatched</Th><Th>Packs</Th><Th>Price/pack</Th><Th>Actual cost</Th></tr></thead>
+            <tbody>
+              {records.map((r, i) => (
+                <tr key={i}>
+                  <Td style={{ fontWeight: 700 }}>{r.articleName}</Td>
+                  <Td>{r.code || <span style={{ color: MUTED }}>—</span>}</Td>
+                  <Td>{r.dispatchQty} {r.unit}</Td>
+                  <Td>{r.packsDispatched}</Td>
+                  <Td>{r.finalPricePerPack == null ? <span style={{ color: MUTED }}>No price yet</span> : `₹${r.finalPricePerPack.toFixed(2)}`}</Td>
+                  <Td style={{ fontWeight: 700, color: r.cost == null ? MUTED : LEAF }}>{r.cost == null ? '—' : `₹${r.cost.toFixed(2)}`}</Td>
+                </tr>
+              ))}
+              {records.length === 0 && (
+                <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>No dispatches priced for this day.</Td></tr>
+              )}
+            </tbody>
+          </table>
+
+          <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14 }}>
+            <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Upload GRN report — {channel}, {day.date}</p>
+            <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
+              Upload the channel's Goods Received Note for this day (item code/name, received qty, received price) to compare against our calculated numbers.
+            </p>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
+            >
+              <Upload size={14} /> Upload GRN report for {day.date}
+            </button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleGrnFile} style={{ display: 'none' }} />
+            {fileError && (
+              <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 10px' }}>
+                <AlertCircle size={13} /> {fileError}
+              </p>
+            )}
+
+            {latestGrn && (
+              <>
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: MUTED }}>
+                  Comparing against latest upload: <strong style={{ color: INK }}>{latestGrn.fileName}</strong>
+                </p>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr><Th>Article</Th><Th>GRN qty</Th><Th>Our qty</Th><Th>Qty diff</Th><Th>GRN price</Th><Th>Our price</Th><Th>Price diff</Th><Th>Cost diff</Th></tr>
+                  </thead>
+                  <tbody>
+                    {grnComparison.map((c) => (
+                      <tr key={c.key}>
+                        <Td style={{ fontWeight: 700 }}>{c.articleName}</Td>
+                        <Td>{c.grnQty}</Td>
+                        <Td>{c.ourQty}</Td>
+                        <Td style={{ color: c.qtyDiff !== 0 ? TOMATO : LEAF, fontWeight: 700 }}>{c.qtyDiff > 0 ? `+${c.qtyDiff}` : c.qtyDiff}</Td>
+                        <Td>₹{c.grnPrice.toFixed(2)}</Td>
+                        <Td>{c.ourPrice == null ? <span style={{ color: MUTED }}>—</span> : `₹${c.ourPrice.toFixed(2)}`}</Td>
+                        <Td style={{ color: c.priceDiff && c.priceDiff !== 0 ? TOMATO : LEAF, fontWeight: 700 }}>{c.priceDiff == null ? '—' : (c.priceDiff > 0 ? `+₹${c.priceDiff.toFixed(2)}` : `₹${c.priceDiff.toFixed(2)}`)}</Td>
+                        <Td style={{ color: c.costDiff !== 0 ? TOMATO : LEAF, fontWeight: 800 }}>{c.costDiff > 0 ? `+₹${c.costDiff.toFixed(2)}` : `₹${c.costDiff.toFixed(2)}`}</Td>
+                      </tr>
+                    ))}
+                    {grnComparison.length === 0 && (
+                      <tr><Td colSpan={8} style={{ textAlign: 'center', color: MUTED }}>No matching rows.</Td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfitLossPanel({ orders, items, purchases, pricingConfig, dispatchLog, grnReports, onUploadGrn }) {
+  const [channel, setChannel] = useState(PLATFORMS[0]);
+
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases), [orders, items, purchases]);
+  const articlesByKey = useMemo(() => {
+    const map = {};
+    articles.forEach((a) => { map[a.key] = a; });
+    return map;
+  }, [articles]);
+  const configByKey = useMemo(() => {
+    const map = {};
+    pricingConfig.forEach((c) => { map[c.id] = c; });
+    return map;
+  }, [pricingConfig]);
+
+  // Turn every dispatched line item into an actual-cost record, priced from the Pricing tab.
+  const records = useMemo(() => {
+    const out = [];
+    dispatchLog.forEach((log) => {
+      (log.items || []).forEach((it) => {
+        const order = orders.find((o) => o.id === it.orderId);
+        const platform = it.platform || order?.platform;
+        const baseProduct = it.baseProduct || order?.product;
+        const packSize = it.packSize || order?.packSize;
+        const packUnit = it.packUnit || order?.packUnit;
+        if (!platform || !baseProduct || !packSize || !packUnit) return; // can't price non-indent orders here
+        const key = `${baseProduct}__${platform}__${packSize}__${packUnit}`;
+        const article = articlesByKey[key];
+        const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key]) : null;
+        const packsDispatched = Math.round((it.dispatchQty / packSize) * 100) / 100;
+        const cost = finalPricePerPack == null ? null : Math.round(packsDispatched * finalPricePerPack * 100) / 100;
+        out.push({
+          date: log.date || '—',
+          channel: platform,
+          articleName: it.product,
+          code: article?.code || '',
+          dispatchQty: it.dispatchQty,
+          unit: it.unit,
+          packsDispatched,
+          finalPricePerPack,
+          cost,
+        });
+      });
+    });
+    return out;
+  }, [dispatchLog, orders, articlesByKey, configByKey]);
+
+  // Total indent (demand) qty per day, from orders' own fulfilment date — independent of dispatch.
+  const indentQtyByDate = useMemo(() => {
+    const map = {};
+    orders
+      .filter((o) => o.platform === channel && o.fulfilmentDate)
+      .forEach((o) => { map[o.fulfilmentDate] = (map[o.fulfilmentDate] || 0) + o.qty; });
+    return map;
+  }, [orders, channel]);
+
+  const channelRecords = records.filter((r) => r.channel === channel);
+
+  const days = useMemo(() => {
+    const dateSet = new Set([
+      ...channelRecords.map((r) => r.date),
+      ...Object.keys(indentQtyByDate),
+    ]);
+    return Array.from(dateSet)
+      .sort((a, b) => b.localeCompare(a))
+      .map((date) => ({
+        date,
+        totalIndentQty: Math.round((indentQtyByDate[date] || 0) * 100) / 100,
+        records: channelRecords.filter((r) => r.date === date),
+      }));
+  }, [channelRecords, indentQtyByDate]);
+
+  const channelTotalValue = channelRecords.reduce((s, r) => s + (r.cost || 0), 0);
+
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <TrendingUp size={16} /> Profit &amp; Loss
+      </p>
+      <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED, maxWidth: 680 }}>
+        Each day is its own row — total indent qty, total dispatched, and total dispatch value (calculated from the Pricing tab). Click a day to see the article breakdown and upload that day's GRN report.
+      </p>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {PLATFORMS.map((p) => (
+            <button
+              key={p}
+              onClick={() => setChannel(p)}
+              style={{ padding: '9px 18px', borderRadius: 8, border: `1px solid ${channel === p ? LEAF : LINE}`, background: channel === p ? LEAF : '#fff', color: channel === p ? '#fff' : INK, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>{channel.toUpperCase()} TOTAL DISPATCH VALUE</p>
+          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: TOMATO }}>₹{channelTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr auto', gap: 14, padding: '0 18px 8px', fontSize: 10, color: MUTED, fontWeight: 700 }}>
+        <div>DATE / CHANNEL</div><div>TOTAL INDENT QTY</div><div>TOTAL DISPATCH</div><div>TOTAL DISPATCH VALUE</div><div />
+      </div>
+
+      {days.map((day) => (
+        <ProfitLossDayCard
+          key={day.date}
+          day={day}
+          channel={channel}
+          records={day.records}
+          grnReportsForDay={grnReports.filter((g) => g.channel === channel && g.date === day.date).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''))}
+          onUploadGrn={onUploadGrn}
+        />
+      ))}
+      {days.length === 0 && (
+        <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No {channel} indents or dispatches yet.</p>
+      )}
     </Panel>
   );
 }
@@ -2800,6 +3571,43 @@ function PackagingPanel({ orders, onAdvanceMany, packingProgress, onUpdatePacked
   );
 }
 
+function DispatchModal({ selectedCount, crates, onClose, onConfirm }) {
+  const [vehicleNo, setVehicleNo] = useState('');
+  const [driverName, setDriverName] = useState('');
+  const [cratesUsed, setCratesUsed] = useState('');
+  const [boxesUsed, setBoxesUsed] = useState('');
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 28, width: 440, maxWidth: '92vw', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <p style={{ margin: 0, fontWeight: 800, fontSize: 17, color: INK, display: 'flex', alignItems: 'center', gap: 8 }}><TruckIcon size={17} /> Dispatch order</p>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        </div>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>{selectedCount} order(s) selected</p>
+        <input placeholder="Vehicle number" value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} style={inputStyle} />
+        <input placeholder="Driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} style={inputStyle} />
+        <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+          <input placeholder={`Crates (${crates.crates} in stock)`} type="number" value={cratesUsed} onChange={(e) => setCratesUsed(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+          <input placeholder={`Boxes (${crates.boxes} in stock)`} type="number" value={boxesUsed} onChange={(e) => setBoxesUsed(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+        </div>
+        <p style={{ margin: '2px 0 16px', fontSize: 10, color: MUTED }}>Crate/box counts will be deducted from stock automatically.</p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => onConfirm({ vehicleNo: vehicleNo.trim(), driverName: driverName.trim(), cratesUsed: Number(cratesUsed) || 0, boxesUsed: Number(boxesUsed) || 0 })}
+            style={{ flex: 1, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+          >
+            Confirm dispatch
+          </button>
+          <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch }) {
   const pending = orders.filter((o) => o.status === 'pending');
   const packed = useMemo(() => orders
@@ -2808,13 +3616,12 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
   [orders]);
   const dispatched = orders.filter((o) => o.status === 'dispatched');
 
+  const [view, setView] = useState('dispatch'); // 'dispatch' | 'history' | 'all'
   const [selected, setSelected] = useState([]);
   const [dispatchQtyById, setDispatchQtyById] = useState({});
   const [shortQtyById, setShortQtyById] = useState({});
-  const [vehicleNo, setVehicleNo] = useState('');
-  const [driverName, setDriverName] = useState('');
-  const [cratesUsed, setCratesUsed] = useState('');
-  const [boxesUsed, setBoxesUsed] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [awaitingOpen, setAwaitingOpen] = useState(false);
 
   const dispatchQtyFor = (o) => dispatchQtyById[o.id] !== undefined ? dispatchQtyById[o.id] : String(o.remaining);
   const shortQtyFor = (o) => shortQtyById[o.id] !== undefined ? shortQtyById[o.id] : '';
@@ -2822,7 +3629,7 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
   const toggleSelect = (id) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const submitDispatch = () => {
+  const submitDispatch = ({ vehicleNo, driverName, cratesUsed, boxesUsed }) => {
     if (selected.length === 0) return;
     const items = selected.map((id) => {
       const o = packed.find((x) => x.id === id);
@@ -2832,125 +3639,136 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
         shortQty: shortQtyById[id] || 0,
       };
     });
-    onDispatchBatch({
-      items,
-      vehicleNo: vehicleNo.trim(),
-      driverName: driverName.trim(),
-      cratesUsed: Number(cratesUsed) || 0,
-      boxesUsed: Number(boxesUsed) || 0,
-    });
+    onDispatchBatch({ items, vehicleNo, driverName, cratesUsed, boxesUsed });
     setSelected([]);
     setDispatchQtyById({});
     setShortQtyById({});
-    setVehicleNo('');
-    setDriverName('');
-    setCratesUsed('');
-    setBoxesUsed('');
+    setShowModal(false);
   };
+
+  const tabBtn = (key, label, count) => (
+    <button
+      onClick={() => setView(key)}
+      style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${view === key ? LEAF : LINE}`, background: view === key ? LEAF : '#fff', color: view === key ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+    >
+      {label}{count !== undefined ? ` (${count})` : ''}
+    </button>
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {pending.length > 0 && (
+      <div style={{ display: 'flex', gap: 8 }}>
+        {tabBtn('dispatch', 'Dispatch')}
+        {tabBtn('history', 'Dispatch history', dispatchLog.length)}
+        {tabBtn('all', 'All dispatched', dispatched.length)}
+      </div>
+
+      {view === 'dispatch' && (
+        <>
+          {pending.length > 0 && (
+            <Panel>
+              <div
+                onClick={() => setAwaitingOpen((x) => !x)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+              >
+                <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Awaiting packing</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ background: '#FBEFDC', color: AMBER, fontWeight: 800, fontSize: 13, padding: '3px 10px', borderRadius: 999 }}>{pending.length}</span>
+                  <ChevronRight size={16} color={MUTED} style={{ transform: awaitingOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+                </div>
+              </div>
+              {awaitingOpen && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+                  <thead><tr><Th>Order ID</Th><Th>Product</Th><Th>Qty</Th><Th /></tr></thead>
+                  <tbody>
+                    {pending.map((o) => (
+                      <tr key={o.id}>
+                        <Td>{o.id}</Td><Td>{o.articleName || o.product}</Td><Td>{o.qty} {o.unit}</Td>
+                        <Td>
+                          <button onClick={() => onAdvance(o.id, 'packed')} style={{ background: '#E6F1FB', color: '#1B5E8C', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                            Mark packed
+                          </button>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Panel>
+          )}
+
+          <Panel>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4, flexWrap: 'wrap', gap: 10 }}>
+              <div>
+                <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Packed — ready to dispatch ({packed.length})</p>
+                <p style={{ margin: 0, fontSize: 11, color: MUTED }}>
+                  Dispatch qty defaults to what's left on the order — lower it if only part is going out now. Whatever isn't dispatched stays "packed" for the next trip, unless you mark it short.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowModal(true)}
+                disabled={selected.length === 0}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, background: selected.length === 0 ? '#C9C2AE' : TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontWeight: 700, fontSize: 13, cursor: selected.length === 0 ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+              >
+                <TruckIcon size={14} /> Dispatch order{selected.length > 0 ? ` (${selected.length})` : ''}
+              </button>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+              <thead><tr><Th /><Th>Order ID</Th><Th>Product</Th><Th>Remaining</Th><Th>Dispatch qty</Th><Th>Short qty</Th></tr></thead>
+              <tbody>
+                {packed.map((o) => (
+                  <tr key={o.id}>
+                    <Td>
+                      <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelect(o.id)} />
+                    </Td>
+                    <Td>{o.id}</Td>
+                    <Td>{o.articleName || o.product}</Td>
+                    <Td style={{ fontWeight: 700 }}>{o.remaining} {o.unit}</Td>
+                    <Td>
+                      <input
+                        type="number"
+                        value={dispatchQtyFor(o)}
+                        onChange={(e) => setDispatchQtyById((p) => ({ ...p, [o.id]: e.target.value }))}
+                        style={{ width: 64, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
+                      />
+                    </Td>
+                    <Td>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={shortQtyFor(o)}
+                        onChange={(e) => setShortQtyById((p) => ({ ...p, [o.id]: e.target.value }))}
+                        style={{ width: 64, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${Number(shortQtyFor(o)) > 0 ? TOMATO : LINE}`, fontSize: 12, padding: '5px 6px', color: Number(shortQtyFor(o)) > 0 ? TOMATO : INK }}
+                      />
+                    </Td>
+                  </tr>
+                ))}
+                {packed.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>Nothing packed yet.</Td></tr>}
+              </tbody>
+            </table>
+          </Panel>
+        </>
+      )}
+
+      {view === 'history' && (
         <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Awaiting packing ({pending.length})</p>
+          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Dispatch history ({dispatchLog.length})</p>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Order ID</Th><Th>Product</Th><Th>Qty</Th><Th /></tr></thead>
+            <thead><tr><Th>Dispatch ID</Th><Th>Vehicle</Th><Th>Driver</Th><Th>Orders</Th><Th>Crates</Th><Th>Boxes</Th><Th>Time</Th></tr></thead>
             <tbody>
-              {pending.map((o) => (
-                <tr key={o.id}>
-                  <Td>{o.id}</Td><Td>{o.articleName || o.product}</Td><Td>{o.qty} {o.unit}</Td>
-                  <Td>
-                    <button onClick={() => onAdvance(o.id, 'packed')} style={{ background: '#E6F1FB', color: '#1B5E8C', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                      Mark packed
-                    </button>
-                  </Td>
+              {dispatchLog.map((d) => (
+                <tr key={d.id}>
+                  <Td>{d.id}</Td><Td>{d.vehicleNo}</Td><Td>{d.driverName}</Td>
+                  <Td>{(d.items || d.orderIds || []).length}</Td><Td>{d.cratesUsed}</Td><Td>{d.boxesUsed}</Td><Td>{d.time}</Td>
                 </tr>
               ))}
+              {dispatchLog.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No dispatches yet.</Td></tr>}
             </tbody>
           </table>
         </Panel>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 18 }}>
-        <Panel>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Packed — ready to dispatch ({packed.length})</p>
-          <p style={{ margin: '0 0 12px', fontSize: 11, color: MUTED }}>
-            Dispatch qty defaults to what's left on the order — lower it if only part is going out now. Whatever isn't dispatched stays "packed" for the next trip, unless you mark it short.
-          </p>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th /><Th>Order ID</Th><Th>Product</Th><Th>Remaining</Th><Th>Dispatch qty</Th><Th>Short qty</Th></tr></thead>
-            <tbody>
-              {packed.map((o) => (
-                <tr key={o.id}>
-                  <Td>
-                    <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelect(o.id)} />
-                  </Td>
-                  <Td>{o.id}</Td>
-                  <Td>{o.articleName || o.product}</Td>
-                  <Td style={{ fontWeight: 700 }}>{o.remaining} {o.unit}</Td>
-                  <Td>
-                    <input
-                      type="number"
-                      value={dispatchQtyFor(o)}
-                      onChange={(e) => setDispatchQtyById((p) => ({ ...p, [o.id]: e.target.value }))}
-                      style={{ width: 64, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
-                    />
-                  </Td>
-                  <Td>
-                    <input
-                      type="number"
-                      placeholder="0"
-                      value={shortQtyFor(o)}
-                      onChange={(e) => setShortQtyById((p) => ({ ...p, [o.id]: e.target.value }))}
-                      style={{ width: 64, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${Number(shortQtyFor(o)) > 0 ? TOMATO : LINE}`, fontSize: 12, padding: '5px 6px', color: Number(shortQtyFor(o)) > 0 ? TOMATO : INK }}
-                    />
-                  </Td>
-                </tr>
-              ))}
-              {packed.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>Nothing packed yet.</Td></tr>}
-            </tbody>
-          </table>
-        </Panel>
-
-        <Panel style={{ alignSelf: 'start' }}>
-          <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <TruckIcon size={14} /> Create dispatch
-          </p>
-          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>{selected.length} order(s) selected</p>
-          <input placeholder="Vehicle number" value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} style={inputStyle} />
-          <input placeholder="Driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} style={inputStyle} />
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-            <input placeholder={`Crates (${crates.crates} in stock)`} type="number" value={cratesUsed} onChange={(e) => setCratesUsed(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-            <input placeholder={`Boxes (${crates.boxes} in stock)`} type="number" value={boxesUsed} onChange={(e) => setBoxesUsed(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-          </div>
-          <p style={{ margin: '2px 0 10px', fontSize: 10, color: MUTED }}>Crate/box counts will be deducted from stock automatically.</p>
-          <button
-            onClick={submitDispatch}
-            disabled={selected.length === 0}
-            style={{ width: '100%', background: selected.length === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: selected.length === 0 ? 'default' : 'pointer' }}
-          >
-            Dispatch {selected.length || ''} order{selected.length !== 1 ? 's' : ''}
-          </button>
-        </Panel>
-      </div>
-
-      <Panel>
-        <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Dispatch history ({dispatchLog.length})</p>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Dispatch ID</Th><Th>Vehicle</Th><Th>Driver</Th><Th>Orders</Th><Th>Crates</Th><Th>Boxes</Th><Th>Time</Th></tr></thead>
-          <tbody>
-            {dispatchLog.map((d) => (
-              <tr key={d.id}>
-                <Td>{d.id}</Td><Td>{d.vehicleNo}</Td><Td>{d.driverName}</Td>
-                <Td>{(d.items || d.orderIds || []).length}</Td><Td>{d.cratesUsed}</Td><Td>{d.boxesUsed}</Td><Td>{d.time}</Td>
-              </tr>
-            ))}
-            {dispatchLog.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No dispatches yet.</Td></tr>}
-          </tbody>
-        </table>
-      </Panel>
-
-      {dispatched.length > 0 && (
+      {view === 'all' && (
         <Panel>
           <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>All dispatched orders ({dispatched.length})</p>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -2967,9 +3785,19 @@ function DispatchPanel({ orders, crates, dispatchLog, onAdvance, onDispatchBatch
                   </Td>
                 </tr>
               ))}
+              {dispatched.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>No dispatched orders yet.</Td></tr>}
             </tbody>
           </table>
         </Panel>
+      )}
+
+      {showModal && (
+        <DispatchModal
+          selectedCount={selected.length}
+          crates={crates}
+          onClose={() => setShowModal(false)}
+          onConfirm={submitDispatch}
+        />
       )}
     </div>
   );
