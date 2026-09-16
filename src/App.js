@@ -224,11 +224,29 @@ export default function AdminPanel() {
   // their own pack size (e.g. "Baby Banana" 500g vs "Banana 3pc" 600g, both on Blinkit,
   // both = item "Banana"). So each distinct article code gets its OWN alias entry —
   // never share one alias between two different codes on the same channel.
+  // A single article code must only ever belong to ONE item — if it's already an
+  // alias on a different item (e.g. someone picked the wrong item from a long
+  // dropdown once), transfer it here instead of letting two items share the same
+  // code, which makes future auto-matching pick whichever item happens to come first.
   const ensureAliasForCode = (itemId, channel, code) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
-    const exists = (it.aliases || []).some((a) => a.channel === channel && a.code && code && a.code.toLowerCase() === code.toLowerCase());
-    if (exists) return;
-    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code: code || '', packSize: '', packUnit: 'kg' }];
+    if (!code) {
+      const exists = (it.aliases || []).some((a) => a.channel === channel && !a.code);
+      if (exists) return;
+      fbUpdate('items', itemId, { aliases: [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: '', packUnit: 'kg' }] });
+      return;
+    }
+    const codeLower = code.toLowerCase();
+    const alreadyHere = (it.aliases || []).some((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
+    if (alreadyHere) return;
+    items.forEach((other) => {
+      if (other.id === itemId) return;
+      const hasIt = (other.aliases || []).some((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
+      if (hasIt) {
+        fbUpdate('items', other.id, { aliases: other.aliases.filter((a) => !(a.channel === channel && a.code && a.code.toLowerCase() === codeLower)) });
+      }
+    });
+    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code, packSize: '', packUnit: 'kg' }];
     fbUpdate('items', itemId, { aliases: nextAliases });
   };
   const updateAliasById = (itemId, aliasId, patch) => {
@@ -260,13 +278,14 @@ export default function AdminPanel() {
   };
 
   // ── GRN reports (Goods Received Note — uploaded per channel + day to reconcile) ─
-  const uploadGrnReport = (channel, date, fileName, rows) => {
+  const uploadGrnReport = (channel, date, fileName, rows, batchId) => {
     const id = `GRN-${channel.slice(0, 3).toUpperCase()}-${date}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: new Date().toISOString().split('T')[0], rows });
+    fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: new Date().toISOString().split('T')[0], rows, batchId: batchId || null });
   };
 
   // ── Indent batches ──────────────────────────────────────
   const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, batch);
+  const updateIndentBatch = (batchId, patch) => fbUpdate('indentBatches', batchId, patch);
   const updatePackedQty = (key, packedQty, orderIds, targetPacks) => {
     fbSetDoc('packingProgress', key, { packedQty });
     const complete = targetPacks > 0 && packedQty >= targetPacks;
@@ -369,7 +388,7 @@ export default function AdminPanel() {
       totalDispatchQty += dQty;
       logItems.push({
         orderId, product: o.articleName || o.product, unit: o.unit, dispatchQty: dQty, shortQty: sQty, remaining: Math.max(0, remaining),
-        platform: o.platform, baseProduct: o.product, packSize: o.packSize || null, packUnit: o.packUnit || null,
+        platform: o.platform, baseProduct: o.product, packSize: o.packSize || null, packUnit: o.packUnit || null, batchId: o.batchId || null,
       });
     });
     b.commit();
@@ -481,11 +500,11 @@ export default function AdminPanel() {
               onToggleReleaseBatch={toggleReleaseBatch}
             />
           )}
-          {tab === 'purchase' && <PurchasePanel purchases={purchases} orders={orders} items={items} recipes={recipes} vendors={vendors} vendorLedger={vendorLedger} totalSpend={totalSpend} stockCounts={stockCounts} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} />}
+          {tab === 'purchase' && <PurchasePanel purchases={purchases} orders={orders} items={items} recipes={recipes} vendors={vendors} vendorLedger={vendorLedger} totalSpend={totalSpend} stockCounts={stockCounts} indentBatches={indentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} />}
           {tab === 'stockcount' && <StockCountPanel items={items} stockCounts={stockCounts} onRecord={recordStockCount} />}
           {tab === 'pricing' && <PricingPanel orders={orders} items={items} purchases={purchases} pricingConfig={pricingConfig} onUpdate={updatePricingConfig} />}
-          {tab === 'profitloss' && <ProfitLossPanel orders={orders} items={items} purchases={purchases} pricingConfig={pricingConfig} dispatchLog={dispatchLog} grnReports={grnReports} onUploadGrn={uploadGrnReport} />}
-          {tab === 'packaging' && <PackagingPanel orders={orders} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
+          {tab === 'profitloss' && <ProfitLossPanel orders={orders} items={items} purchases={purchases} pricingConfig={pricingConfig} dispatchLog={dispatchLog} grnReports={grnReports} indentBatches={indentBatches} onUploadGrn={uploadGrnReport} onUpdateIndentBatch={updateIndentBatch} />}
+          {tab === 'packaging' && <PackagingPanel orders={orders} items={items} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
           {tab === 'dispatch' && <DispatchPanel orders={orders} items={items} crates={crates} dispatchLog={dispatchLog} onAdvance={advanceStatus} onDispatchBatch={dispatchBatch} />}
           {tab === 'crates' && <CratesPanel crates={crates} log={crateLog} onAdjust={adjustCrates} />}
           {tab === 'users' && (
@@ -1795,26 +1814,43 @@ function parseIndentRows(json) {
     .filter((r) => r.rawName && r.qty > 0);
 }
 
-function ReleaseBatchRow({ batch: b, onToggleReleaseBatch }) {
+function ReleaseBatchRow({ batch: b, orders, onToggleReleaseBatch }) {
   const [purchaseDate, setPurchaseDate] = useState(b.purchaseDate || '');
 
+  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === b.id), [orders, b.id]);
+  const articleCount = batchOrders.length;
+  const totalQty = batchOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0);
+  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, border: `1px solid ${LINE}`, borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
-      <div style={{ flex: 1, minWidth: 200 }}>
-        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>
-          {b.platform} indent — {b.fileName}
-        </p>
-        <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>
-          {b.compiled.map((c) => `${c.qty} ${c.unit} ${c.itemName}`).join(', ')}
-        </p>
+    <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: '12px 14px' }}>
+      <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: INK }}>
+        {b.platform} indent — {b.fileName}
+      </p>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ARTICLE QTY</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{articleCount}</p>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL QUANTITY</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{totalQty}</p>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{fulfilmentDate || '—'}</p>
+        </div>
         {b.released && b.purchaseDate && (
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: LEAF, fontWeight: 700 }}>Purchase date: {b.purchaseDate}</p>
-        )}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {!b.released && (
           <div>
             <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>PURCHASE DATE</p>
+            <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: LEAF }}>{b.purchaseDate}</p>
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {!b.released && (
+          <div>
+            <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>RELEASE DATE</p>
             <input
               type="date"
               value={purchaseDate}
@@ -1826,7 +1862,7 @@ function ReleaseBatchRow({ batch: b, onToggleReleaseBatch }) {
         <button
           onClick={() => onToggleReleaseBatch(b.id, purchaseDate)}
           disabled={!b.released && !purchaseDate}
-          title={!b.released && !purchaseDate ? 'Pick a purchase date first — some articles need buying a day or more before the fulfilment date.' : ''}
+          title={!b.released && !purchaseDate ? 'Pick a release date first — some articles need buying a day or more before the fulfilment date.' : ''}
           style={{
             background: b.released ? '#fff' : (!purchaseDate ? '#C9C2AE' : TOMATO),
             color: b.released ? TOMATO : '#fff',
@@ -1837,12 +1873,100 @@ function ReleaseBatchRow({ batch: b, onToggleReleaseBatch }) {
             fontWeight: 700,
             cursor: (!b.released && !purchaseDate) ? 'default' : 'pointer',
             whiteSpace: 'nowrap',
+            alignSelf: 'flex-end',
           }}
         >
           {b.released ? 'Withdraw from Purchase Manager' : 'Release to Purchase Manager'}
         </button>
       </div>
     </div>
+  );
+}
+
+function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
+      <div
+        onClick={() => setOpen((x) => !x)}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', cursor: 'pointer', background: open ? '#F6F3EA' : '#fff' }}
+      >
+        <div>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{label}</p>
+          {subtitle && <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{subtitle}</p>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {badge}
+          <span style={{ background: '#EAF3DE', color: LEAF_DARK, fontWeight: 800, fontSize: 12, padding: '3px 10px', borderRadius: 999 }}>{groupOrders.length}</span>
+          <ChevronRight size={16} color={MUTED} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+        </div>
+      </div>
+      {open && (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr><Th>Order ID</Th><Th>Platform</Th><Th>Product</Th><Th>Qty</Th><Th>UOM</Th><Th>Fulfilment date</Th><Th>Status</Th></tr>
+          </thead>
+          <tbody>
+            {groupOrders.map((o) => (
+              <tr key={o.id}>
+                <Td>{o.id}</Td>
+                <Td>{o.platform}</Td>
+                <Td>{o.articleName || o.product}</Td>
+                <Td>{o.qty}</Td>
+                <Td>{o.unit}</Td>
+                <Td>{o.fulfilmentDate || <span style={{ color: MUTED }}>—</span>}</Td>
+                <Td><StatusPill status={o.status} /></Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function OrdersListPanel({ orders, indentBatches }) {
+  const grouped = useMemo(() => {
+    const byBatch = {};
+    const manual = [];
+    orders.forEach((o) => {
+      if (o.batchId) {
+        byBatch[o.batchId] = byBatch[o.batchId] || [];
+        byBatch[o.batchId].push(o);
+      } else {
+        manual.push(o);
+      }
+    });
+    const batchGroups = indentBatches
+      .filter((b) => byBatch[b.id]?.length)
+      .map((b) => ({ batch: b, orders: byBatch[b.id] }));
+    // any orders whose batch record no longer exists still need to be shown somewhere
+    const knownBatchIds = new Set(indentBatches.map((b) => b.id));
+    const orphaned = Object.entries(byBatch).filter(([id]) => !knownBatchIds.has(id)).flatMap(([, os]) => os);
+    return { batchGroups, manual: [...manual, ...orphaned] };
+  }, [orders, indentBatches]);
+
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>All orders ({orders.length})</p>
+      {grouped.batchGroups.map(({ batch, orders: groupOrders }) => (
+        <OrderBatchGroup
+          key={batch.id}
+          label={`${batch.platform} indent — ${batch.fileName}`}
+          subtitle={batch.released ? `Released${batch.purchaseDate ? ` · purchase date ${batch.purchaseDate}` : ''}` : 'Not yet released'}
+          badge={
+            <span style={{ background: batch.released ? '#E6F1FB' : '#FBEFDC', color: batch.released ? '#1B5E8C' : AMBER, fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999 }}>
+              {batch.released ? 'Released' : 'Not released'}
+            </span>
+          }
+          orders={groupOrders}
+        />
+      ))}
+      {grouped.manual.length > 0 && (
+        <OrderBatchGroup label="Manually added orders" orders={grouped.manual} defaultOpen={grouped.batchGroups.length === 0} />
+      )}
+      {orders.length === 0 && <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No orders yet.</p>}
+    </Panel>
   );
 }
 
@@ -1962,6 +2086,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
     if (!pendingIndent) return;
     const remaining = [];
     const compiledMap = {};
+    const batchId = `BATCH-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     pendingIndent.rows.forEach((r) => {
       if (!isRowReady(r) || !selectedRowKeys.has(r.key)) {
         remaining.push(r);
@@ -1988,6 +2113,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
         packQty: r.qty,
         packSize,
         packUnit,
+        batchId,
       });
       const key = `${item.name}__${item.uom}`;
       if (!compiledMap[key]) compiledMap[key] = { itemName: item.name, unit: item.uom, qty: 0 };
@@ -1996,7 +2122,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
     const compiled = Object.values(compiledMap);
     if (compiled.length > 0) {
       onCreateIndentBatch({
-        id: `BATCH-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+        id: batchId,
         platform: pendingIndent.platform,
         fileName: pendingIndent.fileName,
         compiled,
@@ -2016,7 +2142,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
           <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Release to Purchase Manager</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {indentBatches.map((b) => (
-              <ReleaseBatchRow key={b.id} batch={b} onToggleReleaseBatch={onToggleReleaseBatch} />
+              <ReleaseBatchRow key={b.id} batch={b} orders={orders} onToggleReleaseBatch={onToggleReleaseBatch} />
             ))}
           </div>
         </Panel>
@@ -2198,26 +2324,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
           </button>
         </Panel>
 
-        <Panel>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr><Th>Order ID</Th><Th>Platform</Th><Th>Product</Th><Th>Qty</Th><Th>UOM</Th><Th>Fulfilment date</Th><Th>Status</Th></tr>
-            </thead>
-            <tbody>
-              {orders.map((o) => (
-                <tr key={o.id}>
-                  <Td>{o.id}</Td>
-                  <Td>{o.platform}</Td>
-                  <Td>{o.articleName || o.product}</Td>
-                  <Td>{o.qty}</Td>
-                  <Td>{o.unit}</Td>
-                  <Td>{o.fulfilmentDate || <span style={{ color: MUTED }}>—</span>}</Td>
-                  <Td><StatusPill status={o.status} /></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
+        <OrdersListPanel orders={orders} indentBatches={indentBatches} />
       </div>
     </div>
   );
@@ -2269,7 +2376,7 @@ function downloadPurchasePdf(rows) {
   };
 }
 
-function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, onAdd, onAddLedgerEntry }) {
+function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, indentBatches, onAdd, onAddLedgerEntry }) {
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [bufferPercent, setBufferPercent] = useState('0');
   const [view, setView] = useState('list'); // 'list' | 'purchased'
@@ -2357,8 +2464,13 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
   const neededByProduct = useMemo(() => {
     const map = {};
     const addDemand = (name, qty, unit) => { map[name] = map[name] || { needed: 0, unit }; map[name].needed += qty; };
+    // An order counts toward "needing purchase" once it's actually been released to
+    // Purchase Manager — orders with no batch (added manually) always count, since
+    // there's no release step for those.
+    const releasedBatchIds = new Set(indentBatches.filter((b) => b.released).map((b) => b.id));
     orders
       .filter((o) => o.status !== 'dispatched')
+      .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
       .forEach((o) => {
         const matchingRecipes = recipes.filter((r) => items.find((it) => it.id === r.outputItemId)?.name === o.product);
         if (matchingRecipes.length > 0) {
@@ -2375,7 +2487,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         }
       });
     return map;
-  }, [orders, recipes, items]);
+  }, [orders, recipes, items, indentBatches]);
 
   const filteredItems = useMemo(() => {
     const buffer = Number(bufferPercent) || 0;
@@ -2848,6 +2960,32 @@ function buildPricingArticles(orders, items, purchases) {
   return Object.values(map).sort((a, b) => a.articleName.localeCompare(b.articleName));
 }
 
+// One indent (batch) may have several articles that don't yet have a purchase price —
+// those are simply left out of the running cost until they do (this is what makes the
+// batch's total climb from "day one" partial toward a complete figure as purchases happen).
+function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
+  const batchOrders = orders.filter((o) => o.batchId === batch.id);
+  const rows = batchOrders.map((o) => {
+    const key = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+    const article = articlesByKey[key];
+    const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key]) : null;
+    const cost = finalPricePerPack == null ? null : Math.round(finalPricePerPack * (Number(o.packQty) || 0) * 100) / 100;
+    return {
+      orderId: o.id,
+      articleName: o.articleName || o.product,
+      code: article?.code || '',
+      packQty: Number(o.packQty) || 0,
+      packSize: o.packSize,
+      packUnit: o.packUnit,
+      finalPricePerPack,
+      cost,
+    };
+  });
+  const pricedRows = rows.filter((r) => r.cost != null);
+  const totalCost = Math.round(pricedRows.reduce((s, r) => s + r.cost, 0) * 100) / 100;
+  return { rows, totalCost, pricedCount: pricedRows.length, totalCount: rows.length };
+}
+
 function PricingRow({ article, config, onUpdate }) {
   const [grading, setGrading] = useState(String(config?.gradingPercent ?? 0));
   const [vendorMargin, setVendorMargin] = useState(String(config?.vendorMarginPercent ?? 0));
@@ -3276,8 +3414,252 @@ function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGr
   );
 }
 
-function ProfitLossPanel({ orders, items, purchases, pricingConfig, dispatchLog, grnReports, onUploadGrn }) {
+function IndentBatchCard({ batch, orders, articlesByKey, configByKey, onOpen }) {
+  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
+  const { totalCost, pricedCount, totalCount } = useMemo(
+    () => computeBatchArticleCosts(batch, orders, articlesByKey, configByKey),
+    [batch, orders, articlesByKey, configByKey]
+  );
+  const totalQty = batchOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0);
+  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
+
+  return (
+    <div
+      onClick={onOpen}
+      style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: '12px 14px', marginBottom: 10, cursor: 'pointer' }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{batch.platform} — {batch.fileName}</p>
+        <ChevronRight size={16} color={MUTED} />
+      </div>
+      <div style={{ display: 'flex', gap: 20, marginTop: 10, flexWrap: 'wrap' }}>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{batch.platform}</p>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{fulfilmentDate || '—'}</p>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ARTICLES</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{totalCount}</p>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL QUANTITY</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{totalQty}</p>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>EXPECTED COST SO FAR</p>
+          <p style={{ margin: 0, fontWeight: 800, fontSize: 13, color: TOMATO }}>
+            ₹{totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            <span style={{ fontWeight: 500, color: MUTED, fontSize: 11 }}> ({pricedCount}/{totalCount} priced)</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IndentBatchDetail({ batch, orders, articlesByKey, configByKey, grnReports, onUploadGrn, onUpdateIndentBatch, onBack }) {
+  const { rows, totalCost, pricedCount, totalCount } = useMemo(
+    () => computeBatchArticleCosts(batch, orders, articlesByKey, configByKey),
+    [batch, orders, articlesByKey, configByKey]
+  );
+  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
+  const totalQty = batchOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0);
+  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
+
+  const [poValue, setPoValue] = useState(batch.poValue != null ? String(batch.poValue) : '');
+  const [poFileName, setPoFileName] = useState(batch.poFileName || '');
+  const [poFileError, setPoFileError] = useState('');
+  const poFileInputRef = useRef(null);
+
+  const [grnFileError, setGrnFileError] = useState('');
+  const grnFileInputRef = useRef(null);
+
+  const savePoValue = () => {
+    onUpdateIndentBatch(batch.id, { poValue: Number(poValue) || 0, poFileName });
+  };
+
+  const handlePoFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPoFileError('');
+    setPoFileName(file.name);
+    e.target.value = '';
+  };
+
+  const projectedProfit = batch.poValue != null ? Math.round((batch.poValue - totalCost) * 100) / 100 : null;
+
+  const batchGrnReports = useMemo(
+    () => grnReports.filter((g) => g.batchId === batch.id).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || '')),
+    [grnReports, batch.id]
+  );
+  const latestGrn = batchGrnReports[0];
+
+  const grnComparison = useMemo(() => {
+    if (!latestGrn) return null;
+    const ownByCode = {};
+    rows.forEach((r) => {
+      const k = (r.code || r.articleName).toLowerCase();
+      ownByCode[k] = ownByCode[k] || { articleName: r.articleName, qty: 0, cost: 0 };
+      ownByCode[k].qty += r.packQty;
+      ownByCode[k].cost += r.cost || 0;
+    });
+    let grnValue = 0;
+    const matched = [];
+    latestGrn.rows.forEach((g) => {
+      const k = (g.code || g.name).toLowerCase();
+      if (!ownByCode[k]) return; // GRN rows outside this indent's own articles don't count here
+      const rowValue = Math.round(g.qty * g.price * 100) / 100;
+      grnValue += rowValue;
+      matched.push({ articleName: ownByCode[k].articleName || g.name, grnQty: g.qty, grnPrice: g.price, grnValue: rowValue });
+    });
+    return { grnValue: Math.round(grnValue * 100) / 100, matched };
+  }, [latestGrn, rows]);
+
+  const finalProfit = grnComparison ? Math.round((grnComparison.grnValue - totalCost) * 100) / 100 : null;
+
+  const handleGrnFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setGrnFileError('');
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      extractPdfText(file)
+        .then((text) => {
+          const parsedRows = parseGrnPdfText(text);
+          if (parsedRows.length === 0) { setGrnFileError('Could not find any GRN rows in this PDF.'); return; }
+          onUploadGrn(batch.platform, fulfilmentDate || new Date().toISOString().split('T')[0], file.name, parsedRows, batch.id);
+        })
+        .catch(() => setGrnFileError('Could not read this PDF. Please try again or use an Excel/CSV export instead.'));
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        const parsedRows = parseGrnRows(json);
+        if (parsedRows.length === 0) { setGrnFileError('No rows with a valid code/name and received quantity were found.'); return; }
+        onUploadGrn(batch.platform, fulfilmentDate || new Date().toISOString().split('T')[0], file.name, parsedRows, batch.id);
+      } catch (err) {
+        setGrnFileError('Could not read this file. Please upload a valid .xlsx, .xls, .csv, or .pdf GRN report.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  return (
+    <Panel>
+      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14 }}>
+        <ArrowLeft size={15} /> Back to indents
+      </button>
+
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 15, color: INK }}>{batch.platform} — {batch.fileName}</p>
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${LINE}` }}>
+        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>CHANNEL</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{batch.platform}</p></div>
+        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{fulfilmentDate || '—'}</p></div>
+        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ARTICLES</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{totalCount}</p></div>
+        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL QUANTITY</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{totalQty}</p></div>
+      </div>
+
+      <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: INK }}>Expected purchase cost ({pricedCount}/{totalCount} articles priced)</p>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
+        <thead><tr><Th>Article</Th><Th>Code</Th><Th>Packs</Th><Th>Price/pack</Th><Th>Cost</Th></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.orderId}>
+              <Td style={{ fontWeight: 700 }}>{r.articleName}</Td>
+              <Td>{r.code || <span style={{ color: MUTED }}>—</span>}</Td>
+              <Td>{r.packQty}</Td>
+              <Td>{r.finalPricePerPack == null ? <span style={{ color: MUTED }}>No price yet</span> : `₹${r.finalPricePerPack.toFixed(2)}`}</Td>
+              <Td style={{ fontWeight: 700, color: r.cost == null ? MUTED : LEAF }}>{r.cost == null ? '—' : `₹${r.cost.toFixed(2)}`}</Td>
+            </tr>
+          ))}
+          {rows.length === 0 && <tr><Td colSpan={5} style={{ textAlign: 'center', color: MUTED }}>No articles in this indent.</Td></tr>}
+        </tbody>
+      </table>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
+        <p style={{ margin: 0, fontWeight: 800, fontSize: 16, color: TOMATO }}>Total so far: ₹{totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+      </div>
+
+      <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 18, marginBottom: 18 }}>
+        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Purchase Order</p>
+        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED, maxWidth: 600 }}>
+          Attach the channel's PO for this indent (for your records), and enter its final billing value — we don't try to auto-read the amount off the PO file since formats vary a lot between channels.
+        </p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => poFileInputRef.current?.click()}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+          >
+            <Upload size={13} /> {poFileName || 'Attach PO file'}
+          </button>
+          <input ref={poFileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handlePoFile} style={{ display: 'none' }} />
+          <div>
+            <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>PO VALUE (₹)</p>
+            <input
+              type="number"
+              value={poValue}
+              onChange={(e) => setPoValue(e.target.value)}
+              style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 10px', width: 140 }}
+            />
+          </div>
+          <button onClick={savePoValue} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            Save
+          </button>
+        </div>
+        {poFileError && <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '10px 0 0' }}><AlertCircle size={13} /> {poFileError}</p>}
+
+        {projectedProfit != null && (
+          <div style={{ marginTop: 14, padding: '12px 16px', background: projectedProfit >= 0 ? '#EAF3DE' : '#F3E7E2', borderRadius: 10, display: 'inline-block' }}>
+            <p style={{ margin: 0, fontSize: 11, color: MUTED, fontWeight: 700 }}>PROJECTED {projectedProfit >= 0 ? 'PROFIT' : 'LOSS'}</p>
+            <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: projectedProfit >= 0 ? LEAF_DARK : TOMATO }}>₹{Math.abs(projectedProfit).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 18 }}>
+        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>GRN report for this indent</p>
+        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
+          Upload the channel's GRN once it's received — the Blinkit/Hyperpure PDF works directly, or an Excel/CSV export — to lock in the final profit/loss for this indent.
+        </p>
+        <button
+          onClick={() => grnFileInputRef.current?.click()}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
+        >
+          <Upload size={14} /> Upload GRN report
+        </button>
+        <input ref={grnFileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
+        {grnFileError && <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 10px' }}><AlertCircle size={13} /> {grnFileError}</p>}
+
+        {latestGrn && grnComparison && (
+          <>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: MUTED }}>
+              Latest upload: <strong style={{ color: INK }}>{latestGrn.fileName}</strong> — matched value ₹{grnComparison.grnValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </p>
+            {finalProfit != null && (
+              <div style={{ padding: '12px 16px', background: finalProfit >= 0 ? '#EAF3DE' : '#F3E7E2', borderRadius: 10, display: 'inline-block' }}>
+                <p style={{ margin: 0, fontSize: 11, color: MUTED, fontWeight: 700 }}>FINAL {finalProfit >= 0 ? 'PROFIT' : 'LOSS'}</p>
+                <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: finalProfit >= 0 ? LEAF_DARK : TOMATO }}>₹{Math.abs(finalProfit).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function ProfitLossPanel({ orders, items, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, onUploadGrn, onUpdateIndentBatch }) {
   const [channel, setChannel] = useState(PLATFORMS[0]);
+  const [plView, setPlView] = useState('dispatch'); // 'dispatch' | 'indent'
+  const [selectedBatchId, setSelectedBatchId] = useState(null);
 
   const articles = useMemo(() => buildPricingArticles(orders, items, purchases), [orders, items, purchases]);
   const articlesByKey = useMemo(() => {
@@ -3350,13 +3732,33 @@ function ProfitLossPanel({ orders, items, purchases, pricingConfig, dispatchLog,
 
   const channelTotalValue = channelRecords.reduce((s, r) => s + (r.cost || 0), 0);
 
+  const channelBatches = useMemo(() => indentBatches.filter((b) => b.platform === channel), [indentBatches, channel]);
+
+  const selectedBatch = selectedBatchId ? indentBatches.find((b) => b.id === selectedBatchId) : null;
+  if (selectedBatch) {
+    return (
+      <IndentBatchDetail
+        batch={selectedBatch}
+        orders={orders}
+        articlesByKey={articlesByKey}
+        configByKey={configByKey}
+        grnReports={grnReports}
+        onUploadGrn={onUploadGrn}
+        onUpdateIndentBatch={onUpdateIndentBatch}
+        onBack={() => setSelectedBatchId(null)}
+      />
+    );
+  }
+
   return (
     <Panel>
       <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
         <TrendingUp size={16} /> Profit &amp; Loss
       </p>
       <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED, maxWidth: 680 }}>
-        Each day is its own row — total indent qty, total dispatched, and total dispatch value (calculated from the Pricing tab). Click a day to see the article breakdown and upload that day's GRN report.
+        {plView === 'dispatch'
+          ? 'Each day is its own row — total indent qty, total dispatched, and total dispatch value (calculated from the Pricing tab). Click a day to see the article breakdown and upload that day\'s GRN report.'
+          : 'One card per uploaded indent — its expected purchase cost fills in as articles get priced from actual purchases. Tap a card to see the breakdown, add the channel\'s Purchase Order value, and upload its GRN once received.'}
       </p>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
@@ -3371,28 +3773,58 @@ function ProfitLossPanel({ orders, items, purchases, pricingConfig, dispatchLog,
             </button>
           ))}
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>{channel.toUpperCase()} TOTAL DISPATCH VALUE</p>
-          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: TOMATO }}>₹{channelTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setPlView('dispatch')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${plView === 'dispatch' ? LEAF : LINE}`, background: plView === 'dispatch' ? '#EAF3DE' : '#fff', color: plView === 'dispatch' ? LEAF_DARK : MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            By dispatch day
+          </button>
+          <button onClick={() => setPlView('indent')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${plView === 'indent' ? LEAF : LINE}`, background: plView === 'indent' ? '#EAF3DE' : '#fff', color: plView === 'indent' ? LEAF_DARK : MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            By indent
+          </button>
         </div>
+        {plView === 'dispatch' && (
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>{channel.toUpperCase()} TOTAL DISPATCH VALUE</p>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: TOMATO }}>₹{channelTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+          </div>
+        )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr auto', gap: 14, padding: '0 18px 8px', fontSize: 10, color: MUTED, fontWeight: 700 }}>
-        <div>DATE / CHANNEL</div><div>TOTAL INDENT QTY</div><div>TOTAL DISPATCH</div><div>TOTAL DISPATCH VALUE</div><div />
-      </div>
+      {plView === 'dispatch' ? (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr auto', gap: 14, padding: '0 18px 8px', fontSize: 10, color: MUTED, fontWeight: 700 }}>
+            <div>DATE / CHANNEL</div><div>TOTAL INDENT QTY</div><div>TOTAL DISPATCH</div><div>TOTAL DISPATCH VALUE</div><div />
+          </div>
 
-      {days.map((day) => (
-        <ProfitLossDayCard
-          key={day.date}
-          day={day}
-          channel={channel}
-          records={day.records}
-          grnReportsForDay={grnReports.filter((g) => g.channel === channel && g.date === day.date).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''))}
-          onUploadGrn={onUploadGrn}
-        />
-      ))}
-      {days.length === 0 && (
-        <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No {channel} indents or dispatches yet.</p>
+          {days.map((day) => (
+            <ProfitLossDayCard
+              key={day.date}
+              day={day}
+              channel={channel}
+              records={day.records}
+              grnReportsForDay={grnReports.filter((g) => g.channel === channel && g.date === day.date).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''))}
+              onUploadGrn={onUploadGrn}
+            />
+          ))}
+          {days.length === 0 && (
+            <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No {channel} indents or dispatches yet.</p>
+          )}
+        </>
+      ) : (
+        <>
+          {channelBatches.map((b) => (
+            <IndentBatchCard
+              key={b.id}
+              batch={b}
+              orders={orders}
+              articlesByKey={articlesByKey}
+              configByKey={configByKey}
+              onOpen={() => setSelectedBatchId(b.id)}
+            />
+          ))}
+          {channelBatches.length === 0 && (
+            <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No {channel} indents uploaded yet.</p>
+          )}
+        </>
       )}
     </Panel>
   );
@@ -3409,8 +3841,9 @@ function PackagingRow({ target, packedQty, onSave, onAdvanceMany }) {
   };
 
   if (!target.hasPack) {
+    const isComplete = target.pendingIds.length === 0;
     return (
-      <tr>
+      <tr style={{ background: isComplete ? '#EAF3DE' : 'transparent' }}>
         <Td style={{ fontWeight: 700 }}>{target.articleName || target.product}</Td>
         <Td>{[...target.platforms].join(' + ')}</Td>
         <Td>—</Td>
@@ -3435,8 +3868,10 @@ function PackagingRow({ target, packedQty, onSave, onAdvanceMany }) {
     );
   }
 
+  const isComplete = entered > 0 && shortfall === 0;
+
   return (
-    <tr>
+    <tr style={{ background: isComplete ? '#EAF3DE' : 'transparent' }}>
       <Td style={{ fontWeight: 700 }}>{target.articleName || target.product}</Td>
       <Td>{[...target.platforms].join(' + ')}</Td>
       <Td>{target.packSize}{target.packUnit}/pack</Td>
@@ -3465,16 +3900,25 @@ function PackagingRow({ target, packedQty, onSave, onAdvanceMany }) {
   );
 }
 
-function PackagingPanel({ orders, onAdvanceMany, packingProgress, onUpdatePackedQty }) {
+function PackagingPanel({ orders, items, onAdvanceMany, packingProgress, onUpdatePackedQty }) {
   const [platformFilter, setPlatformFilter] = useState('All');
+  const [categoryFilter, setCategoryFilter] = useState('All');
   const [selectedDate, setSelectedDate] = useState('');
+  const [qtySort, setQtySort] = useState('none'); // 'none' | 'asc' | 'desc'
+
+  const categoryByProduct = useMemo(() => {
+    const map = {};
+    items.forEach((it) => { map[it.name] = it.category; });
+    return map;
+  }, [items]);
 
   const filteredOrders = useMemo(() => {
     return orders
       .filter((o) => o.status !== 'dispatched')
       .filter((o) => platformFilter === 'All' || o.platform === platformFilter)
+      .filter((o) => categoryFilter === 'All' || categoryByProduct[o.product] === categoryFilter)
       .filter((o) => !selectedDate || o.fulfilmentDate === selectedDate);
-  }, [orders, platformFilter, selectedDate]);
+  }, [orders, platformFilter, categoryFilter, categoryByProduct, selectedDate]);
 
   const groupedByDate = useMemo(() => {
     const map = {};
@@ -3494,13 +3938,20 @@ function PackagingPanel({ orders, onAdvanceMany, packingProgress, onUpdatePacked
       if (o.status === 'pending') map[dateKey][key].pendingIds.push(o.id);
     });
     return Object.entries(map)
-      .map(([date, targetMap]) => ({ date, targets: Object.values(targetMap) }))
+      .map(([date, targetMap]) => {
+        let targets = Object.values(targetMap);
+        if (qtySort === 'asc') targets = targets.slice().sort((a, b) => (a.hasPack ? a.targetPacks : a.qty) - (b.hasPack ? b.targetPacks : b.qty));
+        else if (qtySort === 'desc') targets = targets.slice().sort((a, b) => (b.hasPack ? b.targetPacks : b.qty) - (a.hasPack ? a.targetPacks : a.qty));
+        return { date, targets };
+      })
       .sort((a, b) => {
         if (a.date === 'No date') return 1;
         if (b.date === 'No date') return -1;
         return a.date.localeCompare(b.date);
       });
-  }, [filteredOrders]);
+  }, [filteredOrders, qtySort]);
+
+  const categoriesPresent = useMemo(() => ['All', ...Array.from(new Set(items.map((it) => it.category).filter(Boolean)))], [items]);
 
   return (
     <Panel>
@@ -3509,12 +3960,24 @@ function PackagingPanel({ orders, onAdvanceMany, packingProgress, onUpdatePacked
       <div style={{ display: 'flex', gap: 16, marginBottom: 18, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={() => setPlatformFilter('All')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${platformFilter === 'All' ? LEAF : LINE}`, background: platformFilter === 'All' ? LEAF : '#fff', color: platformFilter === 'All' ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>All</button>
-            {PLATFORMS.map((p) => (
-              <button key={p} onClick={() => setPlatformFilter(p)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${platformFilter === p ? LEAF : LINE}`, background: platformFilter === p ? LEAF : '#fff', color: platformFilter === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{p}</button>
-            ))}
-          </div>
+          <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
+            <option value="All">All</option>
+            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
+            {categoriesPresent.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SORT BY QUANTITY</p>
+          <select value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
+            <option value="none">Default</option>
+            <option value="asc">Low to high</option>
+            <option value="desc">High to low</option>
+          </select>
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
