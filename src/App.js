@@ -677,7 +677,7 @@ export default function AdminPanel() {
           )}
           {tab === 'items' && <ItemsPanel items={cityItems} onAdd={addItem} onAddBulk={addItemsBulk} onMapChannel={mapChannelField} onUpdate={updateItem} onDelete={deleteItem} />}
           {tab === 'vendors' && (
-            <VendorsPanel items={cityItems} vendors={cityVendors} vendorLedger={cityVendorLedger} placedOrders={placedOrders} onAdd={addVendor} onDelete={deleteVendor} onToggleItem={toggleVendorItem} onSettle={settleEntries} onUpdatePlacedOrder={updatePlacedOrder} onDeletePlacedOrder={deletePlacedOrder} />
+            <VendorsPanel items={cityItems} vendors={cityVendors} vendorLedger={cityVendorLedger} placedOrders={placedOrders} onAdd={addVendor} onDelete={deleteVendor} onToggleItem={toggleVendorItem} onSettle={settleEntries} onAddLedgerEntry={addLedgerEntry} onUpdatePlacedOrder={updatePlacedOrder} onDeletePlacedOrder={deletePlacedOrder} />
           )}
           {tab === 'cutprocess' && (
             <CutProcessPanel
@@ -1058,7 +1058,120 @@ function PlacedOrderCard({ order, onUpdate, onDelete }) {
   );
 }
 
-function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDelete, onToggleItem, onSettle, onUpdatePlacedOrder, onDeletePlacedOrder }) {
+// Lets a purchase be logged against ANY date, not just today — the point being
+// that a missed entry from an earlier day can still be added correctly later,
+// under the vendor's own ledger, instead of silently becoming today's entry.
+function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
+  const vendorItems = items.filter((it) => (vendor.itemIds || []).includes(it.id));
+  const itemOptions = vendorItems.length > 0 ? vendorItems : items;
+  const [itemId, setItemId] = useState(itemOptions[0]?.id || '');
+  const [qty, setQty] = useState('');
+  const [unitPrice, setUnitPrice] = useState('');
+  const [totalInput, setTotalInput] = useState('');
+  const [date, setDate] = useState(defaultDate);
+  const [paymentMode, setPaymentMode] = useState('credit');
+  const [note, setNote] = useState('');
+
+  const selectedItem = items.find((it) => it.id === itemId);
+  const derivedTotal = qty && unitPrice ? Math.round(Number(qty) * Number(unitPrice) * 100) / 100 : null;
+  const derivedUnitPrice = qty && totalInput && !unitPrice ? Math.round((Number(totalInput) / Number(qty)) * 100) / 100 : null;
+  const totalPrice = derivedTotal ?? (totalInput ? Number(totalInput) : 0);
+  const finalUnitPrice = unitPrice ? Number(unitPrice) : (derivedUnitPrice ?? 0);
+  const canSubmit = itemId && qty && (unitPrice || totalInput) && date;
+
+  const handleUnitPriceChange = (v) => { setUnitPrice(v); if (v && qty) setTotalInput(''); };
+  const handleTotalChange = (v) => { setTotalInput(v); if (v && qty) setUnitPrice(''); };
+
+  const submit = () => {
+    if (!canSubmit) return;
+    onSave({
+      id: `LED-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+      vendorId: vendor.id,
+      vendorName: vendor.name,
+      itemId,
+      itemName: selectedItem?.name || '',
+      qty: Number(qty),
+      unit: selectedItem?.uom || '',
+      unitPrice: finalUnitPrice,
+      total: totalPrice,
+      payment: paymentMode,
+      date,
+      note: note.trim(),
+      settled: paymentMode !== 'credit',
+    });
+  };
+
+  const today = new Date().toISOString().split('T')[0];
+  const isBackdated = date && date < today;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 28, width: 460, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <p style={{ margin: 0, fontWeight: 800, fontSize: 17, color: INK }}>Add purchase</p>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>For {vendor.name} — missed logging a purchase? Set the date to whichever day it actually happened.</p>
+
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={today} style={{ ...inputStyle, borderColor: isBackdated ? AMBER : LINE, fontWeight: 700 }} />
+        {isBackdated && (
+          <p style={{ margin: '-6px 0 10px', fontSize: 11, color: AMBER, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <AlertCircle size={12} /> Backdated to {formatLedgerDate(date)}
+          </p>
+        )}
+
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>ITEM</p>
+        <select value={itemId} onChange={(e) => setItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+          {itemOptions.length === 0 && <option value="">No items available</option>}
+          {itemOptions.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
+        </select>
+        {vendorItems.length === 0 && items.length > 0 && (
+          <p style={{ margin: '-6px 0 10px', fontSize: 11, color: MUTED }}>No items linked to {vendor.name} yet — showing all items. Link items below to narrow this list next time.</p>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>QTY ({selectedItem?.uom || 'unit'})</p>
+            <input type="number" placeholder="0" value={qty} onChange={(e) => setQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>UNIT PRICE (₹)</p>
+            <input placeholder={derivedUnitPrice ? String(derivedUnitPrice) : '0'} type="number" value={unitPrice} onChange={(e) => handleUnitPriceChange(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>OR TOTAL (₹)</p>
+            <input placeholder={derivedTotal ? String(derivedTotal) : '0'} type="number" value={totalInput} onChange={(e) => handleTotalChange(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+          </div>
+        </div>
+
+        {totalPrice > 0 && (
+          <div style={{ background: BG, borderRadius: 8, padding: '8px 12px', marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: MUTED }}>Confirmed total</span>
+            <span style={{ fontWeight: 800, fontSize: 15 }}>₹{totalPrice.toLocaleString('en-IN')}</span>
+          </div>
+        )}
+
+        <p style={{ margin: '0 0 6px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PAYMENT MODE</p>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          {[{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank' }, { key: 'credit', label: '📒 Credit' }].map((m) => (
+            <button key={m.key} onClick={() => setPaymentMode(m.key)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `1px solid ${paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF) : LINE}`, background: paymentMode === m.key ? (m.key === 'credit' ? '#FBEFDC' : '#EAF3DE') : '#fff', color: paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF_DARK) : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <input placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...inputStyle }} />
+
+        <button onClick={submit} disabled={!canSubmit} style={{ width: '100%', background: !canSubmit ? '#C9C2AE' : (paymentMode === 'credit' ? AMBER : LEAF), color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: !canSubmit ? 'default' : 'pointer' }}>
+          {paymentMode === 'credit' ? `Add on credit — ₹${totalPrice.toLocaleString('en-IN')}` : `Add purchase — ₹${totalPrice.toLocaleString('en-IN')}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDelete, onToggleItem, onSettle, onAddLedgerEntry, onUpdatePlacedOrder, onDeletePlacedOrder }) {
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
   const [vendorSearch, setVendorSearch] = useState('');
@@ -1072,6 +1185,7 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDel
   const [payNote, setPayNote] = useState('');
   const [expandedGroup, setExpandedGroup] = useState(null); // key = vendorId-date
   const [draftEdits, setDraftEdits] = useState({}); // { [entryId]: { qty, unitPrice, total } }
+  const [addPurchaseModal, setAddPurchaseModal] = useState(null); // { vendor, defaultDate } | null — lets a missed purchase be logged against any date, not just today
 
   const submit = () => {
     if (!name.trim()) return;
@@ -1235,13 +1349,21 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDel
             <div style={{ textAlign: 'right' }}>
               <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL OUTSTANDING</p>
               <p style={{ margin: '0 0 10px', fontWeight: 800, fontSize: 22, color: vendorDue > 0 ? AMBER : LEAF }}>{money(vendorDue)}</p>
-              <button
-                onClick={() => openPay(openVendor, vendorDueEntries)}
-                disabled={vendorDueEntries.length === 0}
-                style={{ background: vendorDueEntries.length === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 9, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: vendorDueEntries.length === 0 ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
-              >
-                {vendorDueEntries.length === 0 ? 'Nothing due' : `Pay all outstanding — ${money(vendorDue)}`}
-              </button>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: new Date().toISOString().split('T')[0] })}
+                  style={{ background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 9, padding: '10px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Plus size={14} /> Add purchase
+                </button>
+                <button
+                  onClick={() => openPay(openVendor, vendorDueEntries)}
+                  disabled={vendorDueEntries.length === 0}
+                  style={{ background: vendorDueEntries.length === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 9, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: vendorDueEntries.length === 0 ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  {vendorDueEntries.length === 0 ? 'Nothing due' : `Pay all outstanding — ${money(vendorDue)}`}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1335,6 +1457,14 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDel
                           <span style={{ fontWeight: 800, color: AMBER, fontSize: 13 }}>Revised: {money(dueAmt)}</span>
                         </div>
                       )}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                        <button
+                          onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: g.date })}
+                          style={{ background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}
+                        >
+                          <Plus size={11} /> Add another item for {formatLedgerDate(g.date, true)}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1378,6 +1508,15 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDel
         </Panel>
 
         {payModalEl}
+        {addPurchaseModal && (
+          <AddPurchaseModal
+            vendor={addPurchaseModal.vendor}
+            items={items}
+            defaultDate={addPurchaseModal.defaultDate}
+            onSave={(entry) => { onAddLedgerEntry(entry); setAddPurchaseModal(null); }}
+            onClose={() => setAddPurchaseModal(null)}
+          />
+        )}
       </div>
     );
   }
@@ -5192,4 +5331,4 @@ const countBtnStyle = {
   fontWeight: 700,
   cursor: 'pointer',
   color: INK,
-}
+};
