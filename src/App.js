@@ -4484,7 +4484,7 @@ function ProfitLossPanel({ orders, items, purchases, pricingConfig, dispatchLog,
       });
     });
     return out;
-  }, [dispatchLog, orders, articlesByKey, configByKey]);
+  }, [dispatchLog, orders, articlesByKey, configByKey, city]);
 
   // Total indent (demand) qty per day, from orders' own fulfilment date — independent of dispatch.
   const indentQtyByDate = useMemo(() => {
@@ -5192,4 +5192,4 @@ const countBtnStyle = {
   fontWeight: 700,
   cursor: 'pointer',
   color: INK,
-};
+}
