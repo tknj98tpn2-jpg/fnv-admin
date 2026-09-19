@@ -14,7 +14,6 @@ import {
   PackageCheck,
   Truck,
   Boxes,
-  Sprout,
   Settings,
   Upload,
   Truck as TruckIcon,
@@ -81,7 +80,6 @@ const RADIUS = { sm: 6, md: 8, lg: 10, xl: 14 };
 const SHADOW_SM = '0 1px 2px rgba(32,36,30,0.05)';
 const SHADOW_MD = '0 4px 16px rgba(32,36,30,0.08)';
 const TEXT_SECONDARY = '#57584B'; // between INK and MUTED — de-emphasized but still easily readable
-const BORDER_STRONG = '#D5CFB5';
 // One semantic mapping so every status badge in the app — order status, payment
 // due/settled, active/inactive, etc. — draws from the same restrained palette
 // instead of each screen inventing its own bg/fg pair.
@@ -92,12 +90,6 @@ const STATUS_COLORS = {
   danger:  { bg: '#F3E7E2', fg: TOMATO },
   neutral: { bg: '#F1EFE6', fg: MUTED },
 };
-// Shared button styles — a first step toward one Button component; existing
-// inline-styled buttons are unaffected until each screen is upgraded to use these.
-const BTN_PRIMARY = { background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer', transition: 'background 0.15s, transform 0.05s' };
-const BTN_SECONDARY = { background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 17px', fontWeight: 700, fontSize: 13, cursor: 'pointer', transition: 'background 0.15s' };
-const BTN_GHOST = { background: 'none', color: TEXT_SECONDARY, border: 'none', borderRadius: RADIUS.md, padding: '8px 10px', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
-const BTN_DANGER = { background: 'none', color: TOMATO, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '9px 17px', fontWeight: 700, fontSize: 13, cursor: 'pointer' };
 
 const PLATFORMS = ['Blinkit', 'Flipkart'];
 
