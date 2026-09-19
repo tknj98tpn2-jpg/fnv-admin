@@ -97,10 +97,12 @@ const SEED_RECIPES = [];
 const PERMISSION_SECTIONS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'items', label: 'Items' },
+  { key: 'vendors', label: 'Vendors' },
   { key: 'cutprocess', label: 'Cut & Process' },
   { key: 'orders', label: 'Orders' },
   { key: 'purchase', label: 'Purchases' },
   { key: 'stockcount', label: 'Stock Count' },
+  { key: 'spoilage', label: 'Spoilage & Surplus' },
   { key: 'pricing', label: 'Pricing' },
   { key: 'profitloss', label: 'Profit & Loss' },
   { key: 'packaging', label: 'Packaging' },
@@ -113,17 +115,17 @@ const SEED_ROLES = [
   {
     id: 'ROLE-ADMIN',
     name: 'Admin',
-    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, pricing: true, profitloss: true, packaging: true, dispatch: true, crates: true, users: true },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: true, dispatch: true, crates: true, users: true },
   },
   {
     id: 'ROLE-WAREHOUSE',
     name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, cutprocess: false, orders: false, purchase: false, stockcount: true, pricing: false, profitloss: false, packaging: true, dispatch: true, crates: true, users: false },
+    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, purchase: false, stockcount: true, spoilage: false, pricing: false, profitloss: false, packaging: true, dispatch: true, crates: true, users: false },
   },
   {
     id: 'ROLE-PURCHASE',
     name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, cutprocess: true, orders: true, purchase: true, stockcount: true, pricing: true, profitloss: true, packaging: false, dispatch: false, crates: false, users: false },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: false, dispatch: false, crates: false, users: false },
   },
 ];
 
@@ -313,6 +315,22 @@ export default function AdminPanel() {
     setCurrentUser(null);
     window.localStorage.removeItem('fnv_current_user_id');
   };
+
+  // ── Role-based section access — the Roles & Permissions UI has always let
+  // someone tick/untick sections per role, but nothing ever actually read those
+  // values until now. This is the single source of truth for what a logged-in
+  // user's sidebar and page routing are allowed to show.
+  const currentRole = currentUser ? roles.find((r) => r.id === currentUser.roleId) : null;
+  const visibleNav = NAV.filter((n) => hasPermission(currentRole?.permissions, n.key));
+  // If the active tab isn't one this user's role can see — because their role
+  // was just restricted, or a stale tab carried over from a previous session —
+  // drop them onto the first section they do have access to instead of leaving
+  // a restricted page rendered underneath.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (visibleNav.some((n) => n.key === tab)) return;
+    if (visibleNav[0]) setTab(visibleNav[0].key);
+  }, [currentUser, tab, visibleNav]);
 
   // ── Write helpers (replace old setState handlers) ──────
   const fbUpdate = (col, id, patch)  => updateDoc(doc(db, col, id), patch);
@@ -617,7 +635,7 @@ export default function AdminPanel() {
           )}
         </div>
         <div style={{ padding: '14px 10px', flex: 1 }}>
-          {NAV.map((n) => (
+          {visibleNav.map((n) => (
             <button
               key={n.key}
               onClick={() => setTab(n.key)}
@@ -673,7 +691,7 @@ export default function AdminPanel() {
 
         <div style={{ padding: 28, flex: 1, overflowY: 'auto' }}>
           {tab === 'dashboard' && (
-            <Dashboard orders={cityOrders} purchases={cityPurchases} items={cityItems} crates={cityCrates} pendingCount={pendingCount} totalSpend={totalSpend} onGo={setTab} />
+            <Dashboard orders={cityOrders} purchases={cityPurchases} items={cityItems} crates={cityCrates} pendingCount={pendingCount} totalSpend={totalSpend} visibleNav={visibleNav} onGo={setTab} />
           )}
           {tab === 'items' && <ItemsPanel items={cityItems} onAdd={addItem} onAddBulk={addItemsBulk} onMapChannel={mapChannelField} onUpdate={updateItem} onDelete={deleteItem} />}
           {tab === 'vendors' && (
@@ -756,8 +774,9 @@ function StatusPill({ status }) {
   return <span style={{ background: s.bg, color: s.color, fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 999 }}>{s.label}</span>;
 }
 
-function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend, onGo }) {
+function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend, visibleNav, onGo }) {
   const dispatchedToday = orders.filter((o) => o.status === 'dispatched').length;
+  const canSee = (key) => visibleNav.some((n) => n.key === key);
   return (
     <div>
       <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
@@ -782,7 +801,7 @@ function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend,
               ))}
             </tbody>
           </table>
-          <button onClick={() => onGo('orders')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+          <button onClick={() => onGo('orders')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, display: canSee('orders') ? 'inline-flex' : 'none' }}>
             View all orders →
           </button>
         </Panel>
@@ -799,7 +818,7 @@ function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend,
               ))}
             </tbody>
           </table>
-          <button onClick={() => onGo('purchase')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+          <button onClick={() => onGo('purchase')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, display: canSee('purchase') ? 'inline-flex' : 'none' }}>
             View all purchases →
           </button>
         </Panel>
@@ -925,6 +944,16 @@ function formatLedgerDate(d, short) {
 const isDueEntry = (e) => e.payment === 'credit' && !e.settled;
 const money = (n) => `₹${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-IN')}`;
 const COMPANY_NAME = 'NILGIRI FNV SUPPLIER COMPANY';
+
+// Role permissions were previously editable in the Users & Roles UI but never
+// actually enforced anywhere — every section was visible regardless. This is the
+// single gate now used everywhere access is checked. A missing role, or a section
+// a role has simply never been asked about yet (e.g. one added after the role was
+// created), defaults to allowed — only an explicit `false` actually hides it, so
+// existing roles never lose access to something they were silently already using.
+function hasPermission(permissions, key) {
+  return !permissions || permissions[key] !== false;
+}
 
 // Renders a purchase-requirement list as a shareable PNG, styled like a printed order sheet.
 function generateOrderImage(order) {
@@ -2326,7 +2355,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                       <Td key={s.key} style={{ textAlign: 'center' }}>
                         <input
                           type="checkbox"
-                          checked={!!r.permissions[s.key]}
+                          checked={hasPermission(r.permissions, s.key)}
                           onChange={(e) => onToggleRolePermission(r.id, s.key, e.target.checked)}
                         />
                       </Td>
