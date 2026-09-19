@@ -146,6 +146,65 @@ const NAV = [
   { key: 'users', label: 'Users & Roles', icon: Users },
 ];
 
+function LoginScreen({ onLogin, error }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const submit = () => {
+    if (!username.trim() || !password.trim()) return;
+    onLogin(username, password);
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: BG }}>
+      <div style={{ width: 360, maxWidth: '90vw', background: '#fff', borderRadius: 18, padding: 32, boxShadow: '0 20px 50px rgba(0,0,0,0.10)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 24 }}>
+          <Sprout size={32} color={LEAF} />
+          <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: INK }}>FNV Business App</p>
+          <p style={{ margin: 0, fontSize: 12, color: MUTED }}>Sign in to continue</p>
+        </div>
+        <input
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          style={inputStyle}
+          autoFocus
+        />
+        <div style={{ position: 'relative' }}>
+          <input
+            placeholder="Password"
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            style={{ ...inputStyle, paddingRight: 60 }}
+          />
+          <button
+            onClick={() => setShowPassword((s) => !s)}
+            style={{ position: 'absolute', right: 10, top: 9, background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+          >
+            {showPassword ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {error && (
+          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 12px' }}>
+            <AlertCircle size={13} /> {error}
+          </p>
+        )}
+        <button
+          onClick={submit}
+          disabled={!username.trim() || !password.trim()}
+          style={{ width: '100%', background: (!username.trim() || !password.trim()) ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: (!username.trim() || !password.trim()) ? 'default' : 'pointer' }}
+        >
+          Sign in
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPanel() {
   const [tab, setTab] = useState('dashboard');
   // ── Firebase real-time state ───────────────────────────
@@ -167,6 +226,11 @@ export default function AdminPanel() {
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
   const [dbReady,       setDbReady]       = useState(false);
   const [selectedCity,  setSelectedCity]  = usePersistedState('fnv_selected_city', CITIES[0]);
+  const [currentUser,   setCurrentUser]   = useState(null);
+  const [loginError,    setLoginError]    = useState('');
+  // A city-locked employee always operates on their own city, no matter what the
+  // switcher happens to be set to — only an "All Cities" login can actually change it.
+  const effectiveCity = (currentUser && currentUser.city && currentUser.city !== 'All Cities') ? currentUser.city : selectedCity;
 
   useEffect(() => {
     // Seed collections on first load, then subscribe
@@ -217,14 +281,43 @@ export default function AdminPanel() {
   }, []);
   // ──────────────────────────────────────────────────────
 
+  // ── Session — restore a saved login once the users list has loaded ──
+  useEffect(() => {
+    if (!dbReady || currentUser) return;
+    const savedId = window.localStorage.getItem('fnv_current_user_id');
+    if (!savedId) return;
+    const u = users.find((x) => x.id === savedId && x.status === 'active');
+    if (u) setCurrentUser(u);
+  }, [dbReady, users, currentUser]);
+
+  const handleLogin = (usernameInput, passwordInput) => {
+    const uname = usernameInput.trim().toLowerCase();
+    const match = users.find((u) => (u.username || '').toLowerCase() === uname && u.password === passwordInput && u.status === 'active');
+    if (!match) {
+      setLoginError('Incorrect username or password, or this account is inactive.');
+      return;
+    }
+    setLoginError('');
+    setCurrentUser(match);
+    window.localStorage.setItem('fnv_current_user_id', match.id);
+    // A city-locked employee's login always sets the switcher to their own city,
+    // so a stale, previously-selected city from someone else's session never lingers.
+    if (match.city && match.city !== 'All Cities') setSelectedCity(match.city);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    window.localStorage.removeItem('fnv_current_user_id');
+  };
+
   // ── Write helpers (replace old setState handlers) ──────
   const fbUpdate = (col, id, patch)  => updateDoc(doc(db, col, id), patch);
   const fbDelete = (col, id)         => deleteDoc(doc(db, col, id));
   const fbSetDoc = (col, id, obj)    => setDoc(doc(db, col, id), obj);
 
   // ── Items ───────────────────────────────────────────────
-  const addItem      = (item) => fbSetDoc('items', item.id, { ...item, city: selectedCity });
-  const addItemsBulk = (rows) => { const b = writeBatch(db); rows.forEach((r) => b.set(doc(db,'items',r.id), { ...r, city: selectedCity })); b.commit(); };
+  const addItem      = (item) => fbSetDoc('items', item.id, { ...item, city: effectiveCity });
+  const addItemsBulk = (rows) => { const b = writeBatch(db); rows.forEach((r) => b.set(doc(db,'items',r.id), { ...r, city: effectiveCity })); b.commit(); };
   const deleteItem   = (id)   => fbDelete('items', id);
   const updateItem   = (id, patch) => fbUpdate('items', id, patch);
   const mapChannelField = (itemId, channel, patch) => {
@@ -277,13 +370,13 @@ export default function AdminPanel() {
   // ── Purchases ───────────────────────────────────────────
   // "purchased" rows are real, completed transactions and count toward stock.
   // "requirement" rows are just a to-buy queue (from indent release / recipe push) — they do NOT count as stock until actually purchased.
-  const addPurchase            = (p)   => fbSetDoc('purchases', p.id, { date: new Date().toISOString().split('T')[0], type: 'purchased', ...p, city: selectedCity });
-  const addPurchaseRequirements = (rows, dateOverride) => { const b = writeBatch(db); const today = dateOverride || new Date().toISOString().split('T')[0]; rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r, city: selectedCity })); b.commit(); };
+  const addPurchase            = (p)   => fbSetDoc('purchases', p.id, { date: new Date().toISOString().split('T')[0], type: 'purchased', ...p, city: effectiveCity });
+  const addPurchaseRequirements = (rows, dateOverride) => { const b = writeBatch(db); const today = dateOverride || new Date().toISOString().split('T')[0]; rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r, city: effectiveCity })); b.commit(); };
   const removePurchasesByIds   = (ids) => { const b = writeBatch(db); ids.forEach((id) => b.delete(doc(db,'purchases',id))); b.commit(); };
 
   // ── Stock count (nightly closing stock) ─────────────────
   const recordStockCount = (itemId, itemName, unit, date, closingQty) => {
-    fbSetDoc('stockCounts', `${itemId}__${date}`, { id: `${itemId}__${date}`, itemId, itemName, unit, date, closingQty: Number(closingQty) || 0, city: selectedCity });
+    fbSetDoc('stockCounts', `${itemId}__${date}`, { id: `${itemId}__${date}`, itemId, itemName, unit, date, closingQty: Number(closingQty) || 0, city: effectiveCity });
   };
 
   // ── Pricing ─────────────────────────────────────────────
@@ -299,7 +392,7 @@ export default function AdminPanel() {
   };
 
   // ── Indent batches ──────────────────────────────────────
-  const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, { ...batch, city: selectedCity });
+  const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, { ...batch, city: effectiveCity });
   const updateIndentBatch = (batchId, patch) => fbUpdate('indentBatches', batchId, patch);
   // An article is only ever fully resolved two ways: fully packed, or packed+short
   // adding up to the full target — there's no partial/unresolved state that reaches
@@ -362,7 +455,7 @@ export default function AdminPanel() {
   };
 
   // ── Vendors ─────────────────────────────────────────────
-  const addVendor      = (v)  => fbSetDoc('vendors', v.id, { ...v, city: selectedCity });
+  const addVendor      = (v)  => fbSetDoc('vendors', v.id, { ...v, city: effectiveCity });
   const deleteVendor   = (id) => fbDelete('vendors', id);
   const toggleVendorItem = (vendorId, itemId) => {
     const v = vendors.find((x) => x.id === vendorId); if (!v) return;
@@ -390,16 +483,16 @@ export default function AdminPanel() {
   };
 
   // ── Orders ──────────────────────────────────────────────
-  const importOrder  = (o)   => fbSetDoc('orders', o.id, { ...o, city: selectedCity });
+  const importOrder  = (o)   => fbSetDoc('orders', o.id, { ...o, city: effectiveCity });
   const advanceMany   = (ids, next) => { const b = writeBatch(db); ids.forEach((id) => b.update(doc(db,'orders',id), { status: next })); b.commit(); };
 
   // ── Crates ──────────────────────────────────────────────
   const adjustCrates = async (type, delta, note) => {
-    const current = cratesByCity[selectedCity] || { crates: 0, boxes: 0 };
+    const current = cratesByCity[effectiveCity] || { crates: 0, boxes: 0 };
     const next = { ...current, [type]: Math.max(0, current[type] + delta) };
-    await setDoc(doc(db, 'settings', 'crates'), { ...cratesByCity, [selectedCity]: next });
+    await setDoc(doc(db, 'settings', 'crates'), { ...cratesByCity, [effectiveCity]: next });
     const logId = `CL-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    fbSetDoc('crateLog', logId, { id: logId, type, delta, note: note || '', time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), city: selectedCity });
+    fbSetDoc('crateLog', logId, { id: logId, type, delta, note: note || '', time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), city: effectiveCity });
   };
 
   // ── Dispatch ────────────────────────────────────────────
@@ -436,18 +529,18 @@ export default function AdminPanel() {
     if (cratesUsed > 0) adjustCrates('crates', -cratesUsed, `Dispatch ${vehicleNo || ''}`.trim());
     if (boxesUsed > 0)  adjustCrates('boxes',  -boxesUsed,  `Dispatch ${vehicleNo || ''}`.trim());
     const did = `DSP-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    fbSetDoc('dispatchLog', did, { id: did, date: dispatchDate, items: logItems, orderIds: logItems.map((li) => li.orderId), totalDispatchQty, vehicleNo: vehicleNo || '—', driverName: driverName || '—', cratesUsed, boxesUsed, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), city: selectedCity });
+    fbSetDoc('dispatchLog', did, { id: did, date: dispatchDate, items: logItems, orderIds: logItems.map((li) => li.orderId), totalDispatchQty, vehicleNo: vehicleNo || '—', driverName: driverName || '—', cratesUsed, boxesUsed, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), city: effectiveCity });
   };
 
-  const cityItems = items.filter((it) => (it.city || CITIES[0]) === selectedCity);
-  const cityVendors = vendors.filter((v) => (v.city || CITIES[0]) === selectedCity);
-  const cityOrders = orders.filter((o) => (o.city || CITIES[0]) === selectedCity);
-  const cityPurchases = purchases.filter((p) => (p.city || CITIES[0]) === selectedCity);
-  const cityIndentBatches = indentBatches.filter((b) => (b.city || CITIES[0]) === selectedCity);
-  const cityStockCounts = stockCounts.filter((sc) => (sc.city || CITIES[0]) === selectedCity);
-  const cityDispatchLog = dispatchLog.filter((d) => (d.city || CITIES[0]) === selectedCity);
-  const cityCrates = cratesByCity[selectedCity] || { crates: 0, boxes: 0 };
-  const cityCrateLog = crateLog.filter((l) => (l.city || CITIES[0]) === selectedCity);
+  const cityItems = items.filter((it) => (it.city || CITIES[0]) === effectiveCity);
+  const cityVendors = vendors.filter((v) => (v.city || CITIES[0]) === effectiveCity);
+  const cityOrders = orders.filter((o) => (o.city || CITIES[0]) === effectiveCity);
+  const cityPurchases = purchases.filter((p) => (p.city || CITIES[0]) === effectiveCity);
+  const cityIndentBatches = indentBatches.filter((b) => (b.city || CITIES[0]) === effectiveCity);
+  const cityStockCounts = stockCounts.filter((sc) => (sc.city || CITIES[0]) === effectiveCity);
+  const cityDispatchLog = dispatchLog.filter((d) => (d.city || CITIES[0]) === effectiveCity);
+  const cityCrates = cratesByCity[effectiveCity] || { crates: 0, boxes: 0 };
+  const cityCrateLog = crateLog.filter((l) => (l.city || CITIES[0]) === effectiveCity);
   const pendingCount = cityOrders.filter((o) => o.status === 'pending').length;
   const totalSpend = cityPurchases.reduce((s, p) => s + p.cost, 0);
 
@@ -459,6 +552,10 @@ export default function AdminPanel() {
     </div>
   );
 
+  if (!currentUser) return <LoginScreen onLogin={handleLogin} error={loginError} />;
+
+  const isCityLocked = currentUser.city && currentUser.city !== 'All Cities';
+
   return (
     <div style={{ display: 'flex', minHeight: 640, background: BG, fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', border: `1px solid ${LINE}`, borderRadius: 16, overflow: 'hidden' }}>
       {/* Sidebar */}
@@ -469,13 +566,17 @@ export default function AdminPanel() {
         </div>
         <div style={{ padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <p style={{ margin: '0 0 6px', fontSize: 10, color: '#8A968A', fontWeight: 700, letterSpacing: 0.5 }}>CITY</p>
-          <select
-            value={selectedCity}
-            onChange={(e) => setSelectedCity(e.target.value)}
-            style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '7px 8px', fontSize: 13, fontWeight: 700 }}
-          >
-            {CITIES.map((c) => <option key={c} value={c} style={{ color: INK }}>{c}</option>)}
-          </select>
+          {isCityLocked ? (
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#fff' }}>{currentUser.city}</p>
+          ) : (
+            <select
+              value={selectedCity}
+              onChange={(e) => setSelectedCity(e.target.value)}
+              style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '7px 8px', fontSize: 13, fontWeight: 700 }}
+            >
+              {CITIES.map((c) => <option key={c} value={c} style={{ color: INK }}>{c}</option>)}
+            </select>
+          )}
         </div>
         <div style={{ padding: '14px 10px', flex: 1 }}>
           {NAV.map((n) => (
@@ -510,6 +611,10 @@ export default function AdminPanel() {
           ))}
         </div>
         <div style={{ padding: '12px 20px 18px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <p style={{ margin: '0 0 8px', fontSize: 11, color: '#8A968A' }}>Signed in as <strong style={{ color: '#fff' }}>{currentUser.name}</strong></p>
+          <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0, marginBottom: 8 }}>
+            <ArrowLeft size={14} /> Log out
+          </button>
           <button style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0 }}>
             <Settings size={14} /> Settings
           </button>
@@ -1563,6 +1668,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
   const [contact, setContact] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [city, setCity] = useState('All Cities');
   const [roleId, setRoleId] = useState(roles[0]?.id || '');
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -1587,20 +1693,22 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
       status: 'active',
       username: uname,
       password: password.trim(),
+      city,
     });
     setName('');
     setContact('');
     setUsername('');
     setPassword('');
+    setCity('All Cities');
   };
 
   const startEdit = (u) => {
     setEditingId(u.id);
-    setDraft({ name: u.name, contact: u.contact, username: u.username || '', password: u.password || '' });
+    setDraft({ name: u.name, contact: u.contact, username: u.username || '', password: u.password || '', city: u.city || 'All Cities' });
   };
   const saveEdit = (id) => {
     if (!draft.name.trim() || !draft.username.trim() || !draft.password.trim()) return;
-    onUpdateUser(id, { name: draft.name.trim(), contact: draft.contact.trim(), username: draft.username.trim().toLowerCase(), password: draft.password.trim() });
+    onUpdateUser(id, { name: draft.name.trim(), contact: draft.contact.trim(), username: draft.username.trim().toLowerCase(), password: draft.password.trim(), city: draft.city });
     setEditingId(null);
     setDraft(null);
   };
@@ -1631,6 +1739,11 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
           <input placeholder="Username" value={username} onChange={(e) => { setUsername(e.target.value); setUsernameError(''); }} style={{ ...inputStyle, borderColor: usernameError ? TOMATO : LINE }} />
           {usernameError && <p style={{ margin: '-4px 0 8px', fontSize: 11, color: TOMATO }}>{usernameError}</p>}
           <input placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '4px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>CITY ACCESS</p>
+          <select value={city} onChange={(e) => setCity(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+            <option value="All Cities">All Cities (Admin)</option>
+            {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <button onClick={submitUser} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             Add employee
           </button>
@@ -1639,7 +1752,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
         <Panel>
           <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Employees ({users.length})</p>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Name</Th><Th>Contact</Th><Th>Username</Th><Th>Password</Th><Th>Role</Th><Th>Status</Th><Th /></tr></thead>
+            <thead><tr><Th>Name</Th><Th>Contact</Th><Th>Username</Th><Th>Password</Th><Th>City</Th><Th>Role</Th><Th>Status</Th><Th /></tr></thead>
             <tbody>
               {users.map((u) => {
                 const isEditing = editingId === u.id;
@@ -1678,6 +1791,16 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                             </button>
                           )}
                         </div>
+                      )}
+                    </Td>
+                    <Td>
+                      {isEditing ? (
+                        <select value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}>
+                          <option value="All Cities">All Cities</option>
+                          {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ fontWeight: u.city && u.city !== 'All Cities' ? 500 : 700, color: u.city && u.city !== 'All Cities' ? INK : LEAF_DARK }}>{u.city || 'All Cities'}</span>
                       )}
                     </Td>
                     <Td>
@@ -1733,7 +1856,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                   </tr>
                 );
               })}
-              {users.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No employees added yet.</Td></tr>}
+              {users.length === 0 && <tr><Td colSpan={8} style={{ textAlign: 'center', color: MUTED }}>No employees added yet.</Td></tr>}
             </tbody>
           </table>
         </Panel>
