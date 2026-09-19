@@ -582,6 +582,7 @@ export default function AdminPanel() {
 
   // ── Orders ──────────────────────────────────────────────
   const importOrder  = (o)   => fbSetDoc('orders', o.id, { ...o, city: effectiveCity });
+  const deleteOrder  = (id)  => fbDelete('orders', id);
   const advanceMany   = (ids, next) => { const b = writeBatch(db); ids.forEach((id) => b.update(doc(db,'orders',id), { status: next })); b.commit(); };
 
   // ── Crates ──────────────────────────────────────────────
@@ -804,6 +805,7 @@ export default function AdminPanel() {
               items={cityItems}
               indentBatches={cityIndentBatches}
               onImport={importOrder}
+              onDelete={deleteOrder}
               onAddItem={addItem}
               onEnsureAlias={ensureAliasForCode}
               onUpdateAlias={updateAliasById}
@@ -2654,7 +2656,7 @@ function ReleaseBatchRow({ batch: b, orders, onToggleReleaseBatch }) {
   );
 }
 
-function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, defaultOpen }) {
+function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete, defaultOpen }) {
   const [open, setOpen] = useState(!!defaultOpen);
   return (
     <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
@@ -2676,7 +2678,7 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, defaultO
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr><Th>Order ID</Th><Th>Platform</Th><Th>Product</Th><Th>Qty</Th><Th>UOM</Th><Th>Fulfilment date</Th><Th>Status</Th></tr>
+            <tr><Th>Order ID</Th><Th>Platform</Th><Th>Product</Th><Th>Qty</Th><Th>UOM</Th><Th>Fulfilment date</Th><Th>Status</Th><Th /></tr>
           </thead>
           <tbody>
             {groupOrders.map((o) => (
@@ -2688,6 +2690,15 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, defaultO
                 <Td>{o.unit}</Td>
                 <Td>{o.fulfilmentDate || <span style={{ color: MUTED }}>—</span>}</Td>
                 <Td><StatusPill status={o.status} /></Td>
+                <Td>
+                  <button
+                    onClick={() => { if (window.confirm(`Delete order ${o.id}? This can't be undone.`)) onDelete(o.id); }}
+                    style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}
+                    aria-label={`Delete order ${o.id}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </Td>
               </tr>
             ))}
           </tbody>
@@ -2698,7 +2709,7 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, defaultO
   );
 }
 
-function OrdersListPanel({ orders, indentBatches }) {
+function OrdersListPanel({ orders, indentBatches, onDelete }) {
   const grouped = useMemo(() => {
     const byBatch = {};
     const manual = [];
@@ -2733,17 +2744,18 @@ function OrdersListPanel({ orders, indentBatches }) {
             </span>
           }
           orders={groupOrders}
+          onDelete={onDelete}
         />
       ))}
       {grouped.manual.length > 0 && (
-        <OrderBatchGroup label="Manually added orders" orders={grouped.manual} defaultOpen={grouped.batchGroups.length === 0} />
+        <OrderBatchGroup label="Manually added orders" orders={grouped.manual} onDelete={onDelete} defaultOpen={grouped.batchGroups.length === 0} />
       )}
       {orders.length === 0 && <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No orders yet.</p>}
     </Panel>
   );
 }
 
-function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch }) {
+function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch }) {
   const [platform, setPlatform] = useState('Blinkit');
   const [product, setProduct] = useState('');
   const [qty, setQty] = useState('');
@@ -3111,7 +3123,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onAddItem, onEnsu
           </button>
         </Panel>
 
-        <OrdersListPanel orders={orders} indentBatches={indentBatches} />
+        <OrdersListPanel orders={orders} indentBatches={indentBatches} onDelete={onDelete} />
       </div>
     </div>
   );
