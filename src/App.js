@@ -4334,6 +4334,23 @@ function DispatchModal({ selectedCount, crates, onClose, onConfirm }) {
   );
 }
 
+// Indent-imported orders carry both a converted base-UOM qty (qty/unit) and the
+// original per-pack figures from the indent file (packSize/packUnit). Dispatch
+// should show the latter — the unit staff actually loaded the indent in — falling
+// back to the converted UOM only for manual (non-indent) orders that have no pack info.
+function renderIndentQty(o, qtyBase) {
+  if (o.packSize && o.packUnit) {
+    const packs = Math.round((Number(qtyBase) / Number(o.packSize)) * 100) / 100;
+    return (
+      <>
+        {packs} pack{packs === 1 ? '' : 's'}
+        <div style={{ fontSize: 10, fontWeight: 400, color: MUTED }}>{o.packSize}{o.packUnit}/pack</div>
+      </>
+    );
+  }
+  return `${qtyBase} ${o.unit}`;
+}
+
 function DispatchPanel({ orders, crates, dispatchLog, onDispatchBatch }) {
   const packed = useMemo(() => orders
     .filter((o) => o.status === 'packed')
@@ -4404,7 +4421,7 @@ function DispatchPanel({ orders, crates, dispatchLog, onDispatchBatch }) {
                     </Td>
                     <Td>{o.id}</Td>
                     <Td>{o.articleName || o.product}</Td>
-                    <Td style={{ fontWeight: 700, color: LEAF }}>{o.remaining} {o.unit}</Td>
+                    <Td style={{ fontWeight: 700, color: LEAF }}>{renderIndentQty(o, o.remaining)}</Td>
                   </tr>
                 ))}
                 {packed.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>Nothing packed yet — resolve articles in Packaging first.</Td></tr>}
@@ -4439,10 +4456,10 @@ function DispatchPanel({ orders, crates, dispatchLog, onDispatchBatch }) {
             <tbody>
               {dispatched.map((o) => (
                 <tr key={o.id}>
-                  <Td>{o.id}</Td><Td>{o.articleName || o.product}</Td><Td>{o.qty} {o.unit}</Td>
+                  <Td>{o.id}</Td><Td>{o.articleName || o.product}</Td><Td>{renderIndentQty(o, o.qty)}</Td>
                   <Td>
                     {o.shortQty > 0 ? (
-                      <span style={{ color: TOMATO, fontSize: 11, fontWeight: 700 }}>{o.shortQty} {o.unit} short</span>
+                      <span style={{ color: TOMATO, fontSize: 11, fontWeight: 700 }}>{renderIndentQty(o, o.shortQty)} short</span>
                     ) : (
                       <CheckCircle2 size={15} color={LEAF} />
                     )}
