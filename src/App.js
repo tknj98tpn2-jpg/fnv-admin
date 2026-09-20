@@ -548,7 +548,7 @@ export default function AdminPanel() {
   // alias on a different item (e.g. someone picked the wrong item from a long
   // dropdown once), transfer it here instead of letting two items share the same
   // code, which makes future auto-matching pick whichever item happens to come first.
-  const ensureAliasForCode = (itemId, channel, code, altCode) => {
+  const ensureAliasForCode = (itemId, channel, code, ean) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
     if (!code) {
       const exists = (it.aliases || []).some((a) => a.channel === channel && !a.code);
@@ -559,10 +559,10 @@ export default function AdminPanel() {
     const codeLower = code.toLowerCase();
     const existing = (it.aliases || []).find((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
     if (existing) {
-      // Alias is already here, but may predate altCode — backfill it so GRN rows
-      // (which carry the FSN) can still be matched back to this item.
-      if (altCode && !existing.altCode) {
-        fbUpdate('items', itemId, { aliases: it.aliases.map((a) => (a.id === existing.id ? { ...a, altCode } : a)) });
+      // Alias already exists, but may predate the EAN field — backfill it so
+      // barcode printing has the retail code to work with.
+      if (ean && !existing.ean) {
+        fbUpdate('items', itemId, { aliases: it.aliases.map((a) => (a.id === existing.id ? { ...a, ean } : a)) });
       }
       return;
     }
@@ -573,7 +573,7 @@ export default function AdminPanel() {
         fbUpdate('items', other.id, { aliases: other.aliases.filter((a) => !(a.channel === channel && a.code && a.code.toLowerCase() === codeLower)) });
       }
     });
-    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code, altCode: altCode || '', packSize: '', packUnit: 'kg' }];
+    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code, ean: ean || '', packSize: '', packUnit: 'kg' }];
     fbUpdate('items', itemId, { aliases: nextAliases });
   };
   const updateAliasById = (itemId, aliasId, patch) => {
@@ -2855,18 +2855,12 @@ function parseIndentRows(json, platform) {
     .map((r, idx) => {
       const headers = Object.keys(r);
       const rawName = String(pickField(r, ['title', 'article', 'product', 'item', 'description']) || '').trim();
-      // Flipkart's own FSN/SKU column has turned out unreliable for matching across
-      // separate indent uploads, so for Flipkart we key off the EAN barcode instead —
-      // falling back to FSN only if a row's EAN cell is genuinely blank. Blinkit's
-      // existing SKU-based matching already works fine and is left untouched.
-      const fsnCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
-      const rawCode = platform === 'Flipkart'
-        ? String(pickField(r, ['eancode', 'ean']) || fsnCode || '').trim()
-        : fsnCode;
-      // Flipkart's GRN export identifies articles by FSN, while indents are now
-      // matched on EAN — so keep the FSN too, or a GRN row could never be tied
-      // back to the item (and therefore never priced).
-      const rawAltCode = platform === 'Flipkart' && fsnCode && fsnCode !== rawCode ? fsnCode : '';
+      // Articles are matched on the channel's own SKU/FSN — that is also what the
+      // GRN and PO exports carry, so one code ties the whole chain together.
+      const rawCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
+      // The EAN is kept separately: it is the retail barcode, used only for
+      // printing labels, never for matching.
+      const rawEan = String(pickField(r, ['eancode', 'ean']) || '').trim();
       let qty = Number(pickField(r, ['indent', 'qty', 'quantity', 'orderedqty']) || 0);
       let storeQtys = null;
       if (!qty) {
@@ -2875,7 +2869,7 @@ function parseIndentRows(json, platform) {
       }
       const unit = String(pickField(r, ['umo', 'uom', 'unit']) || '').trim();
       const rawCategory = String(pickField(r, ['type', 'category']) || '').trim();
-      return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawAltCode, qty, unit, rawCategory, storeQtys };
+      return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawEan, qty, unit, rawCategory, storeQtys };
     })
     .filter((r) => r.rawName && r.qty > 0);
 }
@@ -3101,7 +3095,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           );
           // Each distinct article code gets its own alias — even when it shares a base
           // item with another article on the same channel (e.g. two different pack sizes).
-          if (match) onEnsureAlias(match.id, indentPlatform, r.rawCode, r.rawAltCode);
+          if (match) onEnsureAlias(match.id, indentPlatform, r.rawCode, r.rawEan);
           return { ...r, mappedItemId: match ? match.id : '' };
         });
         setPendingIndent({ platform: indentPlatform, fileName: file.name, rows, fulfilmentDate: isAdvance ? '' : indentFulfilmentDate, isAdvance });
@@ -3136,12 +3130,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
             name: r.rawName,
             uom: r.unit || 'kg',
             category: normalizeCategory(r.rawCategory),
-            aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', altCode: r.rawAltCode || '', packSize: '', packUnit: 'kg' }],
+            aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', ean: r.rawEan || '', packSize: '', packUnit: 'kg' }],
           };
           onAddItem(newItem);
           return { ...r, mappedItemId: newItem.id };
         }
-        onEnsureAlias(value, prev.platform, r.rawCode, r.rawAltCode);
+        onEnsureAlias(value, prev.platform, r.rawCode, r.rawEan);
         return { ...r, mappedItemId: value };
       }),
     }));
@@ -5404,7 +5398,7 @@ function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, co
       </div>
       {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} />}
       {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
-      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} onMapFormat={(itemId, channel, formatId) => onUpdateAlias(itemId, channel, { barcodeFormatId: formatId })} onUpdateCode={(itemId, channel, code) => onUpdateAlias(itemId, channel, { code })} />}
+      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} onMapFormat={(itemId, channel, formatId) => onUpdateAlias(itemId, channel, { barcodeFormatId: formatId })} onUpdateCode={(itemId, channel, ean) => onUpdateAlias(itemId, channel, { ean })} />}
       {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
     </div>
   );
@@ -5531,7 +5525,7 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateCode }) {
   const rows = [];
   items.forEach((it) => {
     (it.aliases || []).forEach((al) => {
-      if (al.code) rows.push({ itemId: it.id, itemName: it.name, channel: al.channel, code: al.code, barcodeFormatId: al.barcodeFormatId || '' });
+      if (al.code || al.ean) rows.push({ itemId: it.id, itemName: it.name, channel: al.channel, code: al.ean || al.code, barcodeFormatId: al.barcodeFormatId || '' });
     });
   });
   const filtered = rows.filter((r) => !search.trim() || r.itemName.toLowerCase().includes(search.trim().toLowerCase()));
@@ -5549,7 +5543,7 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateCode }) {
       <input placeholder="Search item..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260 }} />
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Item</Th><Th>Channel</Th><Th>Code</Th><Th>Format</Th></tr></thead>
+          <thead><tr><Th>Item</Th><Th>Channel</Th><Th>Barcode (EAN)</Th><Th>Format</Th></tr></thead>
           <tbody>
             {filtered.map((r, i) => (
               <tr key={i}>
@@ -5609,7 +5603,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         const item = items.find((it) => it.name === g.product);
         const alias = (item?.aliases || []).find((a) => a.channel === platform);
         const progress = packingProgress[g.key] || { packedQty: 0 };
-        return { ...g, itemId: item?.id || '', category: item?.category || '', code: alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+        return { ...g, itemId: item?.id || '', category: item?.category || '', code: alias?.ean || alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
   }, [orders, items, packingProgress, platform, date]);
@@ -5643,7 +5637,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides;
   const saveRow = (a) => {
     if (!a.itemId) return;
-    onUpdateAlias(a.itemId, platform, { code: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() });
+    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() });
     setNameOverrides((n) => { const c = { ...n }; delete c[a.key]; return c; });
     setUomOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
     setCodeOverrides((c) => { const d = { ...c }; delete d[a.key]; return d; });
@@ -5779,7 +5773,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Code</Th><Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
+              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Barcode (EAN)</Th><Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
               <tbody>
                 {articles.map((a) => (
                   <tr key={a.key}>
@@ -5873,7 +5867,7 @@ function grnValueForBatch(batchId, grnReports, items, articlesByKey, configByKey
     if (!code) return null;
     const lower = String(code).toLowerCase();
     const item = (items || []).find((it) => (it.aliases || []).some((a) =>
-      (a.code && a.code.toLowerCase() === lower) || (a.altCode && a.altCode.toLowerCase() === lower)));
+      (a.code && a.code.toLowerCase() === lower) || (a.ean && a.ean.toLowerCase() === lower) || (a.altCode && a.altCode.toLowerCase() === lower)));
     if (!item) return null;
     const alias = (item.aliases || []).find((a) => a.channel === platform) || (item.aliases || [])[0];
     if (!alias || !alias.packSize) return null;
@@ -6111,7 +6105,7 @@ function matchChannelRow(row, costRows, items) {
   const code = String(row.code || '').toLowerCase();
   if (code) {
     const item = items.find((it) => (it.aliases || []).some((a) =>
-      (a.code && a.code.toLowerCase() === code) || (a.altCode && a.altCode.toLowerCase() === code)));
+      (a.code && a.code.toLowerCase() === code) || (a.ean && a.ean.toLowerCase() === code) || (a.altCode && a.altCode.toLowerCase() === code)));
     if (item) {
       const hit = costRows.find((cr) => String(cr.articleName).toLowerCase().indexOf(String(item.name).toLowerCase()) !== -1);
       if (hit) return hit;
