@@ -3061,6 +3061,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           packQty: storePacks,
           packSize,
           packUnit,
+          rawUnit: r.unit || '',
           batchId,
         });
         compiledMap[key].qty += storeQty;
@@ -5926,20 +5927,23 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateCode }) {
 
 function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias }) {
   const [platform, setPlatform] = useState(PLATFORMS[0]);
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [qtyOverrides, setQtyOverrides] = useState({});
   const [codeOverrides, setCodeOverrides] = useState({});
+  const [nameOverrides, setNameOverrides] = useState({});
+  const [uomOverrides, setUomOverrides] = useState({});
   const [bestBeforeOverrides, setBestBeforeOverrides] = useState({});
   const [labelSize, setLabelSize] = useState('thermal5050'); // 'thermal5050' | 'a4'
 
-  const articles = useMemo(() => {
+  const allArticles = useMemo(() => {
     const dayOrders = orders.filter((o) => o.platform === platform && o.fulfilmentDate === date && o.packQty && o.packSize);
     const groups = {};
     dayOrders.forEach((o) => {
       const cityKey = o.city || CITIES[0];
       const key = `${cityKey}__${date}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-      if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, packSize: o.packSize, packUnit: o.packUnit, targetPacks: 0 };
+      if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0 };
       groups[key].targetPacks += Number(o.packQty) || 0;
     });
     return Object.values(groups)
@@ -5947,26 +5951,43 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         const item = items.find((it) => it.name === g.product);
         const alias = (item?.aliases || []).find((a) => a.channel === platform);
         const progress = packingProgress[g.key] || { packedQty: 0 };
-        return { ...g, itemId: item?.id || '', code: alias?.code || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+        return { ...g, itemId: item?.id || '', category: item?.category || '', code: alias?.code || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
   }, [orders, items, packingProgress, platform, date]);
 
+  const articles = useMemo(
+    () => allArticles.filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter),
+    [allArticles, categoryFilter]
+  );
+
   useEffect(() => {
-    setSelectedKeys(new Set(articles.map((a) => a.key)));
+    setSelectedKeys(new Set());
     setQtyOverrides({});
     setCodeOverrides({});
+    setNameOverrides({});
+    setUomOverrides({});
     setBestBeforeOverrides({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform, date]);
 
   const toggle = (key) => setSelectedKeys((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  const selectAllArticles = () => setSelectedKeys(new Set(articles.map((a) => a.key)));
+  const clearAllArticles = () => setSelectedKeys(new Set());
   const qtyFor = (a) => qtyOverrides[a.key] ?? (a.packedQty || a.targetPacks || 0);
   const codeFor = (a) => codeOverrides[a.key] ?? a.code;
   const commitCode = (a, value) => {
     const trimmed = value.trim();
     if (trimmed !== a.code && a.itemId) onUpdateAlias(a.itemId, platform, { code: trimmed });
   };
+  // Article name has no single, clean place to persist to (unlike code or shelf
+  // life, which live on one channel alias) — the same product name can appear
+  // across several orders — so a tweak here only affects this print run, the
+  // same as the "Labels to print" quantity beside it.
+  const nameFor = (a) => nameOverrides[a.key] ?? a.articleName;
+  // Same reasoning as article name — UOM/net weight comes from the indent's own
+  // orders (rawUnit), not one alias, so a correction here is print-run-only too.
+  const uomFor = (a) => uomOverrides[a.key] ?? (a.rawUnit || `${a.packSize}${a.packUnit}`);
   // Best Before shows the auto-calculated date (packing date + this article's
   // remembered shelf life) until the user edits it for this print run — editing it
   // re-derives and saves a new shelf-life day-count, so tomorrow's auto-calculation
@@ -5993,13 +6014,24 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     // well inside its 108mm print head width — so the barcode itself is sized down
     // to comfortably fit next to several lines of compliance text on one 50mm-tall label.
     const barcodeW = isThermal ? 44 * 3.78 : 190; // mm→px at 96dpi CSS reference, so the SVG's own coordinate space matches the printed mm size
-    const barcodeH = isThermal ? 18 * 3.78 : 40; // taller than the minimum fit — real-world testing showed 50mm has room to spare, and a taller barcode scans more reliably
+    const barcodeH = isThermal ? 13 * 3.78 : 40; // sized down from 18mm after feedback that it dwarfed the item name — 13mm still scans reliably at typical warehouse handheld-scanner distance
     const labelsHtml = toPrint.map((a) => {
       const format = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
       const sf = format?.standardFields || { printBarcode: true, itemName: true, netWeight: true, showBarcodeNumber: true };
       const qty = Math.max(1, Math.round(qtyFor(a)));
-      const netWeight = `${a.packSize}${a.packUnit}`;
+      // The indent file's own weight/quantity text (e.g. "280-320 g", "2 Units") is
+      // what the platform itself declared for this article — more authoritative for
+      // a printed Net Weight than the admin's own configured pack size, which exists
+      // mainly to drive internal packing-target math. Older orders imported before
+      // this was captured fall back to the configured value so nothing prints blank.
+      const netWeight = uomFor(a);
       let oneLabel = '<div class="label">';
+      if (sf.itemName) oneLabel += `<div class="lbl-line lbl-name">${nameFor(a)}</div>`;
+      if (sf.netWeight) oneLabel += `<div class="lbl-line lbl-key">Net Wt: ${netWeight}</div>`;
+      if (sf.packingDate) oneLabel += `<div class="lbl-line lbl-key">Packed: ${date}</div>`;
+      if (sf.expiryDate) oneLabel += `<div class="lbl-line lbl-key">Best Before: ${bestBeforeFor(a) || '___________'}</div>`;
+      if (sf.companyDetails) oneLabel += `<div class="lbl-line lbl-company">${companyDetails.name || ''}<br/>${(companyDetails.address || '').replace(/\n/g, '<br/>')}<br/>FSSAI: ${companyDetails.fssai || ''}</div>`;
+      (format?.customFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label}: ${cf.value}</div>`; });
       if (sf.printBarcode !== false) {
         oneLabel += barcodeSVGMarkup(a.code, barcodeW, barcodeH, sf.showBarcodeNumber !== false);
       } else if (sf.showBarcodeNumber !== false && a.code) {
@@ -6007,12 +6039,6 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         // as plain text (e.g. for manual lookup) if that toggle is on.
         oneLabel += `<div class="lbl-line lbl-name">${a.code}</div>`;
       }
-      if (sf.itemName) oneLabel += `<div class="lbl-line lbl-name">${a.articleName}</div>`;
-      if (sf.netWeight) oneLabel += `<div class="lbl-line">Net Wt: ${netWeight}</div>`;
-      if (sf.packingDate) oneLabel += `<div class="lbl-line">Packed: ${date}</div>`;
-      if (sf.expiryDate) oneLabel += `<div class="lbl-line">Best Before: ${bestBeforeFor(a) || '___________'}</div>`;
-      if (sf.companyDetails) oneLabel += `<div class="lbl-line lbl-company">${companyDetails.name || ''}<br/>${(companyDetails.address || '').replace(/\n/g, '<br/>')}<br/>FSSAI: ${companyDetails.fssai || ''}</div>`;
-      (format?.customFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label}: ${cf.value}</div>`; });
       oneLabel += '</div>';
       return Array(qty).fill(oneLabel).join('');
     }).join('');
@@ -6023,7 +6049,8 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         .grid { display: flex; flex-wrap: wrap; width: 100mm; }
         .label { width: 50mm; height: 50mm; padding: 1.5mm; box-sizing: border-box; overflow: hidden; text-align: center; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .lbl-line { font-size: 7px; margin-top: 1.5px; line-height: 1.25; word-break: break-word; }
-        .lbl-name { font-weight: 700; font-size: 8.5px; margin-top: 2px; }
+        .lbl-key { font-size: 9.5px; font-weight: 600; }
+        .lbl-name { font-weight: 700; font-size: 13px; margin-top: 3px; line-height: 1.2; }
         .lbl-company { font-size: 5.5px; color: #333; margin-top: 2px; }
       `;
     const a4Style = `
@@ -6032,6 +6059,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         .grid { display: flex; flex-wrap: wrap; gap: 4mm; }
         .label { width: 60mm; border: 1px dashed #999; padding: 3mm; box-sizing: border-box; text-align: center; page-break-inside: avoid; }
         .lbl-line { font-size: 9px; margin-top: 2px; line-height: 1.3; word-break: break-word; }
+        .lbl-key { font-size: 10px; font-weight: 600; }
         .lbl-name { font-weight: 700; font-size: 11px; }
         .lbl-company { font-size: 7px; color: #333; }
       `;
@@ -6059,6 +6087,12 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
           </select>
         </div>
         <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CATEGORY</p>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+            {['ALL', ...CATEGORY_OPTIONS].map((c) => <option key={c} value={c}>{c === 'ALL' ? 'All' : c}</option>)}
+          </select>
+        </div>
+        <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
         </div>
@@ -6079,14 +6113,31 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         <p style={{ color: MUTED, fontSize: 13 }}>No packed articles found for {platform} on {date}.</p>
       ) : (
         <>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+            <button onClick={selectAllArticles} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
+            <button onClick={clearAllArticles} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-              <thead><tr><Th /><Th>Article</Th><Th>Code</Th><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
+              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Code</Th><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
               <tbody>
                 {articles.map((a) => (
                   <tr key={a.key}>
                     <Td><input type="checkbox" checked={selectedKeys.has(a.key)} onChange={() => toggle(a.key)} /></Td>
-                    <Td>{a.articleName}</Td>
+                    <Td>
+                      <input
+                        value={nameFor(a)}
+                        onChange={(e) => setNameOverrides((n) => ({ ...n, [a.key]: e.target.value }))}
+                        style={{ fontSize: 13, width: 160, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
+                      />
+                    </Td>
+                    <Td>
+                      <input
+                        value={uomFor(a)}
+                        onChange={(e) => setUomOverrides((u) => ({ ...u, [a.key]: e.target.value }))}
+                        style={{ fontSize: 12, width: 100, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
+                      />
+                    </Td>
                     <Td>
                       <input
                         value={codeFor(a)}
