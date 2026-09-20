@@ -818,6 +818,7 @@ export default function AdminPanel() {
   });
   const citySalesInvoices = salesInvoices.filter((inv) => (inv.city || CITIES[0]) === effectiveCity);
   const citySalesPayments = salesPayments.filter((p) => (p.city || CITIES[0]) === effectiveCity);
+  const cityOperationalOrders = cityOrders.filter((o) => !o.isAdvance);
   const cityStaff = staff.filter((s) => (s.city || CITIES[0]) === effectiveCity);
   const cityStaffAttendance = staffAttendance.filter((a) => (a.city || CITIES[0]) === effectiveCity);
   const cityStaffAdvances = staffAdvances.filter((a) => (a.city || CITIES[0]) === effectiveCity);
@@ -1020,8 +1021,8 @@ export default function AdminPanel() {
               onDeleteAdvance={deleteAdvance}
             />
           )}
-          {tab === 'packaging' && <PackagingPanel orders={cityOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
-          {tab === 'dispatch' && <DispatchPanel orders={cityOrders} items={cityItems} crates={cityCrates} dispatchLog={cityDispatchLog} indentBatches={cityIndentBatches} onDispatchBatch={dispatchBatch} />}
+          {tab === 'packaging' && <PackagingPanel orders={cityOperationalOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
+          {tab === 'dispatch' && <DispatchPanel orders={cityOperationalOrders} items={cityItems} crates={cityCrates} dispatchLog={cityDispatchLog} indentBatches={cityIndentBatches} onDispatchBatch={dispatchBatch} />}
           {tab === 'crates' && <CratesPanel crates={cityCrates} log={cityCrateLog} onAdjust={adjustCrates} />}
           {tab === 'barcodelabels' && (
             <BarcodeLabelsPanel
@@ -3056,7 +3057,8 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
 
   const [indentPlatform, setIndentPlatform] = useState('Blinkit');
   const [indentFulfilmentDate, setIndentFulfilmentDate] = useState('');
-  const [pendingIndent, setPendingIndent] = useState(null); // { platform, fileName, rows, fulfilmentDate }
+  const [pendingIndent, setPendingIndent] = useState(null); // { platform, fileName, rows, fulfilmentDate, isAdvance }
+  const advanceFileRef = useRef(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState(new Set());
   const [fileError, setFileError] = useState('');
   const fileInputRef = useRef(null);
@@ -3069,10 +3071,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     setFulfilmentDate('');
   };
 
-  const handleFile = (e) => {
+  const handleFile = (e, isAdvance = false) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (!indentFulfilmentDate) {
+    // An advance indent is a heads-up for buying only — the channel fixes its own
+    // fulfilment date later, so we deliberately don't ask for one here.
+    if (!isAdvance && !indentFulfilmentDate) {
       setFileError('Please set the fulfilment date before uploading an indent.');
       e.target.value = '';
       return;
@@ -3100,7 +3104,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           if (match) onEnsureAlias(match.id, indentPlatform, r.rawCode, r.rawAltCode);
           return { ...r, mappedItemId: match ? match.id : '' };
         });
-        setPendingIndent({ platform: indentPlatform, fileName: file.name, rows, fulfilmentDate: indentFulfilmentDate });
+        setPendingIndent({ platform: indentPlatform, fileName: file.name, rows, fulfilmentDate: isAdvance ? '' : indentFulfilmentDate, isAdvance });
         setSelectedRowKeys(new Set(rows.map((r) => r.key))); // select all by default
       } catch (err) {
         setFileError('Could not read this file. Please upload a valid .xlsx, .xls, or .csv indent.');
@@ -3204,6 +3208,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           packSize,
           packUnit,
           rawUnit: r.unit || '',
+          isAdvance: !!pendingIndent.isAdvance,
           batchId,
         });
         compiledMap[key].qty += storeQty;
@@ -3218,9 +3223,10 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
         compiled,
         released: false,
         purchaseRowIds: [],
+        isAdvance: !!pendingIndent.isAdvance,
       });
     }
-    if (!remaining.length) setIndentFulfilmentDate('');
+    if (!remaining.length && !pendingIndent.isAdvance) setIndentFulfilmentDate('');
     setPendingIndent(remaining.length ? { ...pendingIndent, rows: remaining } : null);
     setSelectedRowKeys(new Set(remaining.filter((r) => selectedRowKeys.has(r.key)).map((r) => r.key)));
   };
@@ -3272,8 +3278,19 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
               style={{ borderRadius: 8, border: `1px solid ${indentFulfilmentDate ? LINE : AMBER}`, fontSize: 12, padding: '7px 8px' }}
             />
           </div>
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: 'none' }} />
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFile(e, false)} style={{ display: 'none' }} />
+          <button
+            onClick={() => advanceFileRef.current?.click()}
+            title="For articles that take days to arrive — buying heads-up only, no fulfilment date"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+          >
+            <Upload size={13} /> Upload advance indent
+          </button>
+          <input ref={advanceFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFile(e, true)} style={{ display: 'none' }} />
         </div>
+        <p style={{ margin: '10px 0 0', fontSize: 11, color: MUTED }}>
+          An <strong>advance indent</strong> is the channel telling you early about articles that take a few days to source. It needs no fulfilment date — just pick the articles and release them to the purchase manager. Advance indents are never counted in Sales, P&amp;L or any accounting.
+        </p>
         {!indentFulfilmentDate && (
           <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '10px 0 0' }}>
             <AlertCircle size={13} /> Fulfilment date is required before you can upload an indent.
@@ -3290,6 +3307,11 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <p style={{ margin: 0, fontSize: 12, color: MUTED }}>
                 <strong style={{ color: INK }}>{pendingIndent.fileName}</strong> · {pendingIndent.platform} · {pendingIndent.rows.length} article{pendingIndent.rows.length !== 1 ? 's' : ''} found, {readyCount} ready, {selectedRowKeys.size} selected
+                {pendingIndent.isAdvance && (
+                  <span style={{ marginLeft: 8, background: '#FFF4E5', color: AMBER, border: `1px solid ${AMBER}`, borderRadius: 999, padding: '2px 10px', fontSize: 10, fontWeight: 800 }}>
+                    ADVANCE INDENT — no fulfilment date, purchase only
+                  </span>
+                )}
                 {pendingIndent.fulfilmentDate ? ` · Fulfilment: ${pendingIndent.fulfilmentDate}` : ''}
               </p>
               <div style={{ display: 'flex', gap: 10 }}>
@@ -4303,7 +4325,7 @@ function buildPricingArticles(orders, items, purchases, city, configByKey) {
 // Quantity marked short at packing time is subtracted from the pack count before costing
 // it, so a shortfall we never actually bought or sent out doesn't get counted as spend.
 function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
-  const batchOrders = orders.filter((o) => o.batchId === batch.id);
+  const batchOrders = orders.filter((o) => o.batchId === batch.id && !o.isAdvance);
   const batchCity = batch.city || CITIES[0];
   const rows = batchOrders.map((o) => {
     const key = `${batchCity}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
@@ -5883,7 +5905,10 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
   const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey), [orders, items, purchases, city, configByKey]);
   const articlesByKey = useMemo(() => { const m = {}; articles.forEach((a) => { m[a.key] = a; }); return m; }, [articles]);
 
-  const batchFinancials = useMemo(() => indentBatches.map((b) => {
+  // Advance indents are a buying heads-up only — the channel fixes their real
+  // fulfilment date (and issues the real indent) later, so counting them here
+  // would double-count the same goods in Sales, P&L and receivables.
+  const batchFinancials = useMemo(() => indentBatches.filter((b) => !b.isAdvance).map((b) => {
     const costs = computeBatchArticleCosts(b, orders, articlesByKey, configByKey);
     const grn = grnValueForBatch(b.id, grnReports, items, articlesByKey, configByKey, city, b.platform);
     const poRows = b.poRows || [];
