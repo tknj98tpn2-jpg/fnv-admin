@@ -4707,7 +4707,7 @@ function parsePoSheetRows(rows) {
     }
   }
   if (headerIdx === -1) return [];
-  const num = (v) => Number(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')) || 0;
+  const num = (v) => Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, '')) || 0;
   const out = [];
   for (let i = headerIdx + 1; i < rows.length; i += 1) {
     const cells = rows[i] || [];
