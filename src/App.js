@@ -35,6 +35,7 @@ import {
   IndianRupee,
   TrendingUp,
   ChevronRight,
+  Barcode,
 } from 'lucide-react';
 
 // ── Firebase ──────────────────────────────────────────────
@@ -93,6 +94,131 @@ const STATUS_COLORS = {
 
 const PLATFORMS = ['Blinkit', 'Flipkart'];
 
+// ── Barcode rendering — EAN-13 for numeric codes (Flipkart's EANs), Code 128
+// Set B for anything else (Blinkit's alphanumeric SKUs like "BLK-ONI-600").
+// Both tables are the standardised, publicly defined bar patterns for their
+// symbology — not any particular library's implementation — since a single
+// wrong digit here would make a label print but silently fail to scan.
+// Checksum formulas verified against real EAN-13 codes from this business's own
+// data (890429370450-3, -0, etc.) and against a published Code-128 worked example.
+const EAN13_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+const EAN13_G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
+const EAN13_R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'];
+const EAN13_PARITY = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+
+function ean13CheckDigit(digits12) {
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += (i % 2 === 0) ? Number(digits12[i]) : Number(digits12[i]) * 3;
+  return (10 - (sum % 10)) % 10;
+}
+
+function ean13ToBits(code) {
+  let digits = code.replace(/\D/g, '');
+  if (digits.length === 12) digits += String(ean13CheckDigit(digits));
+  if (digits.length !== 13) return null;
+  const parity = EAN13_PARITY[Number(digits[0])];
+  let bits = '101';
+  for (let i = 1; i <= 6; i++) bits += parity[i - 1] === 'L' ? EAN13_L[Number(digits[i])] : EAN13_G[Number(digits[i])];
+  bits += '01010';
+  for (let i = 7; i <= 12; i++) bits += EAN13_R[Number(digits[i])];
+  bits += '101';
+  return { bits, displayText: digits };
+}
+
+const CODE128_PATTERNS = [
+  '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
+  '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
+  '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
+  '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
+  '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
+  '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
+  '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
+  '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
+  '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
+  '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
+  '114131', '311141', '411131', '211412', '211214', '211232', '233111',
+];
+const CODE128_START_B = 104;
+const CODE128_STOP_PATTERN = '2331112';
+
+function code128ToBits(text) {
+  const chars = String(text).split('').filter((c) => { const n = c.charCodeAt(0); return n >= 32 && n <= 127; });
+  if (chars.length === 0) return null;
+  const values = chars.map((c) => c.charCodeAt(0) - 32);
+  let checksum = CODE128_START_B;
+  values.forEach((v, i) => { checksum += v * (i + 1); });
+  checksum %= 103;
+  const widthStr = [CODE128_START_B, ...values, checksum].map((v) => CODE128_PATTERNS[v]).join('') + CODE128_STOP_PATTERN;
+  let bits = '';
+  let isBar = true;
+  for (const ch of widthStr) { bits += (isBar ? '1' : '0').repeat(Number(ch)); isBar = !isBar; }
+  return { bits, displayText: chars.join('') };
+}
+
+// Dispatches to EAN-13 for a 12-13 digit numeric code, Code 128 otherwise.
+// Returns { bars: [{x,w}], totalWidth, height, displayText } ready for SVG rendering.
+function renderBarcodeData(code, width = 200, height = 45) {
+  const cleaned = String(code || '').trim();
+  if (!cleaned) return null;
+  const isNumeric = /^\d{12,13}$/.test(cleaned);
+  const result = isNumeric ? ean13ToBits(cleaned) : code128ToBits(cleaned);
+  if (!result) return null;
+  const { bits, displayText } = result;
+  const moduleWidth = width / bits.length;
+  const bars = [];
+  let i = 0;
+  while (i < bits.length) {
+    if (bits[i] === '1') {
+      let j = i;
+      while (j < bits.length && bits[j] === '1') j += 1;
+      bars.push({ x: i * moduleWidth, w: (j - i) * moduleWidth });
+      i = j;
+    } else i += 1;
+  }
+  return { bars, totalWidth: width, height, displayText };
+}
+
+function BarcodeSVG({ code, width = 200, height = 45, showText = true }) {
+  const data = renderBarcodeData(code, width, height);
+  if (!data) return <div style={{ fontSize: 10, color: TOMATO }}>No code to print</div>;
+  return (
+    <svg width={width} height={showText ? height + 14 : height} viewBox={`0 0 ${width} ${showText ? height + 14 : height}`}>
+      <rect x={0} y={0} width={width} height={height} fill="#fff" />
+      {data.bars.map((b, i) => <rect key={i} x={b.x} y={0} width={b.w} height={height} fill="#000" />)}
+      {showText && (
+        <text x={width / 2} y={height + 11} textAnchor="middle" fontSize="10" fontFamily="monospace" fill="#000">{data.displayText}</text>
+      )}
+    </svg>
+  );
+}
+
+// String-rendering twin of BarcodeSVG, for building the raw HTML sent to the
+// browser print window (which isn't a React tree, so JSX can't be used there).
+// Lets each article "remember" its own shelf life: whatever gap the user sets once
+// between packing date and best-before gets stored as a day-count on that article's
+// alias, so future print runs auto-advance the best-before date along with the
+// packing date instead of it needing to be re-typed every single day.
+function addDaysToDateStr(dateStr, days) {
+  if (!dateStr) return '';
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + Number(days));
+  return d.toISOString().split('T')[0];
+}
+function diffDaysBetween(fromStr, toStr) {
+  const from = new Date(`${fromStr}T00:00:00`);
+  const to = new Date(`${toStr}T00:00:00`);
+  return Math.round((to - from) / (1000 * 60 * 60 * 24));
+}
+
+function barcodeSVGMarkup(code, width = 200, height = 45, showText = true) {
+  const data = renderBarcodeData(code, width, height);
+  if (!data) return '<div style="font-size:10px;color:#D9552C;">No code</div>';
+  const totalH = showText ? height + 14 : height;
+  const bars = data.bars.map((b) => `<rect x="${b.x}" y="0" width="${b.w}" height="${height}" fill="#000"/>`).join('');
+  const text = showText ? `<text x="${width / 2}" y="${height + 11}" text-anchor="middle" font-size="10" font-family="monospace" fill="#000">${data.displayText}</text>` : '';
+  return `<svg width="${width}" height="${totalH}" viewBox="0 0 ${width} ${totalH}"><rect x="0" y="0" width="${width}" height="${height}" fill="#fff"/>${bars}${text}</svg>`;
+}
+
 // Each indent can be split across dark stores (Flipkart lists one column per store);
 // Blinkit has a single store. Orders carry a `store`; older orders without one fall back
 // to the platform's default store, if it has one.
@@ -144,6 +270,7 @@ const PERMISSION_SECTIONS = [
   { key: 'packaging', label: 'Packaging' },
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'crates', label: 'Crates & boxes' },
+  { key: 'barcodelabels', label: 'Barcode Labels' },
   { key: 'users', label: 'Users & Roles' },
 ];
 
@@ -151,17 +278,17 @@ const SEED_ROLES = [
   {
     id: 'ROLE-ADMIN',
     name: 'Admin',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: true, dispatch: true, crates: true, users: true },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
   },
   {
     id: 'ROLE-WAREHOUSE',
     name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, purchase: false, stockcount: true, spoilage: false, pricing: false, profitloss: false, packaging: true, dispatch: true, crates: true, users: false },
+    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, purchase: false, stockcount: true, spoilage: false, pricing: false, profitloss: false, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
   },
   {
     id: 'ROLE-PURCHASE',
     name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: false, dispatch: false, crates: false, users: false },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
   },
 ];
 
@@ -183,6 +310,7 @@ const NAV = [
   { key: 'packaging', label: 'Packaging', icon: PackageCheck },
   { key: 'dispatch', label: 'Dispatch', icon: Truck },
   { key: 'crates', label: 'Crates & boxes', icon: Boxes },
+  { key: 'barcodelabels', label: 'Barcode Labels', icon: Barcode },
   { key: 'users', label: 'Users & Roles', icon: Users },
 ];
 
@@ -276,6 +404,8 @@ export default function AdminPanel() {
   const [placedOrders,  setPlacedOrders]  = useState([]); // { id, name, date, items: [{itemId, itemName, uom, qty, no}] } — saved requirement lists for WhatsApp sharing
   const [indentBatches, setIndentBatches] = useState([]);
   const [cratesByCity,  setCratesByCity]  = useState({});
+  const [barcodeFormats, setBarcodeFormats] = useState([]);
+  const [companyDetailsByCity, setCompanyDetailsByCity] = useState({});
   const [crateLog,      setCrateLog]      = useState([]);
   const [dispatchLog,   setDispatchLog]   = useState([]);
   const [stockCounts,   setStockCounts]   = useState([]); // nightly closing-stock entries, one per item per date
@@ -306,8 +436,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','spoilageSurplus','pricingConfig','grnReports'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, spoilageSurplus: setSpoilageSurplus, pricingConfig: setPricingConfig, grnReports: setGrnReports };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','spoilageSurplus','pricingConfig','grnReports','barcodeFormats'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, spoilageSurplus: setSpoilageSurplus, pricingConfig: setPricingConfig, grnReports: setGrnReports, barcodeFormats: setBarcodeFormats };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -329,6 +459,12 @@ export default function AdminPanel() {
       }
     });
 
+    // Company details for barcode labels (name/address/FSSAI) — one per city, since a
+    // separate warehouse/premises can hold its own FSSAI licence.
+    const unsub2b = onSnapshot(doc(db, 'settings', 'companyDetails'), (d) => {
+      if (d.exists()) setCompanyDetailsByCity(d.data());
+    });
+
     // packing progress — keyed by target id, stored as a map for O(1) lookup
     const unsub3 = onSnapshot(collection(db, 'packingProgress'), (snap) => {
       const map = {};
@@ -336,7 +472,7 @@ export default function AdminPanel() {
       setPackingProgress(map);
     });
 
-    return () => { unsubs.forEach((u) => u()); unsub2(); unsub3(); };
+    return () => { unsubs.forEach((u) => u()); unsub2(); unsub2b(); unsub3(); };
   }, []);
   // ──────────────────────────────────────────────────────
 
@@ -403,6 +539,13 @@ export default function AdminPanel() {
       : [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: '', packUnit: 'kg', ...patch }];
     fbUpdate('items', itemId, { aliases: nextAliases });
   };
+  // Barcode label formats — each is a named, reusable set of which fields print on a
+  // label (Blinkit/Flipkart genuinely need different fields per article, hence formats
+  // being separate from any one item). Mapping which format an article uses reuses
+  // mapChannelField above, since that's already a per-channel-alias patch.
+  const saveBarcodeFormat = (format) => fbSetDoc('barcodeFormats', format.id, { ...format, city: effectiveCity });
+  const deleteBarcodeFormat = (id) => fbDelete('barcodeFormats', id);
+  const updateCompanyDetails = (details) => fbSetDoc('settings', 'companyDetails', { ...companyDetailsByCity, [effectiveCity]: details });
   // Different articles from the same channel can map to the same base item but have
   // their own pack size (e.g. "Baby Banana" 500g vs "Banana 3pc" 600g, both on Blinkit,
   // both = item "Banana"). So each distinct article code gets its OWN alias entry —
@@ -632,6 +775,8 @@ export default function AdminPanel() {
   };
 
   const cityItems = items.filter((it) => (it.city || CITIES[0]) === effectiveCity);
+  const cityBarcodeFormats = barcodeFormats.filter((f) => (f.city || CITIES[0]) === effectiveCity);
+  const companyDetails = companyDetailsByCity[effectiveCity] || { name: '', address: '', fssai: '' };
   const cityVendors = vendors.filter((v) => (v.city || CITIES[0]) === effectiveCity);
   const cityOrders = orders.filter((o) => (o.city || CITIES[0]) === effectiveCity);
   const cityPurchases = purchases.filter((p) => (p.city || CITIES[0]) === effectiveCity);
@@ -821,6 +966,19 @@ export default function AdminPanel() {
           {tab === 'packaging' && <PackagingPanel orders={cityOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
           {tab === 'dispatch' && <DispatchPanel orders={cityOrders} items={cityItems} crates={cityCrates} dispatchLog={cityDispatchLog} indentBatches={cityIndentBatches} onDispatchBatch={dispatchBatch} />}
           {tab === 'crates' && <CratesPanel crates={cityCrates} log={cityCrateLog} onAdjust={adjustCrates} />}
+          {tab === 'barcodelabels' && (
+            <BarcodeLabelsPanel
+              items={cityItems}
+              orders={cityOrders}
+              packingProgress={packingProgress}
+              barcodeFormats={cityBarcodeFormats}
+              companyDetails={companyDetails}
+              onSaveFormat={saveBarcodeFormat}
+              onDeleteFormat={deleteBarcodeFormat}
+              onUpdateCompanyDetails={updateCompanyDetails}
+              onUpdateAlias={mapChannelField}
+            />
+          )}
           {tab === 'users' && (
             <UsersRolesPanel
               users={users}
@@ -2568,12 +2726,18 @@ function sumUnknownNumericColumns(rowObj, headers) {
   return Object.keys(stores).length > 0 ? stores : null;
 }
 
-function parseIndentRows(json) {
+function parseIndentRows(json, platform) {
   return json
     .map((r, idx) => {
       const headers = Object.keys(r);
       const rawName = String(pickField(r, ['title', 'article', 'product', 'item', 'description']) || '').trim();
-      const rawCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
+      // Flipkart's own FSN/SKU column has turned out unreliable for matching across
+      // separate indent uploads, so for Flipkart we key off the EAN barcode instead —
+      // falling back to FSN only if a row's EAN cell is genuinely blank. Blinkit's
+      // existing SKU-based matching already works fine and is left untouched.
+      const rawCode = platform === 'Flipkart'
+        ? String(pickField(r, ['eancode', 'ean']) || pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim()
+        : String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
       let qty = Number(pickField(r, ['indent', 'qty', 'quantity', 'orderedqty']) || 0);
       let storeQtys = null;
       if (!qty) {
@@ -2792,7 +2956,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
         const wb = XLSX.read(evt.target.result, { type: 'array' });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        const rawRows = parseIndentRows(json);
+        const rawRows = parseIndentRows(json, indentPlatform);
         if (rawRows.length === 0) {
           setFileError('No article rows with a valid name and quantity were found in this file.');
           return;
@@ -5554,6 +5718,421 @@ function CratesPanel({ crates, log, onAdjust }) {
         </div>
       </Panel>
     </div>
+  );
+}
+
+const STD_BARCODE_FIELD_DEFS = [
+  { key: 'printBarcode', label: 'Print barcode (the scannable graphic itself)' },
+  { key: 'itemName', label: 'Item Name' },
+  { key: 'netWeight', label: 'Net Weight / Net Quantity' },
+  { key: 'packingDate', label: 'Packing Date' },
+  { key: 'expiryDate', label: 'Expiry Date' },
+  { key: 'companyDetails', label: 'Company Details (Name + Address + FSSAI)' },
+  { key: 'showBarcodeNumber', label: 'Show barcode number as text' },
+];
+
+function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias }) {
+  const [view, setView] = useState('print'); // 'print' | 'formats' | 'mapping' | 'business'
+  const views = [
+    { key: 'print', label: 'Print Labels' },
+    { key: 'formats', label: 'Formats' },
+    { key: 'mapping', label: 'Map Formats to Articles' },
+    { key: 'business', label: 'Business Details' },
+  ];
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {views.map((v) => (
+          <button
+            key={v.key}
+            onClick={() => setView(v.key)}
+            style={{
+              background: view === v.key ? LEAF : '#fff',
+              color: view === v.key ? '#fff' : INK,
+              border: `1px solid ${view === v.key ? LEAF : LINE}`,
+              borderRadius: RADIUS.md, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} />}
+      {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
+      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} onMapFormat={(itemId, channel, formatId) => onUpdateAlias(itemId, channel, { barcodeFormatId: formatId })} onUpdateCode={(itemId, channel, code) => onUpdateAlias(itemId, channel, { code })} />}
+      {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
+    </div>
+  );
+}
+
+function BusinessDetailsTab({ details, onSave }) {
+  const [name, setName] = useState(details.name || '');
+  const [address, setAddress] = useState(details.address || '');
+  const [fssai, setFssai] = useState(details.fssai || '');
+  useEffect(() => { setName(details.name || ''); setAddress(details.address || ''); setFssai(details.fssai || ''); }, [details]);
+  const [saved, setSaved] = useState(false);
+  const save = () => { onSave({ name: name.trim(), address: address.trim(), fssai: fssai.trim() }); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+  return (
+    <Panel style={{ maxWidth: 480 }}>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Business details</p>
+      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Printed on every label that includes "Company Details" — one set per city, since a separate premises can hold its own FSSAI licence.</p>
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>COMPANY NAME</p>
+      <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>ADDRESS</p>
+      <textarea value={address} onChange={(e) => setAddress(e.target.value)} style={{ ...inputStyle, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} />
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>FSSAI LICENSE NUMBER</p>
+      <input value={fssai} onChange={(e) => setFssai(e.target.value)} placeholder="14-digit number" style={inputStyle} />
+      <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+        {saved ? 'Saved ✓' : 'Save'}
+      </button>
+    </Panel>
+  );
+}
+
+function formatFieldSummary(f) {
+  const parts = [];
+  STD_BARCODE_FIELD_DEFS.forEach((d) => { if (f.standardFields?.[d.key]) parts.push(d.label); });
+  (f.customFields || []).forEach((c) => parts.push(c.label));
+  return parts.join(' · ') || 'No fields selected';
+}
+
+function BarcodeFormatsTab({ formats, onSave, onDelete }) {
+  const [editing, setEditing] = useState(null);
+
+  if (editing) return <BarcodeFormatEditor format={editing} onSave={(f) => { onSave(f); setEditing(null); }} onCancel={() => setEditing(null)} />;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Saved label formats</p>
+        <button
+          onClick={() => setEditing({
+            id: `FMT-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+            name: '',
+            standardFields: { printBarcode: true, itemName: true, netWeight: true, packingDate: true, expiryDate: false, companyDetails: true, showBarcodeNumber: true },
+            customFields: [],
+          })}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+        >
+          <Plus size={14} /> New format
+        </button>
+      </div>
+      {formats.length === 0 && <p style={{ color: MUTED, fontSize: 13 }}>No formats yet — create one to start printing labels.</p>}
+      {formats.map((f) => (
+        <Panel key={f.id} style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <p style={{ fontWeight: 700, margin: '0 0 4px' }}>{f.name}</p>
+            <p style={{ fontSize: 11, color: MUTED, margin: 0 }}>{formatFieldSummary(f)}</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button onClick={() => setEditing(f)} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer' }}><Pencil size={15} /></button>
+            <button onClick={() => { if (window.confirm(`Delete format "${f.name}"? Articles using it will need a new format mapped.`)) onDelete(f.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={15} /></button>
+          </div>
+        </Panel>
+      ))}
+    </div>
+  );
+}
+
+function BarcodeFormatEditor({ format, onSave, onCancel }) {
+  const [name, setName] = useState(format.name);
+  const [standardFields, setStandardFields] = useState(format.standardFields);
+  const [customFields, setCustomFields] = useState(format.customFields || []);
+
+  const toggleStd = (key) => setStandardFields((s) => ({ ...s, [key]: !s[key] }));
+  const addCustom = () => setCustomFields((c) => [...c, { id: `CF-${Date.now().toString(36).toUpperCase()}-${c.length}`, label: '', value: '' }]);
+  const updateCustom = (id, patch) => setCustomFields((c) => c.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  const removeCustom = (id) => setCustomFields((c) => c.filter((f) => f.id !== id));
+  const canSave = name.trim().length > 0;
+  const save = () => { if (canSave) onSave({ ...format, name: name.trim(), standardFields, customFields: customFields.filter((f) => f.label.trim()) }); };
+
+  return (
+    <Panel style={{ maxWidth: 560 }}>
+      <p style={{ margin: '0 0 16px', fontWeight: 700, fontSize: 14, color: INK }}>{format.name ? 'Edit format' : 'New format'}</p>
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>FORMAT NAME</p>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Blinkit Basic" style={inputStyle} />
+
+      <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>FIELDS TO INCLUDE</p>
+      {STD_BARCODE_FIELD_DEFS.map((d) => (
+        <label key={d.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13, cursor: 'pointer', color: INK }}>
+          <input type="checkbox" checked={!!standardFields[d.key]} onChange={() => toggleStd(d.key)} />
+          {d.label}
+        </label>
+      ))}
+
+      <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>CUSTOM FIELDS (any extra number, symbol, or note)</p>
+      {customFields.map((cf) => (
+        <div key={cf.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <input placeholder="Label (e.g. HSN Code)" value={cf.label} onChange={(e) => updateCustom(cf.id, { label: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+          <input placeholder="Value" value={cf.value} onChange={(e) => updateCustom(cf.id, { value: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+          <button onClick={() => removeCustom(cf.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', flexShrink: 0 }}><Trash2 size={15} /></button>
+        </div>
+      ))}
+      <button onClick={addCustom} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: `1px dashed ${LINE}`, borderRadius: RADIUS.md, padding: '8px 12px', fontSize: 12, fontWeight: 700, color: LEAF, cursor: 'pointer', marginBottom: 18 }}>
+        <Plus size={13} /> Add custom field
+      </button>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={save} disabled={!canSave} style={{ background: canSave ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: canSave ? 'pointer' : 'default' }}>Save format</button>
+        <button onClick={onCancel} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </Panel>
+  );
+}
+
+function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateCode }) {
+  const [search, setSearch] = useState('');
+  const [codeOverrides, setCodeOverrides] = useState({});
+  const rows = [];
+  items.forEach((it) => {
+    (it.aliases || []).forEach((al) => {
+      if (al.code) rows.push({ itemId: it.id, itemName: it.name, channel: al.channel, code: al.code, barcodeFormatId: al.barcodeFormatId || '' });
+    });
+  });
+  const filtered = rows.filter((r) => !search.trim() || r.itemName.toLowerCase().includes(search.trim().toLowerCase()));
+  const rowKey = (r) => `${r.itemId}__${r.channel}`;
+  const codeFor = (r) => codeOverrides[rowKey(r)] ?? r.code;
+  const commitCode = (r, value) => {
+    const trimmed = value.trim();
+    if (trimmed !== r.code) onUpdateCode(r.itemId, r.channel, trimmed);
+  };
+
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Map a format to each article</p>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Each article can use a different format — this is what makes labels print with exactly the fields that article needs.</p>
+      <input placeholder="Search item..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260 }} />
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr><Th>Item</Th><Th>Channel</Th><Th>Code</Th><Th>Format</Th></tr></thead>
+          <tbody>
+            {filtered.map((r, i) => (
+              <tr key={i}>
+                <Td>{r.itemName}</Td>
+                <Td>{r.channel}</Td>
+                <Td>
+                  <input
+                    value={codeFor(r)}
+                    onChange={(e) => setCodeOverrides((c) => ({ ...c, [rowKey(r)]: e.target.value }))}
+                    onBlur={(e) => commitCode(r, e.target.value)}
+                    style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
+                  />
+                </Td>
+                <Td>
+                  <select
+                    value={r.barcodeFormatId}
+                    onChange={(e) => onMapFormat(r.itemId, r.channel, e.target.value)}
+                    style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }}
+                  >
+                    <option value="">— No format (skipped on print) —</option>
+                    {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </Td>
+              </tr>
+            ))}
+            {filtered.length === 0 && <tr><Td colSpan={4} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias }) {
+  const [platform, setPlatform] = useState(PLATFORMS[0]);
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedKeys, setSelectedKeys] = useState(new Set());
+  const [qtyOverrides, setQtyOverrides] = useState({});
+  const [codeOverrides, setCodeOverrides] = useState({});
+  const [bestBeforeOverrides, setBestBeforeOverrides] = useState({});
+  const [labelSize, setLabelSize] = useState('thermal5050'); // 'thermal5050' | 'a4'
+
+  const articles = useMemo(() => {
+    const dayOrders = orders.filter((o) => o.platform === platform && o.fulfilmentDate === date && o.packQty && o.packSize);
+    const groups = {};
+    dayOrders.forEach((o) => {
+      const cityKey = o.city || CITIES[0];
+      const key = `${cityKey}__${date}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, packSize: o.packSize, packUnit: o.packUnit, targetPacks: 0 };
+      groups[key].targetPacks += Number(o.packQty) || 0;
+    });
+    return Object.values(groups)
+      .map((g) => {
+        const item = items.find((it) => it.name === g.product);
+        const alias = (item?.aliases || []).find((a) => a.channel === platform);
+        const progress = packingProgress[g.key] || { packedQty: 0 };
+        return { ...g, itemId: item?.id || '', code: alias?.code || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+      })
+      .sort((a, b) => a.articleName.localeCompare(b.articleName));
+  }, [orders, items, packingProgress, platform, date]);
+
+  useEffect(() => {
+    setSelectedKeys(new Set(articles.map((a) => a.key)));
+    setQtyOverrides({});
+    setCodeOverrides({});
+    setBestBeforeOverrides({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform, date]);
+
+  const toggle = (key) => setSelectedKeys((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  const qtyFor = (a) => qtyOverrides[a.key] ?? (a.packedQty || a.targetPacks || 0);
+  const codeFor = (a) => codeOverrides[a.key] ?? a.code;
+  const commitCode = (a, value) => {
+    const trimmed = value.trim();
+    if (trimmed !== a.code && a.itemId) onUpdateAlias(a.itemId, platform, { code: trimmed });
+  };
+  // Best Before shows the auto-calculated date (packing date + this article's
+  // remembered shelf life) until the user edits it for this print run — editing it
+  // re-derives and saves a new shelf-life day-count, so tomorrow's auto-calculation
+  // uses the corrected gap from then on.
+  const bestBeforeFor = (a) => bestBeforeOverrides[a.key] ?? (a.shelfLifeDays != null ? addDaysToDateStr(date, a.shelfLifeDays) : '');
+  const commitBestBefore = (a, value) => {
+    if (!value || !a.itemId) return;
+    const days = diffDaysBetween(date, value);
+    onUpdateAlias(a.itemId, platform, { shelfLifeDays: days });
+  };
+
+  // A checked "Company Details" box on a format only decides WHETHER that section
+  // prints — the actual name/address/FSSAI still come from Business Details, saved
+  // separately per city. Flag it clearly here rather than let it print blank and
+  // only be noticed on the physical label.
+  const needsCompanyDetails = articles.some((a) => barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.standardFields?.companyDetails);
+  const companyDetailsEmpty = !companyDetails.name?.trim() && !companyDetails.address?.trim() && !companyDetails.fssai?.trim();
+
+  const printLabels = () => {
+    const toPrint = articles.filter((a) => selectedKeys.has(a.key) && a.code);
+    if (toPrint.length === 0) { alert('Select at least one article that has a code before printing.'); return; }
+    const isThermal = labelSize === 'thermal5050';
+    // The TVS LP-46 Neo's 2-up roll is two 50mm labels side by side (100mm total),
+    // well inside its 108mm print head width — so the barcode itself is sized down
+    // to comfortably fit next to several lines of compliance text on one 50mm-tall label.
+    const barcodeW = isThermal ? 44 * 3.78 : 190; // mm→px at 96dpi CSS reference, so the SVG's own coordinate space matches the printed mm size
+    const barcodeH = isThermal ? 18 * 3.78 : 40; // taller than the minimum fit — real-world testing showed 50mm has room to spare, and a taller barcode scans more reliably
+    const labelsHtml = toPrint.map((a) => {
+      const format = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
+      const sf = format?.standardFields || { printBarcode: true, itemName: true, netWeight: true, showBarcodeNumber: true };
+      const qty = Math.max(1, Math.round(qtyFor(a)));
+      const netWeight = `${a.packSize}${a.packUnit}`;
+      let oneLabel = '<div class="label">';
+      if (sf.printBarcode !== false) {
+        oneLabel += barcodeSVGMarkup(a.code, barcodeW, barcodeH, sf.showBarcodeNumber !== false);
+      } else if (sf.showBarcodeNumber !== false && a.code) {
+        // No scannable graphic on this format, but the code itself can still print
+        // as plain text (e.g. for manual lookup) if that toggle is on.
+        oneLabel += `<div class="lbl-line lbl-name">${a.code}</div>`;
+      }
+      if (sf.itemName) oneLabel += `<div class="lbl-line lbl-name">${a.articleName}</div>`;
+      if (sf.netWeight) oneLabel += `<div class="lbl-line">Net Wt: ${netWeight}</div>`;
+      if (sf.packingDate) oneLabel += `<div class="lbl-line">Packed: ${date}</div>`;
+      if (sf.expiryDate) oneLabel += `<div class="lbl-line">Best Before: ${bestBeforeFor(a) || '___________'}</div>`;
+      if (sf.companyDetails) oneLabel += `<div class="lbl-line lbl-company">${companyDetails.name || ''}<br/>${(companyDetails.address || '').replace(/\n/g, '<br/>')}<br/>FSSAI: ${companyDetails.fssai || ''}</div>`;
+      (format?.customFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label}: ${cf.value}</div>`; });
+      oneLabel += '</div>';
+      return Array(qty).fill(oneLabel).join('');
+    }).join('');
+
+    const thermalStyle = `
+        @page { size: 100mm 50mm; margin: 0; }
+        body { font-family: Arial, sans-serif; margin: 0; }
+        .grid { display: flex; flex-wrap: wrap; width: 100mm; }
+        .label { width: 50mm; height: 50mm; padding: 1.5mm; box-sizing: border-box; overflow: hidden; text-align: center; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .lbl-line { font-size: 7px; margin-top: 1.5px; line-height: 1.25; word-break: break-word; }
+        .lbl-name { font-weight: 700; font-size: 8.5px; margin-top: 2px; }
+        .lbl-company { font-size: 5.5px; color: #333; margin-top: 2px; }
+      `;
+    const a4Style = `
+        @page { margin: 8mm; }
+        body { font-family: Arial, sans-serif; margin: 0; }
+        .grid { display: flex; flex-wrap: wrap; gap: 4mm; }
+        .label { width: 60mm; border: 1px dashed #999; padding: 3mm; box-sizing: border-box; text-align: center; page-break-inside: avoid; }
+        .lbl-line { font-size: 9px; margin-top: 2px; line-height: 1.3; word-break: break-word; }
+        .lbl-name { font-weight: 700; font-size: 11px; }
+        .lbl-company { font-size: 7px; color: #333; }
+      `;
+
+    const html = `<!DOCTYPE html><html><head><title>Barcode Labels — ${platform} — ${date}</title>
+      <style>${isThermal ? thermalStyle : a4Style}</style></head>
+      <body><div class="grid">${labelsHtml}</div>
+      <script>window.onload = function() { window.print(); };</script>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { alert('Please allow popups to print labels.'); return; }
+    w.document.write(html);
+    w.document.close();
+  };
+
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Print pack labels</p>
+      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Pulls today's packed articles automatically — adjust quantities if needed before printing.</p>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
+          <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL SIZE</p>
+          <select value={labelSize} onChange={(e) => setLabelSize(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+            <option value="thermal5050">TVS LP-46 Neo — 50×50mm (2-up roll)</option>
+            <option value="a4">A4 sheet — multiple per page</option>
+          </select>
+        </div>
+      </div>
+      {needsCompanyDetails && companyDetailsEmpty && (
+        <div style={{ background: '#FFF4E5', border: `1px solid ${AMBER}`, borderRadius: RADIUS.md, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: INK }}>
+          A format below prints "Company Details", but Business Details is empty for this city — that section will print blank. Fill it in under the <strong>Business Details</strong> tab.
+        </div>
+      )}
+      {articles.length === 0 ? (
+        <p style={{ color: MUTED, fontSize: 13 }}>No packed articles found for {platform} on {date}.</p>
+      ) : (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
+              <thead><tr><Th /><Th>Article</Th><Th>Code</Th><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
+              <tbody>
+                {articles.map((a) => (
+                  <tr key={a.key}>
+                    <Td><input type="checkbox" checked={selectedKeys.has(a.key)} onChange={() => toggle(a.key)} /></Td>
+                    <Td>{a.articleName}</Td>
+                    <Td>
+                      <input
+                        value={codeFor(a)}
+                        onChange={(e) => setCodeOverrides((c) => ({ ...c, [a.key]: e.target.value }))}
+                        onBlur={(e) => commitCode(a, e.target.value)}
+                        placeholder="No code"
+                        style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
+                      />
+                    </Td>
+                    <Td>
+                      <input
+                        type="date"
+                        value={bestBeforeFor(a)}
+                        onChange={(e) => setBestBeforeOverrides((b) => ({ ...b, [a.key]: e.target.value }))}
+                        onBlur={(e) => commitBestBefore(a, e.target.value)}
+                        style={{ fontSize: 12, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
+                      />
+                      {a.shelfLifeDays != null && <p style={{ margin: '2px 0 0', fontSize: 10, color: MUTED }}>{a.shelfLifeDays}-day shelf life (remembered)</p>}
+                    </Td>
+                    <Td>{barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.name || <span style={{ color: AMBER }}>Not mapped</span>}</Td>
+                    <Td><input type="number" value={qtyFor(a)} onChange={(e) => setQtyOverrides((q) => ({ ...q, [a.key]: Number(e.target.value) }))} style={{ width: 70, padding: '6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }} /></Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button onClick={printLabels} style={{ display: 'flex', alignItems: 'center', gap: 8, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            <Barcode size={15} /> Print labels
+          </button>
+        </>
+      )}
+    </Panel>
   );
 }
 
