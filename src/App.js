@@ -33,9 +33,10 @@ import {
   ArrowLeft,
   Layers,
   IndianRupee,
-  TrendingUp,
   ChevronRight,
   Barcode,
+  Wallet,
+  UserCheck,
 } from 'lucide-react';
 
 // ── Firebase ──────────────────────────────────────────────
@@ -252,7 +253,8 @@ const PERMISSION_SECTIONS = [
   { key: 'stockcount', label: 'Stock Count' },
   { key: 'spoilage', label: 'Spoilage & Surplus' },
   { key: 'pricing', label: 'Pricing' },
-  { key: 'profitloss', label: 'Profit & Loss' },
+  { key: 'sales', label: 'Sales' },
+  { key: 'staff', label: 'Staff' },
   { key: 'packaging', label: 'Packaging' },
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'crates', label: 'Crates & boxes' },
@@ -264,17 +266,17 @@ const SEED_ROLES = [
   {
     id: 'ROLE-ADMIN',
     name: 'Admin',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, sales: true, staff: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
   },
   {
     id: 'ROLE-WAREHOUSE',
     name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, purchase: false, stockcount: true, spoilage: false, pricing: false, profitloss: false, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
+    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, purchase: false, stockcount: true, spoilage: false, pricing: false, profitloss: false, sales: false, staff: false, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
   },
   {
     id: 'ROLE-PURCHASE',
     name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, sales: true, staff: false, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
   },
 ];
 
@@ -292,7 +294,8 @@ const NAV = [
   { key: 'stockcount', label: 'Stock Count', icon: Layers },
   { key: 'spoilage', label: 'Spoilage & Surplus', icon: AlertCircle },
   { key: 'pricing', label: 'Pricing', icon: IndianRupee },
-  { key: 'profitloss', label: 'Profit & Loss', icon: TrendingUp },
+  { key: 'sales', label: 'Sales', icon: Wallet },
+  { key: 'staff', label: 'Staff', icon: UserCheck },
   { key: 'packaging', label: 'Packaging', icon: PackageCheck },
   { key: 'dispatch', label: 'Dispatch', icon: Truck },
   { key: 'crates', label: 'Crates & boxes', icon: Boxes },
@@ -391,6 +394,11 @@ export default function AdminPanel() {
   const [indentBatches, setIndentBatches] = useState([]);
   const [cratesByCity,  setCratesByCity]  = useState({});
   const [barcodeFormats, setBarcodeFormats] = useState([]);
+  const [salesInvoices, setSalesInvoices] = useState([]);
+  const [salesPayments, setSalesPayments] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [staffAttendance, setStaffAttendance] = useState([]);
+  const [staffAdvances, setStaffAdvances] = useState([]);
   const [companyDetailsByCity, setCompanyDetailsByCity] = useState({});
   const [crateLog,      setCrateLog]      = useState([]);
   const [dispatchLog,   setDispatchLog]   = useState([]);
@@ -422,8 +430,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','spoilageSurplus','pricingConfig','grnReports','barcodeFormats'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, spoilageSurplus: setSpoilageSurplus, pricingConfig: setPricingConfig, grnReports: setGrnReports, barcodeFormats: setBarcodeFormats };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','spoilageSurplus','pricingConfig','grnReports','barcodeFormats','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, spoilageSurplus: setSpoilageSurplus, pricingConfig: setPricingConfig, grnReports: setGrnReports, barcodeFormats: setBarcodeFormats, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -540,7 +548,7 @@ export default function AdminPanel() {
   // alias on a different item (e.g. someone picked the wrong item from a long
   // dropdown once), transfer it here instead of letting two items share the same
   // code, which makes future auto-matching pick whichever item happens to come first.
-  const ensureAliasForCode = (itemId, channel, code) => {
+  const ensureAliasForCode = (itemId, channel, code, altCode) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
     if (!code) {
       const exists = (it.aliases || []).some((a) => a.channel === channel && !a.code);
@@ -549,8 +557,15 @@ export default function AdminPanel() {
       return;
     }
     const codeLower = code.toLowerCase();
-    const alreadyHere = (it.aliases || []).some((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
-    if (alreadyHere) return;
+    const existing = (it.aliases || []).find((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
+    if (existing) {
+      // Alias is already here, but may predate altCode — backfill it so GRN rows
+      // (which carry the FSN) can still be matched back to this item.
+      if (altCode && !existing.altCode) {
+        fbUpdate('items', itemId, { aliases: it.aliases.map((a) => (a.id === existing.id ? { ...a, altCode } : a)) });
+      }
+      return;
+    }
     items.forEach((other) => {
       if (other.id === itemId) return;
       const hasIt = (other.aliases || []).some((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
@@ -558,7 +573,7 @@ export default function AdminPanel() {
         fbUpdate('items', other.id, { aliases: other.aliases.filter((a) => !(a.channel === channel && a.code && a.code.toLowerCase() === codeLower)) });
       }
     });
-    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code, packSize: '', packUnit: 'kg' }];
+    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code, altCode: altCode || '', packSize: '', packUnit: 'kg' }];
     fbUpdate('items', itemId, { aliases: nextAliases });
   };
   const updateAliasById = (itemId, aliasId, patch) => {
@@ -614,6 +629,25 @@ export default function AdminPanel() {
     const id = `GRN-${channel.slice(0, 3).toUpperCase()}-${date}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: new Date().toISOString().split('T')[0], rows, batchId: batchId || null });
   };
+
+  // ── Sales tracking: Flipkart is invoiced then paid; Blinkit settles straight off
+  // GRN with no separate invoice step. Both funnels end at the same Payments log,
+  // which is what actually answers "how much have we been paid" — everything
+  // upstream (dispatch, GRN, invoice) is only ever an estimate of what's owed.
+  const saveSalesInvoice = (invoice) => fbSetDoc('salesInvoices', invoice.id, { ...invoice, city: effectiveCity });
+  const deleteSalesInvoice = (id) => fbDelete('salesInvoices', id);
+  const saveSalesPayment = (payment) => fbSetDoc('salesPayments', payment.id, { ...payment, city: effectiveCity });
+  const deleteSalesPayment = (id) => fbDelete('salesPayments', id);
+
+  // ── Staff: one doc per person, plus a per-day attendance doc and a log of
+  // advances. Attendance uses a deterministic id (staff + date) so marking the
+  // same day twice overwrites rather than creating duplicates.
+  const saveStaff = (s) => fbSetDoc('staff', s.id, { ...s, city: effectiveCity });
+  const deleteStaff = (id) => fbDelete('staff', id);
+  const markAttendance = (staffId, date, status) => fbSetDoc('staffAttendance', `${staffId}__${date}`, { id: `${staffId}__${date}`, staffId, date, status, city: effectiveCity });
+  const clearAttendance = (staffId, date) => fbDelete('staffAttendance', `${staffId}__${date}`);
+  const saveAdvance = (adv) => fbSetDoc('staffAdvances', adv.id, { ...adv, city: effectiveCity });
+  const deleteAdvance = (id) => fbDelete('staffAdvances', id);
 
   // ── Indent batches ──────────────────────────────────────
   const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, { ...batch, city: effectiveCity });
@@ -782,6 +816,11 @@ export default function AdminPanel() {
     const batch = indentBatches.find((b) => b.id === g.batchId);
     return batch ? (batch.city || CITIES[0]) === effectiveCity : CITIES[0] === effectiveCity;
   });
+  const citySalesInvoices = salesInvoices.filter((inv) => (inv.city || CITIES[0]) === effectiveCity);
+  const citySalesPayments = salesPayments.filter((p) => (p.city || CITIES[0]) === effectiveCity);
+  const cityStaff = staff.filter((s) => (s.city || CITIES[0]) === effectiveCity);
+  const cityStaffAttendance = staffAttendance.filter((a) => (a.city || CITIES[0]) === effectiveCity);
+  const cityStaffAdvances = staffAdvances.filter((a) => (a.city || CITIES[0]) === effectiveCity);
   const pendingCount = cityOrders.filter((o) => o.status === 'pending').length;
   const totalSpend = cityPurchases.reduce((s, p) => s + p.cost, 0);
 
@@ -918,7 +957,7 @@ export default function AdminPanel() {
           )}
           {tab === 'items' && <ItemsPanel items={cityItems} onAdd={addItem} onAddBulk={addItemsBulk} onMapChannel={mapChannelField} onUpdate={updateItem} onDelete={deleteItem} />}
           {tab === 'vendors' && (
-            <VendorsPanel items={cityItems} vendors={cityVendors} vendorLedger={cityVendorLedger} placedOrders={placedOrders} onAdd={addVendor} onDelete={deleteVendor} onToggleItem={toggleVendorItem} onSettle={settleEntries} onAddLedgerEntry={addLedgerEntry} onUpdatePlacedOrder={updatePlacedOrder} onDeletePlacedOrder={deletePlacedOrder} />
+            <VendorsPanel items={cityItems} vendors={cityVendors} vendorLedger={cityVendorLedger} placedOrders={placedOrders} purchases={cityPurchases} onAdd={addVendor} onDelete={deleteVendor} onToggleItem={toggleVendorItem} onSettle={settleEntries} onAddLedgerEntry={addLedgerEntry} onUpdatePlacedOrder={updatePlacedOrder} onDeletePlacedOrder={deletePlacedOrder} />
           )}
           {tab === 'cutprocess' && (
             <CutProcessPanel
@@ -948,7 +987,39 @@ export default function AdminPanel() {
           {tab === 'stockcount' && <StockCountPanel items={cityItems} stockCounts={cityStockCounts} purchases={cityPurchases} dispatchLog={cityDispatchLog} onRecord={recordStockCount} />}
           {tab === 'spoilage' && <SpoilageSurplusPanel spoilageSurplus={citySpoilageSurplus} />}
           {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} />}
-          {tab === 'profitloss' && <ProfitLossPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} dispatchLog={cityDispatchLog} grnReports={cityGrnReports} indentBatches={cityIndentBatches} city={effectiveCity} onUploadGrn={uploadGrnReport} onUpdateIndentBatch={updateIndentBatch} />}
+          {tab === 'sales' && (
+            <SalesPanel
+              items={cityItems}
+              orders={cityOrders}
+              purchases={cityPurchases}
+              pricingConfig={pricingConfig}
+              dispatchLog={cityDispatchLog}
+              grnReports={cityGrnReports}
+              indentBatches={cityIndentBatches}
+              salesInvoices={citySalesInvoices}
+              salesPayments={citySalesPayments}
+              city={effectiveCity}
+              onSaveInvoice={saveSalesInvoice}
+              onDeleteInvoice={deleteSalesInvoice}
+              onSavePayment={saveSalesPayment}
+              onDeletePayment={deleteSalesPayment}
+              onUploadGrn={uploadGrnReport}
+              onUpdateIndentBatch={updateIndentBatch}
+            />
+          )}
+          {tab === 'staff' && (
+            <StaffPanel
+              staff={cityStaff}
+              attendance={cityStaffAttendance}
+              advances={cityStaffAdvances}
+              onSaveStaff={saveStaff}
+              onDeleteStaff={deleteStaff}
+              onMarkAttendance={markAttendance}
+              onClearAttendance={clearAttendance}
+              onSaveAdvance={saveAdvance}
+              onDeleteAdvance={deleteAdvance}
+            />
+          )}
           {tab === 'packaging' && <PackagingPanel orders={cityOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
           {tab === 'dispatch' && <DispatchPanel orders={cityOrders} items={cityItems} crates={cityCrates} dispatchLog={cityDispatchLog} indentBatches={cityIndentBatches} onDispatchBatch={dispatchBatch} />}
           {tab === 'crates' && <CratesPanel crates={cityCrates} log={cityCrateLog} onAdjust={adjustCrates} />}
@@ -1126,6 +1197,70 @@ function parseBulkItemRows(json) {
     });
   });
   return results;
+}
+
+// The ledger above only carries CREDIT purchases (those are the ones that create a
+// due). Anything bought for cash/UPI/bank settles instantly and never lands there,
+// so it was invisible on this screen. This reads the purchases collection directly
+// instead, which holds every purchase from this vendor whatever the payment mode.
+function VendorPurchaseHistory({ vendorName, purchases }) {
+  const [openDate, setOpenDate] = useState(null);
+
+  const byDate = useMemo(() => {
+    const groups = {};
+    purchases
+      .filter((p) => (p.supplier || '').trim().toLowerCase() === (vendorName || '').trim().toLowerCase())
+      .forEach((p) => {
+        const d = p.date || '—';
+        if (!groups[d]) groups[d] = { date: d, rows: [], total: 0 };
+        groups[d].rows.push(p);
+        groups[d].total += Number(p.cost) || 0;
+      });
+    return Object.values(groups).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [purchases, vendorName]);
+
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Purchase history — date wise</p>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Every purchase from this vendor, in any payment mode. Click a date to see that day's items.</p>
+      {byDate.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>No purchases recorded from this vendor yet.</p>}
+      {byDate.map((g) => {
+        const isOpen = openDate === g.date;
+        return (
+          <div key={g.date} style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS.md, marginBottom: 8, overflow: 'hidden' }}>
+            <button
+              onClick={() => setOpenDate(isOpen ? null : g.date)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: isOpen ? '#F4F6F1' : '#fff', border: 'none', padding: '10px 14px', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <ChevronRight size={14} style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', color: MUTED, flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, fontSize: 13, color: INK }}>{g.date}</span>
+                <span style={{ fontSize: 11, color: MUTED }}>{g.rows.length} item{g.rows.length === 1 ? '' : 's'}</span>
+              </span>
+              <span style={{ fontWeight: 800, fontSize: 14, color: LEAF, flexShrink: 0 }}>₹{g.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+            </button>
+            {isOpen && (
+              <div style={{ borderTop: `1px solid ${LINE}`, padding: '4px 14px 10px', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead><tr><Th>Item</Th><Th>Qty</Th><Th>Cost</Th><Th>Paid by</Th></tr></thead>
+                  <tbody>
+                    {g.rows.map((r) => (
+                      <tr key={r.id}>
+                        <Td>{r.item}</Td>
+                        <Td>{r.qty} {r.unit}</Td>
+                        <Td style={{ fontWeight: 700 }}>₹{(Number(r.cost) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Td>
+                        <Td style={{ fontSize: 12, color: MUTED }}>{r.source || '—'}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Panel>
+  );
 }
 
 function VendorItemLinker({ vendorId, vendorItemIds, items, onToggle }) {
@@ -1441,7 +1576,7 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
   );
 }
 
-function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDelete, onToggleItem, onSettle, onAddLedgerEntry, onUpdatePlacedOrder, onDeletePlacedOrder }) {
+function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, onAdd, onDelete, onToggleItem, onSettle, onAddLedgerEntry, onUpdatePlacedOrder, onDeletePlacedOrder }) {
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
   const [vendorSearch, setVendorSearch] = useState('');
@@ -1760,6 +1895,8 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, onAdd, onDel
           <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Linked items ({openVendor.itemIds.length})</p>
           <VendorItemLinker vendorId={openVendor.id} vendorItemIds={openVendor.itemIds} items={items} onToggle={onToggleItem} />
         </Panel>
+
+        <VendorPurchaseHistory vendorName={openVendor.name} purchases={purchases} />
 
         <Panel>
           {confirmDeleteId === openVendor.id ? (
@@ -2721,9 +2858,14 @@ function parseIndentRows(json, platform) {
       // separate indent uploads, so for Flipkart we key off the EAN barcode instead —
       // falling back to FSN only if a row's EAN cell is genuinely blank. Blinkit's
       // existing SKU-based matching already works fine and is left untouched.
+      const fsnCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
       const rawCode = platform === 'Flipkart'
-        ? String(pickField(r, ['eancode', 'ean']) || pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim()
-        : String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
+        ? String(pickField(r, ['eancode', 'ean']) || fsnCode || '').trim()
+        : fsnCode;
+      // Flipkart's GRN export identifies articles by FSN, while indents are now
+      // matched on EAN — so keep the FSN too, or a GRN row could never be tied
+      // back to the item (and therefore never priced).
+      const rawAltCode = platform === 'Flipkart' && fsnCode && fsnCode !== rawCode ? fsnCode : '';
       let qty = Number(pickField(r, ['indent', 'qty', 'quantity', 'orderedqty']) || 0);
       let storeQtys = null;
       if (!qty) {
@@ -2732,7 +2874,7 @@ function parseIndentRows(json, platform) {
       }
       const unit = String(pickField(r, ['umo', 'uom', 'unit']) || '').trim();
       const rawCategory = String(pickField(r, ['type', 'category']) || '').trim();
-      return { key: `row-${idx}-${rawName}`, rawName, rawCode, qty, unit, rawCategory, storeQtys };
+      return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawAltCode, qty, unit, rawCategory, storeQtys };
     })
     .filter((r) => r.rawName && r.qty > 0);
 }
@@ -2955,7 +3097,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           );
           // Each distinct article code gets its own alias — even when it shares a base
           // item with another article on the same channel (e.g. two different pack sizes).
-          if (match) onEnsureAlias(match.id, indentPlatform, r.rawCode);
+          if (match) onEnsureAlias(match.id, indentPlatform, r.rawCode, r.rawAltCode);
           return { ...r, mappedItemId: match ? match.id : '' };
         });
         setPendingIndent({ platform: indentPlatform, fileName: file.name, rows, fulfilmentDate: indentFulfilmentDate });
@@ -2990,12 +3132,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
             name: r.rawName,
             uom: r.unit || 'kg',
             category: normalizeCategory(r.rawCategory),
-            aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', packSize: '', packUnit: 'kg' }],
+            aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', altCode: r.rawAltCode || '', packSize: '', packUnit: 'kg' }],
           };
           onAddItem(newItem);
           return { ...r, mappedItemId: newItem.id };
         }
-        onEnsureAlias(value, prev.platform, r.rawCode);
+        onEnsureAlias(value, prev.platform, r.rawCode, r.rawAltCode);
         return { ...r, mappedItemId: value };
       }),
     }));
@@ -4447,21 +4589,58 @@ function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate 
   );
 }
 
-function parseGrnRows(json) {
-  // Column-name order matters: Excel exports like Hyperpure's often have BOTH a
-  // "PO" and a "GRN" version of quantity/rate (and "Product UPC" alongside
-  // "Product Description") — the more specific "...GRN" / "...Description"
-  // candidates must be checked before the generic ones, or a generic match
-  // (e.g. "quantity") would grab the wrong column ("Quantity - PO") first.
-  return json
-    .map((r) => {
-      const code = String(pickField(r, ['itemcode', 'code', 'sku', 'articlecode', 'fsn']) || '').trim();
-      const name = String(pickField(r, ['productdescription', 'itemname', 'name', 'description', 'article', 'product']) || '').trim();
-      const qty = Number(pickField(r, ['quantitygrn', 'grnqty', 'receivedqty', 'accepted', 'qty', 'quantity']) || 0);
-      const price = Number(pickField(r, ['landingrategrn', 'grnlandingrate', 'rategrn', 'receivedprice', 'unitprice', 'unitrate', 'price', 'rate', 'landingrate']) || 0);
-      return { code, name, qty, price };
-    })
-    .filter((r) => (r.code || r.name) && r.qty > 0);
+// Flipkart's "Items Received" export isn't a plain table: it opens with an
+// invoice header block, then a blank line, and only then the real item header —
+// so reading row 1 as the header (which a plain sheet_to_json does) finds no
+// items at all. This scans for the row that actually looks like the item header,
+// and drops the trailing "Total" summary row so it isn't counted as an article.
+const GRN_CODE_KEYS = ['productid', 'itemcode', 'code', 'sku', 'articlecode', 'fsn'];
+const GRN_NAME_KEYS = ['productdescription', 'itemname', 'name', 'description', 'article', 'product'];
+// "Received"/"accepted" must beat a generic "quantity", or a PO-ordered column wins.
+const GRN_QTY_KEYS = ['receivedquantity', 'quantitygrn', 'grnqty', 'receivedqty', 'accepted', 'qty', 'quantity'];
+const GRN_PRICE_KEYS = ['landingrategrn', 'grnlandingrate', 'rategrn', 'receivedprice', 'unitprice', 'unitrate', 'price', 'rate', 'landingrate'];
+
+const normaliseHeader = (h) => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function findColumnIndex(headerCells, candidates) {
+  const norm = headerCells.map(normaliseHeader);
+  for (const c of candidates) {
+    const i = norm.findIndex((h) => h.includes(c));
+    if (i !== -1) return i;
+  }
+  return -1;
+}
+
+// Takes the sheet as an array of arrays (sheet_to_json with header: 1).
+function parseGrnSheetRows(rows) {
+  let headerIdx = -1;
+  let cols = null;
+  for (let i = 0; i < rows.length; i += 1) {
+    const cells = rows[i] || [];
+    if (cells.length < 2) continue;
+    const qtyIdx = findColumnIndex(cells, GRN_QTY_KEYS);
+    const idIdx = findColumnIndex(cells, GRN_CODE_KEYS);
+    const nameIdx = findColumnIndex(cells, GRN_NAME_KEYS);
+    if (qtyIdx !== -1 && (idIdx !== -1 || nameIdx !== -1)) {
+      headerIdx = i;
+      cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: findColumnIndex(cells, GRN_PRICE_KEYS) };
+      break;
+    }
+  }
+  if (headerIdx === -1) return [];
+
+  const out = [];
+  for (let i = headerIdx + 1; i < rows.length; i += 1) {
+    const cells = rows[i] || [];
+    const code = cols.code === -1 ? '' : String(cells[cols.code] ?? '').trim();
+    const name = cols.name === -1 ? '' : String(cells[cols.name] ?? '').trim();
+    // The footer row has "Total" where the code/name belongs and no real article.
+    if (!code && !name) continue;
+    if (normaliseHeader(code) === 'total' || normaliseHeader(name) === 'total') continue;
+    const qty = Number(String(cells[cols.qty] ?? '').replace(/,/g, '')) || 0;
+    const price = cols.price === -1 ? 0 : Number(String(cells[cols.price] ?? '').replace(/,/g, '')) || 0;
+    if (qty > 0) out.push({ code, name, qty, price });
+  }
+  return out;
 }
 
 // ── Hyperpure / Blinkit GRN report PDFs — parsed client-side via pdf.js ──
@@ -4500,6 +4679,67 @@ async function extractPdfText(file) {
   return fullText;
 }
 
+// ── Purchase Orders ──
+// A PO is the channel telling us what they'll PAY us per pack, so parsing it is
+// what turns "expected profit" from a typed-in guess into a per-article
+// comparison against our own cost.
+const PO_CODE_KEYS = ['productno', 'productid', 'itemcode', 'code', 'sku', 'articlecode', 'fsn'];
+const PO_NAME_KEYS = ['productname', 'productdescription', 'itemname', 'name', 'description', 'article', 'product'];
+const PO_QTY_KEYS = ['qty', 'quantity', 'orderedqty', 'poquantity'];
+const PO_PRICE_KEYS = ['priceperunit', 'perunitprice', 'unitprice', 'landingrate', 'rate', 'price'];
+const PO_TOTAL_KEYS = ['totalamount', 'linetotal', 'total', 'amount', 'value'];
+
+function parsePoSheetRows(rows) {
+  let headerIdx = -1;
+  let cols = null;
+  for (let i = 0; i < rows.length; i += 1) {
+    const cells = rows[i] || [];
+    if (cells.length < 2) continue;
+    const priceIdx = findColumnIndex(cells, PO_PRICE_KEYS);
+    const qtyIdx = findColumnIndex(cells, PO_QTY_KEYS);
+    const idIdx = findColumnIndex(cells, PO_CODE_KEYS);
+    const nameIdx = findColumnIndex(cells, PO_NAME_KEYS);
+    const totalIdx = findColumnIndex(cells, PO_TOTAL_KEYS);
+    if (qtyIdx !== -1 && (priceIdx !== -1 || totalIdx !== -1) && (idIdx !== -1 || nameIdx !== -1)) {
+      headerIdx = i;
+      cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx };
+      break;
+    }
+  }
+  if (headerIdx === -1) return [];
+  const num = (v) => Number(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')) || 0;
+  const out = [];
+  for (let i = headerIdx + 1; i < rows.length; i += 1) {
+    const cells = rows[i] || [];
+    const code = cols.code === -1 ? '' : String(cells[cols.code] == null ? '' : cells[cols.code]).trim();
+    const name = cols.name === -1 ? '' : String(cells[cols.name] == null ? '' : cells[cols.name]).trim();
+    if (!code && !name) continue;
+    if (normaliseHeader(code) === 'total' || normaliseHeader(name) === 'total') continue;
+    const qty = num(cells[cols.qty]);
+    let price = cols.price === -1 ? 0 : num(cells[cols.price]);
+    const total = cols.total === -1 ? 0 : num(cells[cols.total]);
+    if (!price && total && qty) price = Math.round((total / qty) * 100) / 100;
+    if (qty > 0 && price > 0) out.push({ code, name, qty, price, total: total || Math.round(qty * price * 100) / 100 });
+  }
+  return out;
+}
+
+// Hyperpure's PO PDF flattens to: productNo name HSN MRP margin qty pricePerUnit
+// UoM gst% taxPerUnit total. The UoM is free text ("200 g", "1 unit (150 - 160 g)")
+// so it's matched loosely between the two numeric runs.
+function parsePoPdfText(text) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const pattern = /(\d{7,9}) (.+?) (\d{8}) (\d+\.\d{2}) (\d+\.\d{2}) (\d+) (\d+\.\d{2}) .*?(\d+)% (\d+\.\d{2}) (\d+\.\d{2})/g;
+  const rows = [];
+  let m;
+  while ((m = pattern.exec(flat)) !== null) {
+    const qty = Number(m[6]) || 0;
+    const price = Number(m[7]) || 0;
+    if (qty > 0 && price > 0) rows.push({ code: m[1].trim(), name: m[2].trim(), qty, price, total: Number(m[10]) || Math.round(qty * price * 100) / 100 });
+  }
+  return rows;
+}
+
 function parseGrnPdfText(text) {
   const flat = text.replace(/\s+/g, ' ').trim();
   const pattern = /(\d+) (\d{6,8}) (\d{6,10}) (\d{3,4}) (.*?) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}|-) (\d+) (\d+) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2})/g;
@@ -4514,613 +4754,9 @@ function parseGrnPdfText(text) {
   return rows;
 }
 
-function ProfitLossDayCard({ day, channel, records, grnReportsForDay, onUploadGrn }) {
-  const [expanded, setExpanded] = useState(false);
-  const [fileError, setFileError] = useState('');
-  const fileInputRef = useRef(null);
 
-  const totalDispatchQty = records.reduce((s, r) => s + (r.dispatchQty || 0), 0);
-  const totalDispatchValue = records.reduce((s, r) => s + (r.cost || 0), 0);
 
-  const handleGrnFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setFileError('');
 
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    if (isPdf) {
-      extractPdfText(file)
-        .then((text) => {
-          const rows = parseGrnPdfText(text);
-          if (rows.length === 0) {
-            setFileError('Could not find any GRN rows in this PDF. If this keeps happening, try exporting the report as Excel/CSV instead.');
-            return;
-          }
-          onUploadGrn(channel, day.date, file.name, rows);
-        })
-        .catch(() => setFileError('Could not read this PDF. Please try again or use an Excel/CSV export instead.'));
-      e.target.value = '';
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const wb = XLSX.read(evt.target.result, { type: 'array' });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        const rows = parseGrnRows(json);
-        if (rows.length === 0) {
-          setFileError('No rows with a valid code/name and received quantity were found in this file.');
-          return;
-        }
-        onUploadGrn(channel, day.date, file.name, rows);
-      } catch (err) {
-        setFileError('Could not read this file. Please upload a valid .xlsx, .xls, .csv, or .pdf GRN report.');
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = '';
-  };
-
-  const latestGrn = grnReportsForDay[0];
-  const grnComparison = useMemo(() => {
-    if (!latestGrn) return [];
-    const ours = {};
-    records.forEach((r) => {
-      const k = (r.code || r.articleName).toLowerCase();
-      ours[k] = ours[k] || { articleName: r.articleName, code: r.code, qty: 0, cost: 0, lastPrice: r.finalPricePerPack };
-      ours[k].qty += r.packsDispatched;
-      ours[k].cost += r.cost || 0;
-    });
-    return latestGrn.rows.map((g) => {
-      const k = (g.code || g.name).toLowerCase();
-      const match = ours[k];
-      const ourQty = match?.qty || 0;
-      const ourPrice = match?.lastPrice ?? null;
-      const ourCost = match?.cost || 0;
-      const grnCost = g.qty * g.price;
-      return {
-        key: k,
-        articleName: match?.articleName || g.name || g.code,
-        code: g.code,
-        grnQty: g.qty,
-        ourQty: Math.round(ourQty * 100) / 100,
-        qtyDiff: Math.round((g.qty - ourQty) * 100) / 100,
-        grnPrice: g.price,
-        ourPrice,
-        priceDiff: ourPrice == null ? null : Math.round((g.price - ourPrice) * 100) / 100,
-        grnCost: Math.round(grnCost * 100) / 100,
-        ourCost: Math.round(ourCost * 100) / 100,
-        costDiff: Math.round((grnCost - ourCost) * 100) / 100,
-      };
-    });
-  }, [latestGrn, records]);
-
-  return (
-    <div style={{ border: `1px solid ${expanded ? LEAF : LINE}`, borderRadius: 12, overflow: 'hidden', marginBottom: 10 }}>
-      <div
-        onClick={() => setExpanded((x) => !x)}
-        style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr auto', gap: 14, alignItems: 'center', padding: '14px 18px', background: expanded ? '#F6F3EA' : '#fff', cursor: 'pointer' }}
-      >
-        <div>
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 14, color: INK }}>{day.date}</p>
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{channel}</p>
-        </div>
-        <div>
-          <p style={{ margin: 0, fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL INDENT QTY</p>
-          <p style={{ margin: '2px 0 0', fontWeight: 700, fontSize: 13, color: INK }}>{day.totalIndentQty}</p>
-        </div>
-        <div>
-          <p style={{ margin: 0, fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL DISPATCH</p>
-          <p style={{ margin: '2px 0 0', fontWeight: 700, fontSize: 13, color: INK }}>{Math.round(totalDispatchQty * 100) / 100}</p>
-        </div>
-        <div>
-          <p style={{ margin: 0, fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL DISPATCH VALUE</p>
-          <p style={{ margin: '2px 0 0', fontWeight: 800, fontSize: 13, color: TOMATO }}>₹{totalDispatchValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
-        </div>
-        <ChevronRight size={16} color={MUTED} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
-      </div>
-
-      {expanded && (
-        <div style={{ borderTop: `1px solid ${LINE}`, padding: '16px 18px' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 18 }}>
-            <thead><tr><Th>Article</Th><Th>Code</Th><Th>Qty dispatched</Th><Th>Packs</Th><Th>Price/pack</Th><Th>Actual cost</Th></tr></thead>
-            <tbody>
-              {records.map((r, i) => (
-                <tr key={i}>
-                  <Td style={{ fontWeight: 700 }}>{r.articleName}</Td>
-                  <Td>{r.code || <span style={{ color: MUTED }}>—</span>}</Td>
-                  <Td>{r.dispatchQty} {r.unit}</Td>
-                  <Td>{r.packsDispatched}</Td>
-                  <Td>{r.finalPricePerPack == null ? <span style={{ color: MUTED }}>No price yet</span> : `₹${r.finalPricePerPack.toFixed(2)}`}</Td>
-                  <Td style={{ fontWeight: 700, color: r.cost == null ? MUTED : LEAF }}>{r.cost == null ? '—' : `₹${r.cost.toFixed(2)}`}</Td>
-                </tr>
-              ))}
-              {records.length === 0 && (
-                <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>No dispatches priced for this day.</Td></tr>
-              )}
-            </tbody>
-          </table>
-          </div>
-
-          <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14 }}>
-            <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Upload GRN report — {channel}, {day.date}</p>
-            <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-              Upload the channel's Goods Received Note for this day — the Blinkit/Hyperpure PDF works directly, or an Excel/CSV export (item code/name, received qty, received price) — to compare against our calculated numbers.
-            </p>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
-            >
-              <Upload size={14} /> Upload GRN report for {day.date}
-            </button>
-            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
-            {fileError && (
-              <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 10px' }}>
-                <AlertCircle size={13} /> {fileError}
-              </p>
-            )}
-
-            {latestGrn && (
-              <>
-                <p style={{ margin: '0 0 8px', fontSize: 12, color: MUTED }}>
-                  Comparing against latest upload: <strong style={{ color: INK }}>{latestGrn.fileName}</strong>
-                </p>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr><Th>Article</Th><Th>GRN qty</Th><Th>Our qty</Th><Th>Qty diff</Th><Th>GRN price</Th><Th>Our price</Th><Th>Price diff</Th><Th>Cost diff</Th></tr>
-                  </thead>
-                  <tbody>
-                    {grnComparison.map((c) => (
-                      <tr key={c.key}>
-                        <Td style={{ fontWeight: 700 }}>{c.articleName}</Td>
-                        <Td>{c.grnQty}</Td>
-                        <Td>{c.ourQty}</Td>
-                        <Td style={{ color: c.qtyDiff !== 0 ? TOMATO : LEAF, fontWeight: 700 }}>{c.qtyDiff > 0 ? `+${c.qtyDiff}` : c.qtyDiff}</Td>
-                        <Td>₹{c.grnPrice.toFixed(2)}</Td>
-                        <Td>{c.ourPrice == null ? <span style={{ color: MUTED }}>—</span> : `₹${c.ourPrice.toFixed(2)}`}</Td>
-                        <Td style={{ color: c.priceDiff && c.priceDiff !== 0 ? TOMATO : LEAF, fontWeight: 700 }}>{c.priceDiff == null ? '—' : (c.priceDiff > 0 ? `+₹${c.priceDiff.toFixed(2)}` : `₹${c.priceDiff.toFixed(2)}`)}</Td>
-                        <Td style={{ color: c.costDiff !== 0 ? TOMATO : LEAF, fontWeight: 800 }}>{c.costDiff > 0 ? `+₹${c.costDiff.toFixed(2)}` : `₹${c.costDiff.toFixed(2)}`}</Td>
-                      </tr>
-                    ))}
-                    {grnComparison.length === 0 && (
-                      <tr><Td colSpan={8} style={{ textAlign: 'center', color: MUTED }}>No matching rows.</Td></tr>
-                    )}
-                  </tbody>
-                </table>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function IndentBatchCard({ batch, orders, articlesByKey, configByKey, onOpen }) {
-  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
-  const { totalCost, pricedCount, totalCount } = useMemo(
-    () => computeBatchArticleCosts(batch, orders, articlesByKey, configByKey),
-    [batch, orders, articlesByKey, configByKey]
-  );
-  const totalQty = batchOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0);
-  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
-
-  return (
-    <div
-      onClick={onOpen}
-      style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: '12px 14px', marginBottom: 10, cursor: 'pointer' }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{batch.platform} — {batch.fileName}</p>
-        <ChevronRight size={16} color={MUTED} />
-      </div>
-      <div style={{ display: 'flex', gap: 20, marginTop: 10, flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{batch.platform}</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{fulfilmentDate || '—'}</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ARTICLES</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{totalCount}</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL QUANTITY</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{totalQty}</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>EXPECTED COST SO FAR</p>
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 13, color: TOMATO }}>
-            ₹{totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-            <span style={{ fontWeight: 500, color: MUTED, fontSize: 11 }}> ({pricedCount}/{totalCount} priced)</span>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function IndentBatchDetail({ batch, orders, articlesByKey, configByKey, grnReports, onUploadGrn, onUpdateIndentBatch, onBack }) {
-  const { rows, totalCost, pricedCount, totalCount } = useMemo(
-    () => computeBatchArticleCosts(batch, orders, articlesByKey, configByKey),
-    [batch, orders, articlesByKey, configByKey]
-  );
-  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
-  const totalQty = batchOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0);
-  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
-
-  const [poValue, setPoValue] = useState(batch.poValue != null ? String(batch.poValue) : '');
-  const [poFileName, setPoFileName] = useState(batch.poFileName || '');
-  const [poFileError, setPoFileError] = useState('');
-  const poFileInputRef = useRef(null);
-
-  const [grnFileError, setGrnFileError] = useState('');
-  const grnFileInputRef = useRef(null);
-
-  const savePoValue = () => {
-    onUpdateIndentBatch(batch.id, { poValue: Number(poValue) || 0, poFileName });
-  };
-
-  const handlePoFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setPoFileError('');
-    setPoFileName(file.name);
-    e.target.value = '';
-  };
-
-  const projectedProfit = batch.poValue != null ? Math.round((batch.poValue - totalCost) * 100) / 100 : null;
-
-  const batchGrnReports = useMemo(
-    () => grnReports.filter((g) => g.batchId === batch.id).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || '')),
-    [grnReports, batch.id]
-  );
-  const latestGrn = batchGrnReports[0];
-
-  const grnComparison = useMemo(() => {
-    if (!latestGrn) return null;
-    const ownByCode = {};
-    rows.forEach((r) => {
-      const k = (r.code || r.articleName).toLowerCase();
-      ownByCode[k] = ownByCode[k] || { articleName: r.articleName, qty: 0, cost: 0 };
-      ownByCode[k].qty += r.packQty;
-      ownByCode[k].cost += r.cost || 0;
-    });
-    let grnValue = 0;
-    const matched = [];
-    latestGrn.rows.forEach((g) => {
-      const k = (g.code || g.name).toLowerCase();
-      if (!ownByCode[k]) return; // GRN rows outside this indent's own articles don't count here
-      const rowValue = Math.round(g.qty * g.price * 100) / 100;
-      grnValue += rowValue;
-      matched.push({ articleName: ownByCode[k].articleName || g.name, grnQty: g.qty, grnPrice: g.price, grnValue: rowValue });
-    });
-    return { grnValue: Math.round(grnValue * 100) / 100, matched };
-  }, [latestGrn, rows]);
-
-  const finalProfit = grnComparison ? Math.round((grnComparison.grnValue - totalCost) * 100) / 100 : null;
-
-  const handleGrnFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setGrnFileError('');
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    if (isPdf) {
-      extractPdfText(file)
-        .then((text) => {
-          const parsedRows = parseGrnPdfText(text);
-          if (parsedRows.length === 0) { setGrnFileError('Could not find any GRN rows in this PDF.'); return; }
-          onUploadGrn(batch.platform, fulfilmentDate || new Date().toISOString().split('T')[0], file.name, parsedRows, batch.id);
-        })
-        .catch(() => setGrnFileError('Could not read this PDF. Please try again or use an Excel/CSV export instead.'));
-      e.target.value = '';
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const wb = XLSX.read(evt.target.result, { type: 'array' });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        const parsedRows = parseGrnRows(json);
-        if (parsedRows.length === 0) { setGrnFileError('No rows with a valid code/name and received quantity were found.'); return; }
-        onUploadGrn(batch.platform, fulfilmentDate || new Date().toISOString().split('T')[0], file.name, parsedRows, batch.id);
-      } catch (err) {
-        setGrnFileError('Could not read this file. Please upload a valid .xlsx, .xls, .csv, or .pdf GRN report.');
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = '';
-  };
-
-  return (
-    <Panel>
-      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14 }}>
-        <ArrowLeft size={15} /> Back to indents
-      </button>
-
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 15, color: INK }}>{batch.platform} — {batch.fileName}</p>
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${LINE}` }}>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>CHANNEL</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{batch.platform}</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{fulfilmentDate || '—'}</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ARTICLES</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{totalCount}</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL QUANTITY</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{totalQty}</p></div>
-      </div>
-
-      <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: INK }}>Expected purchase cost ({pricedCount}/{totalCount} articles priced)</p>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
-        <thead><tr><Th>Article</Th><Th>Code</Th><Th>Ordered</Th><Th>Short</Th><Th>Costed for</Th><Th>Price/pack</Th><Th>Cost</Th></tr></thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.orderId}>
-              <Td style={{ fontWeight: 700 }}>{r.articleName}</Td>
-              <Td>{r.code || <span style={{ color: MUTED }}>—</span>}</Td>
-              <Td>{r.packQty}</Td>
-              <Td style={{ color: r.shortPacks > 0 ? TOMATO : MUTED }}>{r.shortPacks > 0 ? r.shortPacks : '—'}</Td>
-              <Td>{r.effectivePacks}</Td>
-              <Td>{r.finalPricePerPack == null ? <span style={{ color: MUTED }}>No price yet</span> : `₹${r.finalPricePerPack.toFixed(2)}`}</Td>
-              <Td style={{ fontWeight: 700, color: r.cost == null ? MUTED : LEAF }}>{r.cost == null ? '—' : `₹${r.cost.toFixed(2)}`}</Td>
-            </tr>
-          ))}
-          {rows.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No articles in this indent.</Td></tr>}
-        </tbody>
-      </table>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
-        <p style={{ margin: 0, fontWeight: 800, fontSize: 16, color: TOMATO }}>Total so far: ₹{totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
-      </div>
-
-      <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 18, marginBottom: 18 }}>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Purchase Order</p>
-        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED, maxWidth: 600 }}>
-          Attach the channel's PO for this indent (for your records), and enter its final billing value — we don't try to auto-read the amount off the PO file since formats vary a lot between channels.
-        </p>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => poFileInputRef.current?.click()}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-          >
-            <Upload size={13} /> {poFileName || 'Attach PO file'}
-          </button>
-          <input ref={poFileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handlePoFile} style={{ display: 'none' }} />
-          <div>
-            <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>PO VALUE (₹)</p>
-            <input
-              type="number"
-              value={poValue}
-              onChange={(e) => setPoValue(e.target.value)}
-              style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 10px', width: 140 }}
-            />
-          </div>
-          <button onClick={savePoValue} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            Save
-          </button>
-        </div>
-        {poFileError && <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '10px 0 0' }}><AlertCircle size={13} /> {poFileError}</p>}
-
-        {projectedProfit != null && (
-          <div style={{ marginTop: 14, padding: '12px 16px', background: projectedProfit >= 0 ? '#EAF3DE' : '#F3E7E2', borderRadius: 10, display: 'inline-block' }}>
-            <p style={{ margin: 0, fontSize: 11, color: MUTED, fontWeight: 700 }}>PROJECTED {projectedProfit >= 0 ? 'PROFIT' : 'LOSS'}</p>
-            <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: projectedProfit >= 0 ? LEAF_DARK : TOMATO }}>₹{Math.abs(projectedProfit).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
-          </div>
-        )}
-      </div>
-
-      <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 18 }}>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>GRN report for this indent</p>
-        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-          Upload the channel's GRN once it's received — the Blinkit/Hyperpure PDF works directly, or an Excel/CSV export — to lock in the final profit/loss for this indent.
-        </p>
-        <button
-          onClick={() => grnFileInputRef.current?.click()}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
-        >
-          <Upload size={14} /> Upload GRN report
-        </button>
-        <input ref={grnFileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
-        {grnFileError && <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 10px' }}><AlertCircle size={13} /> {grnFileError}</p>}
-
-        {latestGrn && grnComparison && (
-          <>
-            <p style={{ margin: '0 0 8px', fontSize: 12, color: MUTED }}>
-              Latest upload: <strong style={{ color: INK }}>{latestGrn.fileName}</strong> — matched value ₹{grnComparison.grnValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-            </p>
-            {finalProfit != null && (
-              <div style={{ padding: '12px 16px', background: finalProfit >= 0 ? '#EAF3DE' : '#F3E7E2', borderRadius: 10, display: 'inline-block' }}>
-                <p style={{ margin: 0, fontSize: 11, color: MUTED, fontWeight: 700 }}>FINAL {finalProfit >= 0 ? 'PROFIT' : 'LOSS'}</p>
-                <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: finalProfit >= 0 ? LEAF_DARK : TOMATO }}>₹{Math.abs(finalProfit).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
-function ProfitLossPanel({ orders, items, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, city, onUploadGrn, onUpdateIndentBatch }) {
-  const [channel, setChannel] = useState(PLATFORMS[0]);
-  const [plView, setPlView] = useState('dispatch'); // 'dispatch' | 'indent'
-  const [selectedBatchId, setSelectedBatchId] = useState(null);
-
-  const configByKey = useMemo(() => {
-    const map = {};
-    pricingConfig.forEach((c) => { map[c.id] = c; });
-    return map;
-  }, [pricingConfig]);
-  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey), [orders, items, purchases, city, configByKey]);
-  const articlesByKey = useMemo(() => {
-    const map = {};
-    articles.forEach((a) => { map[a.key] = a; });
-    return map;
-  }, [articles]);
-
-  // Turn every dispatched line item into an actual-cost record, priced from the Pricing tab.
-  const records = useMemo(() => {
-    const out = [];
-    dispatchLog.forEach((log) => {
-      (log.items || []).forEach((it) => {
-        const order = orders.find((o) => o.id === it.orderId);
-        const platform = it.platform || order?.platform;
-        const baseProduct = it.baseProduct || order?.product;
-        const packSize = it.packSize || order?.packSize;
-        const packUnit = it.packUnit || order?.packUnit;
-        if (!platform || !baseProduct || !packSize || !packUnit) return; // can't price non-indent orders here
-        const key = `${city}__${baseProduct}__${platform}__${packSize}__${packUnit}`;
-        const legacyKey = `${baseProduct}__${platform}__${packSize}__${packUnit}`;
-        const article = articlesByKey[key];
-        const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key] || configByKey[legacyKey]) : null;
-        const packsDispatched = Math.round((it.dispatchQty / packSize) * 100) / 100;
-        const cost = finalPricePerPack == null ? null : Math.round(packsDispatched * finalPricePerPack * 100) / 100;
-        out.push({
-          date: log.date || '—',
-          channel: platform,
-          articleName: it.product,
-          code: article?.code || '',
-          dispatchQty: it.dispatchQty,
-          unit: it.unit,
-          packsDispatched,
-          finalPricePerPack,
-          cost,
-        });
-      });
-    });
-    return out;
-  }, [dispatchLog, orders, articlesByKey, configByKey, city]);
-
-  // Total indent (demand) qty per day, from orders' own fulfilment date — independent of dispatch.
-  const indentQtyByDate = useMemo(() => {
-    const map = {};
-    orders
-      .filter((o) => o.platform === channel && o.fulfilmentDate)
-      .forEach((o) => { map[o.fulfilmentDate] = (map[o.fulfilmentDate] || 0) + o.qty; });
-    return map;
-  }, [orders, channel]);
-
-  const channelRecords = records.filter((r) => r.channel === channel);
-
-  const days = useMemo(() => {
-    const dateSet = new Set([
-      ...channelRecords.map((r) => r.date),
-      ...Object.keys(indentQtyByDate),
-    ]);
-    return Array.from(dateSet)
-      .sort((a, b) => b.localeCompare(a))
-      .map((date) => ({
-        date,
-        totalIndentQty: Math.round((indentQtyByDate[date] || 0) * 100) / 100,
-        records: channelRecords.filter((r) => r.date === date),
-      }));
-  }, [channelRecords, indentQtyByDate]);
-
-  const channelTotalValue = channelRecords.reduce((s, r) => s + (r.cost || 0), 0);
-
-  const channelBatches = useMemo(() => indentBatches.filter((b) => b.platform === channel), [indentBatches, channel]);
-
-  const selectedBatch = selectedBatchId ? indentBatches.find((b) => b.id === selectedBatchId) : null;
-  if (selectedBatch) {
-    return (
-      <IndentBatchDetail
-        batch={selectedBatch}
-        orders={orders}
-        articlesByKey={articlesByKey}
-        configByKey={configByKey}
-        grnReports={grnReports}
-        onUploadGrn={onUploadGrn}
-        onUpdateIndentBatch={onUpdateIndentBatch}
-        onBack={() => setSelectedBatchId(null)}
-      />
-    );
-  }
-
-  return (
-    <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <TrendingUp size={16} /> Profit &amp; Loss
-      </p>
-      <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED, maxWidth: 680 }}>
-        {plView === 'dispatch'
-          ? 'Each day is its own row — total indent qty, total dispatched, and total dispatch value (calculated from the Pricing tab). Click a day to see the article breakdown and upload that day\'s GRN report.'
-          : 'One card per uploaded indent — its expected purchase cost fills in as articles get priced from actual purchases. Tap a card to see the breakdown, add the channel\'s Purchase Order value, and upload its GRN once received.'}
-      </p>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {PLATFORMS.map((p) => (
-            <button
-              key={p}
-              onClick={() => setChannel(p)}
-              style={{ padding: '9px 18px', borderRadius: 8, border: `1px solid ${channel === p ? LEAF : LINE}`, background: channel === p ? LEAF : '#fff', color: channel === p ? '#fff' : INK, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={() => setPlView('dispatch')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${plView === 'dispatch' ? LEAF : LINE}`, background: plView === 'dispatch' ? '#EAF3DE' : '#fff', color: plView === 'dispatch' ? LEAF_DARK : MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            By dispatch day
-          </button>
-          <button onClick={() => setPlView('indent')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${plView === 'indent' ? LEAF : LINE}`, background: plView === 'indent' ? '#EAF3DE' : '#fff', color: plView === 'indent' ? LEAF_DARK : MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            By indent
-          </button>
-        </div>
-        {plView === 'dispatch' && (
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>{channel.toUpperCase()} TOTAL DISPATCH VALUE</p>
-            <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: TOMATO }}>₹{channelTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
-          </div>
-        )}
-      </div>
-
-      {plView === 'dispatch' ? (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr auto', gap: 14, padding: '0 18px 8px', fontSize: 10, color: MUTED, fontWeight: 700 }}>
-            <div>DATE / CHANNEL</div><div>TOTAL INDENT QTY</div><div>TOTAL DISPATCH</div><div>TOTAL DISPATCH VALUE</div><div />
-          </div>
-
-          {days.map((day) => (
-            <ProfitLossDayCard
-              key={day.date}
-              day={day}
-              channel={channel}
-              records={day.records}
-              grnReportsForDay={grnReports.filter((g) => g.channel === channel && g.date === day.date).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''))}
-              onUploadGrn={onUploadGrn}
-            />
-          ))}
-          {days.length === 0 && (
-            <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No {channel} indents or dispatches yet.</p>
-          )}
-        </>
-      ) : (
-        <>
-          {channelBatches.map((b) => (
-            <IndentBatchCard
-              key={b.id}
-              batch={b}
-              orders={orders}
-              articlesByKey={articlesByKey}
-              configByKey={configByKey}
-              onOpen={() => setSelectedBatchId(b.id)}
-            />
-          ))}
-          {channelBatches.length === 0 && (
-            <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No {channel} indents uploaded yet.</p>
-          )}
-        </>
-      )}
-    </Panel>
-  );
-}
 
 function PackagingRow({ target, progress, onSave, onAdvanceMany }) {
   const [packedValue, setPackedValue] = useState(String(progress.packedQty || ''));
@@ -5951,7 +5587,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         const item = items.find((it) => it.name === g.product);
         const alias = (item?.aliases || []).find((a) => a.channel === platform);
         const progress = packingProgress[g.key] || { packedQty: 0 };
-        return { ...g, itemId: item?.id || '', category: item?.category || '', code: alias?.code || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+        return { ...g, itemId: item?.id || '', category: item?.category || '', code: alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
   }, [orders, items, packingProgress, platform, date]);
@@ -5976,18 +5612,20 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const clearAllArticles = () => setSelectedKeys(new Set());
   const qtyFor = (a) => qtyOverrides[a.key] ?? (a.packedQty || a.targetPacks || 0);
   const codeFor = (a) => codeOverrides[a.key] ?? a.code;
-  const commitCode = (a, value) => {
-    const trimmed = value.trim();
-    if (trimmed !== a.code && a.itemId) onUpdateAlias(a.itemId, platform, { code: trimmed });
+  // Article Name and UOM default from this print run's order data, but once saved
+  // (via the row's Save button) the correction lives on the item's channel alias —
+  // same place Code already lives — so it survives navigating away and reappears
+  // automatically next time, instead of only lasting this one print session.
+  const nameFor = (a) => nameOverrides[a.key] ?? a.labelName ?? a.articleName;
+  const uomFor = (a) => uomOverrides[a.key] ?? a.labelUom ?? (a.rawUnit || `${a.packSize}${a.packUnit}`);
+  const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides;
+  const saveRow = (a) => {
+    if (!a.itemId) return;
+    onUpdateAlias(a.itemId, platform, { code: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() });
+    setNameOverrides((n) => { const c = { ...n }; delete c[a.key]; return c; });
+    setUomOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
+    setCodeOverrides((c) => { const d = { ...c }; delete d[a.key]; return d; });
   };
-  // Article name has no single, clean place to persist to (unlike code or shelf
-  // life, which live on one channel alias) — the same product name can appear
-  // across several orders — so a tweak here only affects this print run, the
-  // same as the "Labels to print" quantity beside it.
-  const nameFor = (a) => nameOverrides[a.key] ?? a.articleName;
-  // Same reasoning as article name — UOM/net weight comes from the indent's own
-  // orders (rawUnit), not one alias, so a correction here is print-run-only too.
-  const uomFor = (a) => uomOverrides[a.key] ?? (a.rawUnit || `${a.packSize}${a.packUnit}`);
   // Best Before shows the auto-calculated date (packing date + this article's
   // remembered shelf life) until the user edits it for this print run — editing it
   // re-derives and saves a new shelf-life day-count, so tomorrow's auto-calculation
@@ -6006,8 +5644,8 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const needsCompanyDetails = articles.some((a) => barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.standardFields?.companyDetails);
   const companyDetailsEmpty = !companyDetails.name?.trim() && !companyDetails.address?.trim() && !companyDetails.fssai?.trim();
 
-  const printLabels = () => {
-    const toPrint = articles.filter((a) => selectedKeys.has(a.key) && a.code);
+  const printLabels = (onlyArticles) => {
+    const toPrint = (onlyArticles || articles.filter((a) => selectedKeys.has(a.key))).filter((a) => a.code);
     if (toPrint.length === 0) { alert('Select at least one article that has a code before printing.'); return; }
     const isThermal = labelSize === 'thermal5050';
     // The TVS LP-46 Neo's 2-up roll is two 50mm labels side by side (100mm total),
@@ -6119,7 +5757,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Code</Th><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
+              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Code</Th><Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
               <tbody>
                 {articles.map((a) => (
                   <tr key={a.key}>
@@ -6142,10 +5780,20 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                       <input
                         value={codeFor(a)}
                         onChange={(e) => setCodeOverrides((c) => ({ ...c, [a.key]: e.target.value }))}
-                        onBlur={(e) => commitCode(a, e.target.value)}
                         placeholder="No code"
                         style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
+                    </Td>
+                    <Td>
+                      {rowDirty(a) && (
+                        <button
+                          onClick={() => saveRow(a)}
+                          title="Save Article Name, UOM and Code"
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, background: LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          <CheckCircle2 size={13} /> Save
+                        </button>
+                      )}
                     </Td>
                     <Td>
                       <input
@@ -6158,18 +5806,1025 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                       {a.shelfLifeDays != null && <p style={{ margin: '2px 0 0', fontSize: 10, color: MUTED }}>{a.shelfLifeDays}-day shelf life (remembered)</p>}
                     </Td>
                     <Td>{barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.name || <span style={{ color: AMBER }}>Not mapped</span>}</Td>
-                    <Td><input type="number" value={qtyFor(a)} onChange={(e) => setQtyOverrides((q) => ({ ...q, [a.key]: Number(e.target.value) }))} style={{ width: 70, padding: '6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }} /></Td>
+                    <Td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input type="number" value={qtyFor(a)} onChange={(e) => setQtyOverrides((q) => ({ ...q, [a.key]: Number(e.target.value) }))} style={{ width: 70, padding: '6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }} />
+                        <button
+                          onClick={() => printLabels([a])}
+                          title="Print just this article"
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 6, padding: '6px 8px', cursor: 'pointer', flexShrink: 0 }}
+                        >
+                          <Barcode size={13} />
+                        </button>
+                      </div>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <button onClick={printLabels} style={{ display: 'flex', alignItems: 'center', gap: 8, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          <button onClick={() => printLabels()} style={{ display: 'flex', alignItems: 'center', gap: 8, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             <Barcode size={15} /> Print labels
           </button>
         </>
       )}
     </Panel>
+  );
+}
+
+// ── Sales tracking helpers ──
+// A batch's "GRN value" uses the GRN file's OWN rate, not our internal Pricing
+// config — the platform's accepted rate is what actually gets billed/paid, and
+// it can differ from our list price (rate revisions, quality-based cuts, etc.).
+// Blinkit/Hyperpure GRNs carry their own landing rate, so accepted value comes
+// straight off the file. Flipkart's "Items Received" export has quantities only —
+// no rate column at all — so those rows are valued at our own agreed price from
+// the Pricing tab instead, matched back to the item by code (EAN or the FSN we
+// keep alongside it). Rows we can't match are reported rather than counted as
+// zero, so a partial match never quietly understates what the platform owes.
+function grnValueForBatch(batchId, grnReports, items, articlesByKey, configByKey, city, platform) {
+  let value = 0;
+  let pricedRows = 0;
+  let unpricedRows = 0;
+
+  const priceForCode = (code) => {
+    if (!code) return null;
+    const lower = String(code).toLowerCase();
+    const item = (items || []).find((it) => (it.aliases || []).some((a) =>
+      (a.code && a.code.toLowerCase() === lower) || (a.altCode && a.altCode.toLowerCase() === lower)));
+    if (!item) return null;
+    const alias = (item.aliases || []).find((a) => a.channel === platform) || (item.aliases || [])[0];
+    if (!alias || !alias.packSize) return null;
+    const key = `${city}__${item.name}__${platform}__${alias.packSize}__${alias.packUnit}`;
+    const legacyKey = `${item.name}__${platform}__${alias.packSize}__${alias.packUnit}`;
+    const article = articlesByKey?.[key];
+    if (!article) return null;
+    return computeFinalPrice(article.basePrice, configByKey?.[key] || configByKey?.[legacyKey]);
+  };
+
+  grnReports.filter((g) => g.batchId === batchId).forEach((g) => {
+    (g.rows || []).forEach((r) => {
+      const qty = Number(r.qty) || 0;
+      if (qty <= 0) return;
+      const filePrice = Number(r.price) || 0;
+      if (filePrice > 0) { value += qty * filePrice; pricedRows += 1; return; }
+      const ourPrice = priceForCode(r.code);
+      if (ourPrice != null && ourPrice > 0) { value += qty * ourPrice; pricedRows += 1; }
+      else unpricedRows += 1;
+    });
+  });
+  return { value: Math.round(value * 100) / 100, pricedRows, unpricedRows };
+}
+
+function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onUpdateIndentBatch }) {
+  const [view, setView] = useState('overview');
+  const [openBatchId, setOpenBatchId] = useState(null);
+  const configByKey = useMemo(() => { const m = {}; pricingConfig.forEach((x) => { m[x.id] = x; }); return m; }, [pricingConfig]);
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey), [orders, items, purchases, city, configByKey]);
+  const articlesByKey = useMemo(() => { const m = {}; articles.forEach((a) => { m[a.key] = a; }); return m; }, [articles]);
+
+  const batchFinancials = useMemo(() => indentBatches.map((b) => {
+    const costs = computeBatchArticleCosts(b, orders, articlesByKey, configByKey);
+    const grn = grnValueForBatch(b.id, grnReports, items, articlesByKey, configByKey, city, b.platform);
+    const poRows = b.poRows || [];
+    const poValue = poRows.length > 0
+      ? Math.round(poRows.reduce((s, r) => s + (Number(r.total) || 0), 0) * 100) / 100
+      : (b.poValue != null ? Number(b.poValue) : null);
+    return {
+      batch: b,
+      indentCost: costs.totalCost,
+      costRows: costs.rows,
+      pricedCount: costs.pricedCount,
+      totalCount: costs.totalCount,
+      poRows,
+      poValue,
+      expectedProfit: poValue == null ? null : Math.round((poValue - costs.totalCost) * 100) / 100,
+      grnValue: grn.value,
+      grnUnpricedRows: grn.unpricedRows,
+      hasGrn: grnReports.some((g) => g.batchId === b.id),
+      netProfit: grn.value > 0 ? Math.round((grn.value - costs.totalCost) * 100) / 100 : null,
+      invoice: salesInvoices.find((inv) => (inv.batchIds || []).includes(b.id)),
+    };
+  }), [indentBatches, orders, articlesByKey, configByKey, city, grnReports, salesInvoices, items]);
+
+  const openBatch = openBatchId ? batchFinancials.find((bf) => bf.batch.id === openBatchId) : null;
+  if (openBatch) {
+    return (
+      <SalesBatchDetail
+        bf={openBatch}
+        items={items}
+        reports={grnReports.filter((g) => g.batchId === openBatch.batch.id)}
+        onBack={() => setOpenBatchId(null)}
+        onUploadGrn={onUploadGrn}
+        onUpdateIndentBatch={onUpdateIndentBatch}
+      />
+    );
+  }
+
+  const views = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'batches', label: 'Indents & P&L' },
+    { key: 'invoices', label: 'Invoices (Flipkart)' },
+    { key: 'payments', label: 'Payments' },
+  ];
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {views.map((v) => (
+          <button key={v.key} onClick={() => setView(v.key)}
+            style={{ background: view === v.key ? LEAF : '#fff', color: view === v.key ? '#fff' : INK, border: '1px solid ' + (view === v.key ? LEAF : LINE), borderRadius: RADIUS.md, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {view === 'overview' && <SalesOverviewTab batchFinancials={batchFinancials} grnReports={grnReports} salesInvoices={salesInvoices} salesPayments={salesPayments} />}
+      {view === 'batches' && <SalesBatchesTab batchFinancials={batchFinancials} onOpen={setOpenBatchId} />}
+      {view === 'invoices' && <SalesInvoicesTab batchFinancials={batchFinancials} salesInvoices={salesInvoices} salesPayments={salesPayments} onSaveInvoice={onSaveInvoice} onDeleteInvoice={onDeleteInvoice} />}
+      {view === 'payments' && <SalesPaymentsTab batchFinancials={batchFinancials} salesInvoices={salesInvoices} salesPayments={salesPayments} onSavePayment={onSavePayment} onDeletePayment={onDeletePayment} />}
+    </div>
+  );
+}
+
+// Exact sales for a day = what the GRN says the channel actually accepted.
+// Everything upstream (dispatch, PO) is an estimate; this is the number that
+// gets billed, so it is what the daily chart is built from.
+function dailySalesFromGrn(grnReports, batchFinancials) {
+  const byDate = {};
+  batchFinancials.forEach((bf) => {
+    if (bf.grnValue <= 0) return;
+    const reports = grnReports.filter((g) => g.batchId === bf.batch.id);
+    const date = (reports[0] && reports[0].date) || bf.batch.purchaseDate || '-';
+    if (!byDate[date]) byDate[date] = { date, total: 0, cost: 0 };
+    byDate[date].total = Math.round((byDate[date].total + bf.grnValue) * 100) / 100;
+    byDate[date].cost = Math.round((byDate[date].cost + bf.indentCost) * 100) / 100;
+  });
+  return Object.values(byDate).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function SalesOverviewTab({ batchFinancials, grnReports, salesInvoices, salesPayments }) {
+  const daily = dailySalesFromGrn(grnReports, batchFinancials);
+  const maxVal = Math.max(1, ...daily.map((d) => Math.max(d.total, d.cost)));
+  const grandSales = Math.round(daily.reduce((s, d) => s + d.total, 0) * 100) / 100;
+  const grandCost = Math.round(daily.reduce((s, d) => s + d.cost, 0) * 100) / 100;
+  const grandProfit = Math.round((grandSales - grandCost) * 100) / 100;
+
+  const cards = PLATFORMS.map((platform) => {
+    const bfs = batchFinancials.filter((bf) => bf.batch.platform === platform);
+    const grn = Math.round(bfs.reduce((s, bf) => s + bf.grnValue, 0) * 100) / 100;
+    const owed = platform === 'Flipkart'
+      ? Math.round(salesInvoices.filter((i) => i.platform === platform).reduce((s, i) => s + (Number(i.amount) || 0), 0) * 100) / 100
+      : grn;
+    const received = Math.round(salesPayments.filter((p) => p.platform === platform).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
+    return { platform, grn, owed, received, outstanding: Math.round((owed - received) * 100) / 100 };
+  });
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
+        <Panel style={{ flex: 1, minWidth: 180 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>EXACT SALES (GRN)</p>
+          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: LEAF }}>{money(grandSales)}</p>
+        </Panel>
+        <Panel style={{ flex: 1, minWidth: 180 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>INDENT COST</p>
+          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: TOMATO }}>{money(grandCost)}</p>
+        </Panel>
+        <Panel style={{ flex: 1, minWidth: 180 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>NET PROFIT</p>
+          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: grandProfit >= 0 ? LEAF : TOMATO }}>{money(grandProfit)}</p>
+        </Panel>
+      </div>
+
+      <Panel style={{ marginBottom: 16 }}>
+        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Daily sales</p>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>Built only from uploaded GRN reports - the quantities the channel actually accepted, valued at the accepted rate. Days without a GRN yet do not appear.</p>
+        {daily.length === 0 ? (
+          <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>No GRN reports uploaded yet, so there is nothing to chart.</p>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 200, overflowX: 'auto', paddingTop: 8 }}>
+            {daily.map((d) => {
+              const salesH = Math.round((d.total / maxVal) * 140);
+              const costH = Math.round((d.cost / maxVal) * 140);
+              const profit = Math.round((d.total - d.cost) * 100) / 100;
+              return (
+                <div key={d.date} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 70 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: profit >= 0 ? LEAF : TOMATO }}>{money(profit)}</span>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 145 }}>
+                    <div title={'Sales ' + money(d.total)} style={{ width: 20, height: Math.max(2, salesH), background: LEAF, borderRadius: '3px 3px 0 0' }} />
+                    <div title={'Cost ' + money(d.cost)} style={{ width: 20, height: Math.max(2, costH), background: TOMATO, borderRadius: '3px 3px 0 0', opacity: 0.75 }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: MUTED, whiteSpace: 'nowrap' }}>{String(d.date).slice(5)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: MUTED }}><span style={{ width: 12, height: 12, background: LEAF, borderRadius: 3 }} /> Sales (GRN)</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: MUTED }}><span style={{ width: 12, height: 12, background: TOMATO, opacity: 0.75, borderRadius: 3 }} /> Indent cost</span>
+        </div>
+      </Panel>
+
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        {cards.map((c) => (
+          <Panel key={c.platform} style={{ flex: 1, minWidth: 250 }}>
+            <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 15, color: INK }}>{c.platform}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>Accepted (GRN)</span><span style={{ fontSize: 13, fontWeight: 700 }}>{money(c.grn)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>{c.platform === 'Flipkart' ? 'Invoiced' : 'Owed (from GRN)'}</span><span style={{ fontSize: 13, fontWeight: 700 }}>{money(c.owed)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>Received</span><span style={{ fontSize: 13, fontWeight: 700, color: LEAF }}>{money(c.received)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid ' + LINE, paddingTop: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>Outstanding</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: c.outstanding > 0 ? TOMATO : LEAF }}>{money(c.outstanding)}</span>
+              </div>
+            </div>
+          </Panel>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SalesBatchesTab({ batchFinancials, onOpen }) {
+  const sorted = [...batchFinancials].sort((a, b) => String(b.batch.id).localeCompare(String(a.batch.id)));
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Indents - cost, PO and profit</p>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Each indent runs the same course: cost from purchases, then the PO tells us what they will pay, then the GRN confirms what they took. Open one to see it article by article.</p>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr><Th>Indent</Th><Th>Channel</Th><Th>Indent cost</Th><Th>PO value</Th><Th>Expected profit</Th><Th>Sales (GRN)</Th><Th>Net profit</Th><Th /></tr></thead>
+          <tbody>
+            {sorted.map((bf) => (
+              <tr key={bf.batch.id}>
+                <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{bf.batch.id}</Td>
+                <Td>{bf.batch.platform}</Td>
+                <Td>{money(bf.indentCost)}</Td>
+                <Td>{bf.poValue == null ? <span style={{ color: AMBER, fontSize: 12 }}>No PO yet</span> : money(bf.poValue)}</Td>
+                <Td style={{ fontWeight: 700, color: bf.expectedProfit == null ? MUTED : (bf.expectedProfit >= 0 ? LEAF : TOMATO) }}>{bf.expectedProfit == null ? '-' : money(bf.expectedProfit)}</Td>
+                <Td>{bf.hasGrn ? money(bf.grnValue) : <span style={{ color: AMBER, fontSize: 12 }}>No GRN yet</span>}</Td>
+                <Td style={{ fontWeight: 800, color: bf.netProfit == null ? MUTED : (bf.netProfit >= 0 ? LEAF : TOMATO) }}>{bf.netProfit == null ? '-' : money(bf.netProfit)}</Td>
+                <Td>
+                  <button onClick={() => onOpen(bf.batch.id)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', color: LEAF, border: '1px solid ' + LEAF, borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    Open <ChevronRight size={12} />
+                  </button>
+                </Td>
+              </tr>
+            ))}
+            {sorted.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No indent batches yet.</Td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+// Matches a PO or GRN line back to one of our own costed articles. Channel files
+// identify articles by their own code (EAN or FSN, both kept on the alias), so
+// code wins; a normalised name is only a fallback for codes we have never seen.
+function matchChannelRow(row, costRows, items) {
+  const code = String(row.code || '').toLowerCase();
+  if (code) {
+    const item = items.find((it) => (it.aliases || []).some((a) =>
+      (a.code && a.code.toLowerCase() === code) || (a.altCode && a.altCode.toLowerCase() === code)));
+    if (item) {
+      const hit = costRows.find((cr) => String(cr.articleName).toLowerCase().indexOf(String(item.name).toLowerCase()) !== -1);
+      if (hit) return hit;
+    }
+    const byCode = costRows.find((cr) => String(cr.code || '').toLowerCase() === code);
+    if (byCode) return byCode;
+  }
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const n = norm(row.name);
+  if (!n) return null;
+  return costRows.find((cr) => {
+    const a = norm(cr.articleName);
+    return a && (a === n || a.indexOf(n) !== -1 || n.indexOf(a) !== -1);
+  }) || null;
+}
+
+function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateIndentBatch }) {
+  const poRef = useRef(null);
+  const grnRef = useRef(null);
+  const [poError, setPoError] = useState('');
+  const [grnError, setGrnError] = useState('');
+  const batch = bf.batch;
+  const batchDate = batch.purchaseDate || new Date().toISOString().split('T')[0];
+
+  const handlePoFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPoError('');
+    const finish = (rows, name) => {
+      if (!rows.length) { setPoError('Could not find any priced article rows in this PO.'); return; }
+      onUpdateIndentBatch(batch.id, { poRows: rows, poFileName: name, poValue: Math.round(rows.reduce((s, r) => s + (Number(r.total) || 0), 0) * 100) / 100 });
+    };
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name)).catch(() => setPoError('Could not read this PDF.'));
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        finish(parsePoSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })), file.name);
+      } catch (err) { setPoError('Could not read this file - use .xlsx, .xls, .csv or .pdf.'); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const handleGrnFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setGrnError('');
+    const finish = (rows, name) => {
+      if (!rows.length) { setGrnError('No valid GRN rows found in this file.'); return; }
+      onUploadGrn(batch.platform, batchDate, name, rows, batch.id);
+    };
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      extractPdfText(file).then((t) => finish(parseGrnPdfText(t), file.name)).catch(() => setGrnError('Could not read this PDF.'));
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        finish(parseGrnSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })), file.name);
+      } catch (err) { setGrnError('Could not read this file - use .xlsx, .xls, .csv or .pdf.'); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const comparison = useMemo(() => bf.poRows.map((po) => {
+    const cr = matchChannelRow(po, bf.costRows, items);
+    const ourCost = cr && cr.finalPricePerPack != null ? cr.finalPricePerPack : null;
+    const margin = ourCost == null ? null : Math.round((po.price - ourCost) * 100) / 100;
+    return { po, ourCost, margin, marginPct: ourCost ? Math.round((margin / ourCost) * 1000) / 10 : null };
+  }), [bf.poRows, bf.costRows, items]);
+  const unmatched = comparison.filter((x) => x.ourCost == null).length;
+
+  const btn = { display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: '1px solid ' + LEAF, borderRadius: RADIUS.md, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14 }}>
+        <ArrowLeft size={15} /> Back to indents
+      </button>
+
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
+        <Panel style={{ flex: 1, minWidth: 170 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>INDENT COST</p>
+          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: TOMATO }}>{money(bf.indentCost)}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>{bf.pricedCount}/{bf.totalCount} articles priced, shorts removed</p>
+        </Panel>
+        <Panel style={{ flex: 1, minWidth: 170 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PO VALUE</p>
+          <p style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{bf.poValue == null ? '-' : money(bf.poValue)}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>{bf.poRows.length > 0 ? bf.poRows.length + ' articles read from PO' : 'No PO uploaded'}</p>
+        </Panel>
+        <Panel style={{ flex: 1, minWidth: 170 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>EXPECTED PROFIT</p>
+          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: bf.expectedProfit == null ? MUTED : (bf.expectedProfit >= 0 ? LEAF : TOMATO) }}>{bf.expectedProfit == null ? '-' : money(bf.expectedProfit)}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>PO value minus indent cost</p>
+        </Panel>
+        <Panel style={{ flex: 1, minWidth: 170 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>NET PROFIT</p>
+          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: bf.netProfit == null ? MUTED : (bf.netProfit >= 0 ? LEAF : TOMATO) }}>{bf.netProfit == null ? '-' : money(bf.netProfit)}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>{bf.hasGrn ? 'GRN ' + money(bf.grnValue) + ' minus indent cost' : 'Waiting for GRN'}</p>
+        </Panel>
+      </div>
+
+      <Panel style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <p style={{ margin: '0 0 2px', fontWeight: 700, fontSize: 14, color: INK }}>{batch.platform} - {batch.fileName}</p>
+            <p style={{ margin: 0, fontSize: 11, color: MUTED }}>Indent date {batchDate}</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => poRef.current && poRef.current.click()} style={btn}><Upload size={13} /> {bf.poRows.length ? 'Replace PO' : 'Add PO'}</button>
+            <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handlePoFile} style={{ display: 'none' }} />
+            <button onClick={() => grnRef.current && grnRef.current.click()} style={btn}><Upload size={13} /> {reports.length ? 'Add another GRN' : 'Upload GRN'}</button>
+            <input ref={grnRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
+          </div>
+        </div>
+        {poError && <p style={{ margin: '8px 0 0', fontSize: 11, color: TOMATO }}>{poError}</p>}
+        {grnError && <p style={{ margin: '8px 0 0', fontSize: 11, color: TOMATO }}>{grnError}</p>}
+        {reports.length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + LINE }}>
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>GRN REPORTS ({reports.length})</p>
+            {reports.map((g) => <p key={g.id} style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{g.fileName} - {(g.rows || []).length} rows</p>)}
+            {bf.grnUnpricedRows > 0 && <p style={{ margin: '6px 0 0', fontSize: 11, color: AMBER }}>{bf.grnUnpricedRows} GRN row(s) could not be matched to an item, so they are not valued.</p>}
+          </div>
+        )}
+      </Panel>
+
+      {bf.poRows.length > 0 && (
+        <Panel style={{ marginBottom: 16 }}>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Price check - our cost vs what they will pay</p>
+          <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Green means the PO price covers our packed cost; red means we would lose money on that article.{unmatched > 0 ? ' ' + unmatched + ' PO row(s) could not be matched to a costed article.' : ''}</p>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><Th>Article (from PO)</Th><Th>PO qty</Th><Th>Our cost / pack</Th><Th>PO price / pack</Th><Th>Margin / pack</Th><Th>Margin %</Th></tr></thead>
+              <tbody>
+                {comparison.map((x, i) => {
+                  const good = x.margin != null && x.margin >= 0;
+                  return (
+                    <tr key={i} style={{ background: x.margin == null ? 'transparent' : (good ? 'rgba(47,82,51,0.06)' : 'rgba(217,85,44,0.08)') }}>
+                      <Td style={{ fontWeight: 700 }}>{x.po.name || x.po.code}</Td>
+                      <Td>{x.po.qty}</Td>
+                      <Td>{x.ourCost == null ? <span style={{ color: AMBER, fontSize: 12 }}>No match</span> : money(x.ourCost)}</Td>
+                      <Td>{money(x.po.price)}</Td>
+                      <Td style={{ fontWeight: 800, color: x.margin == null ? MUTED : (good ? LEAF : TOMATO) }}>{x.margin == null ? '-' : (x.margin >= 0 ? '+' : '') + money(x.margin)}</Td>
+                      <Td style={{ color: x.marginPct == null ? MUTED : (good ? LEAF : TOMATO) }}>{x.marginPct == null ? '-' : x.marginPct + '%'}</Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      <Panel>
+        <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Indent cost breakdown ({bf.pricedCount}/{bf.totalCount} articles priced)</p>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Article</Th><Th>Code</Th><Th>Ordered</Th><Th>Short</Th><Th>Costed for</Th><Th>Cost / pack</Th><Th>Cost</Th></tr></thead>
+            <tbody>
+              {bf.costRows.map((r) => (
+                <tr key={r.orderId}>
+                  <Td style={{ fontWeight: 700 }}>{r.articleName}</Td>
+                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</Td>
+                  <Td>{r.packQty}</Td>
+                  <Td style={{ color: r.shortPacks > 0 ? TOMATO : MUTED }}>{r.shortPacks > 0 ? r.shortPacks : '-'}</Td>
+                  <Td>{r.effectivePacks}</Td>
+                  <Td>{r.finalPricePerPack == null ? <span style={{ color: MUTED }}>No price</span> : money(r.finalPricePerPack)}</Td>
+                  <Td style={{ fontWeight: 700, color: r.cost == null ? MUTED : LEAF }}>{r.cost == null ? '-' : money(r.cost)}</Td>
+                </tr>
+              ))}
+              {bf.costRows.length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No articles in this indent.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSaveInvoice, onDeleteInvoice }) {
+  const [creating, setCreating] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [amount, setAmount] = useState('');
+  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
+
+  const flipkartBatches = batchFinancials.filter((bf) => bf.batch.platform === 'Flipkart');
+  const uninvoicedBatches = flipkartBatches.filter((bf) => !bf.invoice);
+
+  const toggleBatch = (id) => setSelectedBatchIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const save = () => {
+    if (!invoiceNumber.trim() || !amount || selectedBatchIds.length === 0) return;
+    onSaveInvoice({ id: `INV-${Date.now().toString(36).toUpperCase()}`, platform: 'Flipkart', invoiceNumber: invoiceNumber.trim(), invoiceDate, amount: Number(amount), batchIds: selectedBatchIds });
+    setCreating(false); setInvoiceNumber(''); setAmount(''); setSelectedBatchIds([]);
+  };
+
+  const receivedFor = (invoiceId) => Math.round(salesPayments.filter((p) => p.linkedInvoiceId === invoiceId).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
+
+  return (
+    <div>
+      {!creating ? (
+        <button onClick={() => setCreating(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>
+          <Plus size={14} /> New invoice
+        </button>
+      ) : (
+        <Panel style={{ maxWidth: 520, marginBottom: 16 }}>
+          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>New Flipkart invoice</p>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE NUMBER</p>
+          <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE DATE</p>
+          <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>BATCHES COVERED BY THIS INVOICE</p>
+          <div style={{ maxHeight: 160, overflowY: 'auto', border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: 8, marginBottom: 16 }}>
+            {uninvoicedBatches.length === 0 && <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>No un-invoiced Flipkart batches with GRN data yet.</p>}
+            {uninvoicedBatches.map((bf) => (
+              <label key={bf.batch.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 6, cursor: 'pointer' }}>
+                <input type="checkbox" checked={selectedBatchIds.includes(bf.batch.id)} onChange={() => toggleBatch(bf.batch.id)} />
+                {bf.batch.id} — GRN ₹{bf.grnValue.toLocaleString('en-IN')}
+              </label>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save invoice</button>
+            <button onClick={() => setCreating(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </Panel>
+      )}
+      <Panel>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Invoice #</Th><Th>Date</Th><Th>Amount</Th><Th>Batches</Th><Th>Received</Th><Th>Outstanding</Th><Th /></tr></thead>
+            <tbody>
+              {salesInvoices.filter((inv) => inv.platform === 'Flipkart').map((inv) => {
+                const received = receivedFor(inv.id);
+                const outstanding = Math.round((Number(inv.amount) - received) * 100) / 100;
+                return (
+                  <tr key={inv.id}>
+                    <Td>{inv.invoiceNumber}</Td>
+                    <Td>{inv.invoiceDate}</Td>
+                    <Td>₹{Number(inv.amount).toLocaleString('en-IN')}</Td>
+                    <Td style={{ fontSize: 11, color: MUTED }}>{(inv.batchIds || []).join(', ')}</Td>
+                    <Td style={{ color: LEAF }}>₹{received.toLocaleString('en-IN')}</Td>
+                    <Td style={{ color: outstanding > 0 ? TOMATO : LEAF, fontWeight: 700 }}>₹{outstanding.toLocaleString('en-IN')}</Td>
+                    <Td><button onClick={() => { if (window.confirm(`Delete invoice ${inv.invoiceNumber}?`)) onDeleteInvoice(inv.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button></Td>
+                  </tr>
+                );
+              })}
+              {salesInvoices.filter((inv) => inv.platform === 'Flipkart').length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No invoices yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSavePayment, onDeletePayment }) {
+  const [logging, setLogging] = useState(false);
+  const [platform, setPlatform] = useState(PLATFORMS[0]);
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [amount, setAmount] = useState('');
+  const [reference, setReference] = useState('');
+  const [linkType, setLinkType] = useState('invoice'); // 'invoice' | 'batch' | 'general'
+  const [linkedId, setLinkedId] = useState('');
+
+  const platformInvoices = salesInvoices.filter((inv) => inv.platform === platform);
+  const platformBatches = batchFinancials.filter((bf) => bf.batch.platform === platform);
+
+  const save = () => {
+    if (!amount) return;
+    onSavePayment({
+      id: `PAY-${Date.now().toString(36).toUpperCase()}`,
+      platform, date, amount: Number(amount), reference: reference.trim(),
+      linkedInvoiceId: linkType === 'invoice' ? linkedId : null,
+      linkedBatchId: linkType === 'batch' ? linkedId : null,
+    });
+    setLogging(false); setAmount(''); setReference(''); setLinkedId('');
+  };
+
+  // Outstanding receivables: Flipkart owed = invoiced total; Blinkit owed = GRN total (no invoice step)
+  const outstandingByPlatform = PLATFORMS.map((p) => {
+    const owed = p === 'Flipkart'
+      ? salesInvoices.filter((inv) => inv.platform === p).reduce((s, inv) => s + (Number(inv.amount) || 0), 0)
+      : batchFinancials.filter((bf) => bf.batch.platform === p).reduce((s, bf) => s + bf.grnValue, 0);
+    const received = salesPayments.filter((pay) => pay.platform === p).reduce((s, pay) => s + (Number(pay.amount) || 0), 0);
+    return { platform: p, outstanding: Math.round((owed - received) * 100) / 100 };
+  });
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+        {outstandingByPlatform.map((o) => (
+          <Panel key={o.platform} style={{ flex: 1, minWidth: 200 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 12, color: MUTED }}>{o.platform} outstanding</p>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: o.outstanding > 0 ? TOMATO : LEAF }}>₹{o.outstanding.toLocaleString('en-IN')}</p>
+          </Panel>
+        ))}
+      </div>
+      {!logging ? (
+        <button onClick={() => setLogging(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>
+          <Plus size={14} /> Log payment
+        </button>
+      ) : (
+        <Panel style={{ maxWidth: 480, marginBottom: 16 }}>
+          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Log a payment received</p>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
+          <select value={platform} onChange={(e) => { setPlatform(e.target.value); setLinkedId(''); setLinkType(e.target.value === 'Flipkart' ? 'invoice' : 'batch'); }} style={inputStyle}>
+            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>BANK REFERENCE (optional)</p>
+          <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="UTR / transaction ID" style={inputStyle} />
+          {platform === 'Flipkart' ? (
+            <>
+              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AGAINST WHICH INVOICE</p>
+              <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
+                <option value="">— Not linked to a specific invoice —</option>
+                {platformInvoices.map((inv) => <option key={inv.id} value={inv.id}>{inv.invoiceNumber} (₹{Number(inv.amount).toLocaleString('en-IN')})</option>)}
+              </select>
+            </>
+          ) : (
+            <>
+              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AGAINST WHICH BATCH (optional)</p>
+              <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
+                <option value="">— Not linked to a specific batch —</option>
+                {platformBatches.map((bf) => <option key={bf.batch.id} value={bf.batch.id}>{bf.batch.id} (GRN ₹{bf.grnValue.toLocaleString('en-IN')})</option>)}
+              </select>
+            </>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save payment</button>
+            <button onClick={() => setLogging(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </Panel>
+      )}
+      <Panel>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Date</Th><Th>Platform</Th><Th>Amount</Th><Th>Reference</Th><Th>Against</Th><Th /></tr></thead>
+            <tbody>
+              {[...salesPayments].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((p) => (
+                <tr key={p.id}>
+                  <Td>{p.date}</Td>
+                  <Td>{p.platform}</Td>
+                  <Td>₹{Number(p.amount).toLocaleString('en-IN')}</Td>
+                  <Td style={{ fontSize: 12, color: MUTED }}>{p.reference || '—'}</Td>
+                  <Td style={{ fontSize: 12, color: MUTED }}>{p.linkedInvoiceId || p.linkedBatchId || 'General'}</Td>
+                  <Td><button onClick={() => { if (window.confirm('Delete this payment record?')) onDeletePayment(p.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button></Td>
+                </tr>
+              ))}
+              {salesPayments.length === 0 && <tr><Td colSpan={6} style={{ color: MUTED, textAlign: 'center' }}>No payments logged yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+// ── Staff helpers ──
+const ATTENDANCE_STATUSES = [
+  { key: 'present', label: 'P', full: 'Present', color: LEAF, payFactor: 1 },
+  { key: 'halfday', label: 'H', full: 'Half day', color: AMBER, payFactor: 0.5 },
+  { key: 'leave', label: 'L', full: 'Paid leave', color: '#5B8DB8', payFactor: 1 },
+  { key: 'absent', label: 'A', full: 'Absent', color: TOMATO, payFactor: 0 },
+];
+const attendanceMeta = (key) => ATTENDANCE_STATUSES.find((s) => s.key === key);
+function daysInMonth(monthStr) {
+  const [y, m] = monthStr.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+function monthDateStrings(monthStr) {
+  return Array.from({ length: daysInMonth(monthStr) }, (_, i) => `${monthStr}-${String(i + 1).padStart(2, '0')}`);
+}
+function tenureText(joiningDate) {
+  if (!joiningDate) return '—';
+  const start = new Date(`${joiningDate}T00:00:00`);
+  const now = new Date();
+  let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 0) return 'Starts soon';
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  if (y === 0) return `${m} month${m === 1 ? '' : 's'}`;
+  return m === 0 ? `${y} year${y === 1 ? '' : 's'}` : `${y}y ${m}m`;
+}
+// Payroll for one person in one month. Unmarked days are treated as worked —
+// marking every present day would be a lot of clicking, so only exceptions
+// (absent/half-day/leave) need recording, which is how most small teams run it.
+function computePayroll(person, monthStr, attendance, advances) {
+  const dates = monthDateStrings(monthStr);
+  const totalDays = dates.length;
+  const perDay = (Number(person.monthlySalary) || 0) / totalDays;
+  const marks = {};
+  attendance.filter((a) => a.staffId === person.id && (a.date || '').startsWith(monthStr)).forEach((a) => { marks[a.date] = a.status; });
+
+  // Someone who joined mid-month is only paid from their joining date.
+  const joined = person.joiningDate || '';
+  const eligible = dates.filter((d) => !joined || d >= joined);
+
+  const counts = { present: 0, halfday: 0, leave: 0, absent: 0, unmarked: 0 };
+  let payableDays = 0;
+  eligible.forEach((d) => {
+    const status = marks[d];
+    if (!status) { counts.unmarked += 1; payableDays += 1; return; }
+    counts[status] = (counts[status] || 0) + 1;
+    payableDays += attendanceMeta(status)?.payFactor ?? 1;
+  });
+
+  const earned = Math.round(perDay * payableDays * 100) / 100;
+  const monthAdvances = advances.filter((a) => a.staffId === person.id && (a.date || '').startsWith(monthStr));
+  const advanceTotal = Math.round(monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+  return {
+    totalDays, eligibleDays: eligible.length, counts, payableDays: Math.round(payableDays * 100) / 100,
+    earned, advanceTotal, netPayable: Math.round((earned - advanceTotal) * 100) / 100,
+  };
+}
+
+function StaffPanel({ staff, attendance, advances, onSaveStaff, onDeleteStaff, onMarkAttendance, onClearAttendance, onSaveAdvance, onDeleteAdvance }) {
+  const [view, setView] = useState('people');
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const views = [
+    { key: 'people', label: 'People' },
+    { key: 'attendance', label: 'Attendance' },
+    { key: 'advances', label: 'Advances' },
+    { key: 'payroll', label: 'Monthly Payroll' },
+  ];
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        {views.map((v) => (
+          <button
+            key={v.key}
+            onClick={() => setView(v.key)}
+            style={{ background: view === v.key ? LEAF : '#fff', color: view === v.key ? '#fff' : INK, border: `1px solid ${view === v.key ? LEAF : LINE}`, borderRadius: RADIUS.md, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+          >
+            {v.label}
+          </button>
+        ))}
+        {view !== 'people' && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>MONTH</span>
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 'auto' }} />
+          </div>
+        )}
+      </div>
+      {view === 'people' && <StaffPeopleTab staff={staff} onSaveStaff={onSaveStaff} onDeleteStaff={onDeleteStaff} />}
+      {view === 'attendance' && <StaffAttendanceTab staff={staff} attendance={attendance} month={month} onMark={onMarkAttendance} onClear={onClearAttendance} />}
+      {view === 'advances' && <StaffAdvancesTab staff={staff} advances={advances} month={month} onSave={onSaveAdvance} onDelete={onDeleteAdvance} />}
+      {view === 'payroll' && <StaffPayrollTab staff={staff} attendance={attendance} advances={advances} month={month} />}
+    </div>
+  );
+}
+
+function StaffPeopleTab({ staff, onSaveStaff, onDeleteStaff }) {
+  const blank = { id: '', name: '', phone: '', role: '', joiningDate: new Date().toISOString().split('T')[0], monthlySalary: '', status: 'active' };
+  const [editing, setEditing] = useState(null);
+
+  const save = () => {
+    if (!editing.name.trim()) return;
+    onSaveStaff({ ...editing, id: editing.id || `STF-${Date.now().toString(36).toUpperCase()}`, name: editing.name.trim(), monthlySalary: Number(editing.monthlySalary) || 0 });
+    setEditing(null);
+  };
+
+  if (editing) {
+    return (
+      <Panel style={{ maxWidth: 480 }}>
+        <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>{editing.id ? 'Edit staff member' : 'Add staff member'}</p>
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>NAME</p>
+        <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} style={inputStyle} />
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>ROLE / DESIGNATION</p>
+        <input value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })} placeholder="e.g. Packer, Driver, Supervisor" style={inputStyle} />
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PHONE</p>
+        <input value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} style={inputStyle} />
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>JOINING DATE</p>
+        <input type="date" value={editing.joiningDate} onChange={(e) => setEditing({ ...editing, joiningDate: e.target.value })} style={inputStyle} />
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>MONTHLY SALARY (₹)</p>
+        <input type="number" value={editing.monthlySalary} onChange={(e) => setEditing({ ...editing, monthlySalary: e.target.value })} style={inputStyle} />
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>STATUS</p>
+        <select value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })} style={inputStyle}>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive (left)</option>
+        </select>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save</button>
+          <button onClick={() => setEditing(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </Panel>
+    );
+  }
+
+  const active = staff.filter((s) => s.status !== 'inactive');
+  const inactive = staff.filter((s) => s.status === 'inactive');
+  const monthlyWageBill = active.reduce((s, p) => s + (Number(p.monthlySalary) || 0), 0);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 20 }}>
+          <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>ACTIVE STAFF</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18 }}>{active.length}</p></div>
+          <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>MONTHLY WAGE BILL</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: LEAF }}>{money(monthlyWageBill)}</p></div>
+        </div>
+        <button onClick={() => setEditing(blank)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          <Plus size={14} /> Add staff
+        </button>
+      </div>
+      <Panel>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Name</Th><Th>Role</Th><Th>Phone</Th><Th>Joined</Th><Th>Tenure</Th><Th>Salary / month</Th><Th /></tr></thead>
+            <tbody>
+              {[...active, ...inactive].map((p) => (
+                <tr key={p.id} style={{ opacity: p.status === 'inactive' ? 0.55 : 1 }}>
+                  <Td style={{ fontWeight: 700 }}>{p.name}{p.status === 'inactive' && <span style={{ fontSize: 10, color: MUTED, fontWeight: 400 }}> (left)</span>}</Td>
+                  <Td>{p.role || '—'}</Td>
+                  <Td>{p.phone || '—'}</Td>
+                  <Td>{p.joiningDate || '—'}</Td>
+                  <Td style={{ fontSize: 12, color: MUTED }}>{tenureText(p.joiningDate)}</Td>
+                  <Td style={{ fontWeight: 700 }}>{money(p.monthlySalary)}</Td>
+                  <Td>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => setEditing({ ...blank, ...p })} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer' }}><Pencil size={14} /></button>
+                      <button onClick={() => { if (window.confirm(`Delete ${p.name}? Their attendance and advance records stay in the database but will no longer be shown.`)) onDeleteStaff(p.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button>
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+              {staff.length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No staff added yet.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function StaffAttendanceTab({ staff, attendance, month, onMark, onClear }) {
+  const dates = monthDateStrings(month);
+  const active = staff.filter((s) => s.status !== 'inactive');
+  const markMap = useMemo(() => {
+    const m = {};
+    attendance.forEach((a) => { m[`${a.staffId}__${a.date}`] = a.status; });
+    return m;
+  }, [attendance]);
+
+  // Clicking a cell walks through the statuses then back to unmarked, so one
+  // control covers every case without a dropdown per day.
+  const cycle = (staffId, date) => {
+    const current = markMap[`${staffId}__${date}`];
+    if (!current) { onMark(staffId, date, 'present'); return; }
+    const idx = ATTENDANCE_STATUSES.findIndex((s) => s.key === current);
+    if (idx === ATTENDANCE_STATUSES.length - 1) { onClear(staffId, date); return; }
+    onMark(staffId, date, ATTENDANCE_STATUSES[idx + 1].key);
+  };
+
+  return (
+    <Panel>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Attendance — {month}</p>
+      <p style={{ margin: '0 0 10px', fontSize: 12, color: MUTED }}>
+        Click a day to cycle through {ATTENDANCE_STATUSES.map((s) => s.full).join(' → ')} → blank. Blank days count as worked, so you only need to mark the exceptions.
+      </p>
+      <div style={{ display: 'flex', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
+        {ATTENDANCE_STATUSES.map((s) => (
+          <span key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: MUTED }}>
+            <span style={{ width: 16, height: 16, borderRadius: 4, background: s.color, color: '#fff', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.label}</span>
+            {s.full}
+          </span>
+        ))}
+      </div>
+      {active.length === 0 ? (
+        <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>No active staff — add someone in the People tab first.</p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', padding: '6px 10px', position: 'sticky', left: 0, background: '#fff', borderBottom: `1px solid ${LINE}`, fontSize: 11, color: MUTED, fontWeight: 700 }}>STAFF</th>
+                {dates.map((d) => <th key={d} style={{ padding: '6px 2px', borderBottom: `1px solid ${LINE}`, fontSize: 10, color: MUTED, fontWeight: 700, minWidth: 24 }}>{Number(d.slice(-2))}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {active.map((p) => (
+                <tr key={p.id}>
+                  <td style={{ padding: '6px 10px', position: 'sticky', left: 0, background: '#fff', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', borderBottom: `1px solid ${LINE}` }}>{p.name}</td>
+                  {dates.map((d) => {
+                    const beforeJoining = p.joiningDate && d < p.joiningDate;
+                    const status = markMap[`${p.id}__${d}`];
+                    const meta = status ? attendanceMeta(status) : null;
+                    return (
+                      <td key={d} style={{ padding: 2, borderBottom: `1px solid ${LINE}`, textAlign: 'center' }}>
+                        {beforeJoining ? (
+                          <span style={{ display: 'block', width: 22, height: 22, borderRadius: 4, background: '#F0F0EC' }} title="Before joining date" />
+                        ) : (
+                          <button
+                            onClick={() => cycle(p.id, d)}
+                            title={`${d} — ${meta ? meta.full : 'Not marked (counts as worked)'}`}
+                            style={{ width: 22, height: 22, borderRadius: 4, border: meta ? 'none' : `1px solid ${LINE}`, background: meta ? meta.color : '#fff', color: '#fff', fontSize: 10, fontWeight: 800, cursor: 'pointer', padding: 0 }}
+                          >
+                            {meta ? meta.label : ''}
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function StaffAdvancesTab({ staff, advances, month, onSave, onDelete }) {
+  const [adding, setAdding] = useState(false);
+  const [staffId, setStaffId] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+
+  const monthAdvances = advances.filter((a) => (a.date || '').startsWith(month)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const total = monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+  const nameOf = (id) => staff.find((s) => s.id === id)?.name || 'Unknown';
+
+  const save = () => {
+    if (!staffId || !amount) return;
+    onSave({ id: `ADV-${Date.now().toString(36).toUpperCase()}`, staffId, date, amount: Number(amount), note: note.trim() });
+    setAdding(false); setStaffId(''); setAmount(''); setNote('');
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+        <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>ADVANCES THIS MONTH</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: AMBER }}>{money(total)}</p></div>
+        {!adding && (
+          <button onClick={() => setAdding(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            <Plus size={14} /> Give advance
+          </button>
+        )}
+      </div>
+      {adding && (
+        <Panel style={{ maxWidth: 440, marginBottom: 16 }}>
+          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Record an advance</p>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>STAFF MEMBER</p>
+          <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={inputStyle}>
+            <option value="">— Select —</option>
+            {staff.filter((s) => s.status !== 'inactive').map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>NOTE (optional)</p>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason / reference" style={inputStyle} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save</button>
+            <button onClick={() => setAdding(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </Panel>
+      )}
+      <Panel>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Date</Th><Th>Staff</Th><Th>Amount</Th><Th>Note</Th><Th /></tr></thead>
+            <tbody>
+              {monthAdvances.map((a) => (
+                <tr key={a.id}>
+                  <Td>{a.date}</Td>
+                  <Td style={{ fontWeight: 700 }}>{nameOf(a.staffId)}</Td>
+                  <Td style={{ fontWeight: 700, color: AMBER }}>{money(a.amount)}</Td>
+                  <Td style={{ fontSize: 12, color: MUTED }}>{a.note || '—'}</Td>
+                  <Td><button onClick={() => { if (window.confirm('Delete this advance?')) onDelete(a.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button></Td>
+                </tr>
+              ))}
+              {monthAdvances.length === 0 && <tr><Td colSpan={5} style={{ color: MUTED, textAlign: 'center' }}>No advances given in {month}.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function StaffPayrollTab({ staff, attendance, advances, month }) {
+  const active = staff.filter((s) => s.status !== 'inactive');
+  const rows = active.map((p) => ({ person: p, ...computePayroll(p, month, attendance, advances) }));
+  const totalNet = rows.reduce((s, r) => s + r.netPayable, 0);
+  const totalAdvance = rows.reduce((s, r) => s + r.advanceTotal, 0);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 20, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>ADVANCES DEDUCTED</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: AMBER }}>{money(totalAdvance)}</p></div>
+        <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>NET PAYABLE ({month})</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: LEAF }}>{money(totalNet)}</p></div>
+      </div>
+      <Panel>
+        <p style={{ margin: '0 0 10px', fontSize: 12, color: MUTED }}>Salary is pro-rated per day of the month. Absent days aren't paid, half-days pay half, paid leave pays in full. Anyone who joined mid-month is only paid from their joining date.</p>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Staff</Th><Th>Salary</Th><Th>Absent</Th><Th>Half</Th><Th>Leave</Th><Th>Payable days</Th><Th>Earned</Th><Th>Advances</Th><Th>Net payable</Th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.person.id}>
+                  <Td style={{ fontWeight: 700 }}>{r.person.name}</Td>
+                  <Td>{money(r.person.monthlySalary)}</Td>
+                  <Td style={{ color: r.counts.absent > 0 ? TOMATO : MUTED, fontWeight: r.counts.absent > 0 ? 700 : 400 }}>{r.counts.absent || '—'}</Td>
+                  <Td style={{ color: r.counts.halfday > 0 ? AMBER : MUTED }}>{r.counts.halfday || '—'}</Td>
+                  <Td style={{ color: MUTED }}>{r.counts.leave || '—'}</Td>
+                  <Td>{r.payableDays} / {r.eligibleDays}</Td>
+                  <Td>{money(r.earned)}</Td>
+                  <Td style={{ color: r.advanceTotal > 0 ? AMBER : MUTED }}>{r.advanceTotal > 0 ? `− ${money(r.advanceTotal)}` : '—'}</Td>
+                  <Td style={{ fontWeight: 800, color: r.netPayable < 0 ? TOMATO : LEAF }}>{money(r.netPayable)}</Td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><Td colSpan={9} style={{ color: MUTED, textAlign: 'center' }}>No active staff to pay.</Td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
   );
 }
 
