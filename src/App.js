@@ -178,22 +178,6 @@ function renderBarcodeData(code, width = 200, height = 45) {
   return { bars, totalWidth: width, height, displayText };
 }
 
-function BarcodeSVG({ code, width = 200, height = 45, showText = true }) {
-  const data = renderBarcodeData(code, width, height);
-  if (!data) return <div style={{ fontSize: 10, color: TOMATO }}>No code to print</div>;
-  return (
-    <svg width={width} height={showText ? height + 14 : height} viewBox={`0 0 ${width} ${showText ? height + 14 : height}`}>
-      <rect x={0} y={0} width={width} height={height} fill="#fff" />
-      {data.bars.map((b, i) => <rect key={i} x={b.x} y={0} width={b.w} height={height} fill="#000" />)}
-      {showText && (
-        <text x={width / 2} y={height + 11} textAnchor="middle" fontSize="10" fontFamily="monospace" fill="#000">{data.displayText}</text>
-      )}
-    </svg>
-  );
-}
-
-// String-rendering twin of BarcodeSVG, for building the raw HTML sent to the
-// browser print window (which isn't a React tree, so JSX can't be used there).
 // Lets each article "remember" its own shelf life: whatever gap the user sets once
 // between packing date and best-before gets stored as a day-count on that article's
 // alias, so future print runs auto-advance the best-before date along with the
@@ -210,6 +194,8 @@ function diffDaysBetween(fromStr, toStr) {
   return Math.round((to - from) / (1000 * 60 * 60 * 24));
 }
 
+// Renders a barcode as a raw HTML/SVG string, for building the print window's page
+// (which isn't a React tree, so JSX can't be used there).
 function barcodeSVGMarkup(code, width = 200, height = 45, showText = true) {
   const data = renderBarcodeData(code, width, height);
   if (!data) return '<div style="font-size:10px;color:#D9552C;">No code</div>';
