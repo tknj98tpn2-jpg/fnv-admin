@@ -4945,32 +4945,43 @@ async function extractPdfText(file) {
 // what turns "expected profit" from a typed-in guess into a per-article
 // comparison against our own cost.
 const PO_CODE_KEYS = ['productno', 'productid', 'itemcode', 'code', 'sku', 'articlecode', 'fsn'];
-const PO_NAME_KEYS = ['productname', 'productdescription', 'itemname', 'name', 'description', 'article', 'product'];
+const PO_NAME_KEYS = ['productname', 'productdetails', 'productdescription', 'itemname', 'name', 'description', 'article', 'product'];
 const PO_QTY_KEYS = ['qty', 'quantity', 'orderedqty', 'poquantity'];
 const PO_PRICE_KEYS = ['priceperunit', 'perunitprice', 'unitprice', 'landingrate', 'rate', 'price'];
 const PO_TOTAL_KEYS = ['totalamount', 'linetotal', 'total', 'amount', 'value'];
 
 function parsePoSheetRows(rows) {
   let headerIdx = -1;
+  let headerSpan = 1; // some exports (Flipkart's own PO) wrap the header onto two lines
   let cols = null;
-  for (let i = 0; i < rows.length; i += 1) {
+  for (let i = 0; i < rows.length && headerIdx === -1; i += 1) {
     const cells = rows[i] || [];
     if (cells.length < 2) continue;
-    const priceIdx = findColumnIndex(cells, PO_PRICE_KEYS);
-    const qtyIdx = findColumnIndex(cells, PO_QTY_KEYS);
-    const idIdx = findColumnIndex(cells, PO_CODE_KEYS);
-    const nameIdx = findColumnIndex(cells, PO_NAME_KEYS);
-    const totalIdx = findColumnIndex(cells, PO_TOTAL_KEYS);
-    if (qtyIdx !== -1 && (priceIdx !== -1 || totalIdx !== -1) && (idIdx !== -1 || nameIdx !== -1)) {
-      headerIdx = i;
-      cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx };
-      break;
+    for (const span of [1, 2]) {
+      const merged = span === 1 ? cells : cells.map((c, idx) => {
+        const c2 = (rows[i + 1] || [])[idx];
+        return [c, c2].filter((x) => x !== undefined && x !== null && x !== '').join(' ');
+      });
+      const priceIdx = findColumnIndex(merged, PO_PRICE_KEYS);
+      const qtyIdx = findColumnIndex(merged, PO_QTY_KEYS);
+      const idIdx = findColumnIndex(merged, PO_CODE_KEYS);
+      // A "Product ID" column can also contain the word "product", which is one
+      // of the name candidates too — exclude whichever column matched the code
+      // so the two never collide onto the same column.
+      const nameIdx = findColumnIndex(merged.map((v, idx) => (idx === idIdx ? '' : v)), PO_NAME_KEYS);
+      const totalIdx = findColumnIndex(merged, PO_TOTAL_KEYS);
+      if (qtyIdx !== -1 && (priceIdx !== -1 || totalIdx !== -1) && (idIdx !== -1 || nameIdx !== -1)) {
+        headerIdx = i;
+        headerSpan = span;
+        cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx };
+        break;
+      }
     }
   }
   if (headerIdx === -1) return [];
   const num = (v) => Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, '')) || 0;
   const out = [];
-  for (let i = headerIdx + 1; i < rows.length; i += 1) {
+  for (let i = headerIdx + headerSpan; i < rows.length; i += 1) {
     const cells = rows[i] || [];
     const code = cols.code === -1 ? '' : String(cells[cols.code] == null ? '' : cells[cols.code]).trim();
     const name = cols.name === -1 ? '' : String(cells[cols.name] == null ? '' : cells[cols.name]).trim();
@@ -5013,6 +5024,74 @@ function parseGrnPdfText(text) {
     if (qty > 0) rows.push({ code: code.trim(), name: desc.trim(), qty, price });
   }
   return rows;
+}
+
+// Bank statement columns, matched generically so this survives the small header
+// wording differences between banks (e.g. "Transaction Date" vs "Txn Date").
+const BANK_STMT_DATE_KEYS = ['transactiondate', 'txndate', 'valuedate', 'date'];
+const BANK_STMT_PARTICULARS_KEYS = ['particulars', 'narration', 'description', 'transactiondetails', 'remarks'];
+const BANK_STMT_CREDIT_KEYS = ['credit', 'creditamt', 'depositamt', 'creditamount'];
+// Which channel each bank-statement payer actually pays down. Zomato Hyperpure
+// settles Blinkit indents and Duffers Farm settles Flipkart indents for this
+// business — a real relationship stated by the business, not something the
+// statement itself declares, so this mapping needs updating if that changes.
+const BANK_STMT_PAYMENT_SOURCES = [
+  { platform: 'Blinkit', keywords: ['ZOMATO', 'HYPERPURE'] },
+  { platform: 'Flipkart', keywords: ['DUFFER'] },
+];
+const BANK_STMT_MONTHS = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+function normaliseStatementDate(v) {
+  if (v instanceof Date) return v.toISOString().split('T')[0];
+  const s = String(v == null ? '' : v).trim();
+  const m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/); // "01-Aug-2026", the format IDFC First (and many banks) export
+  if (m) {
+    const mon = BANK_STMT_MONTHS[m[2].toLowerCase()];
+    if (mon) return `${m[3]}-${mon}-${m[1].padStart(2, '0')}`;
+  }
+  if (/^\d+(\.\d+)?$/.test(s)) { // Excel date serial, in case a bank exports real date cells
+    const d = new Date(Math.round((Number(s) - 25569) * 86400 * 1000));
+    if (!isNaN(d)) return d.toISOString().split('T')[0];
+  }
+  return s;
+}
+// Only CREDIT rows count — a bank statement mixes money in and out, and this
+// feature is specifically for detecting channel payments received. Each match
+// keeps the bank's own transaction reference number as its id, so uploading
+// the same statement twice (or an overlapping date range) updates the same
+// payment record instead of logging it a second time.
+function parseBankStatementRows(rows) {
+  let headerIdx = -1, cols = null;
+  for (let i = 0; i < rows.length; i += 1) {
+    const cells = rows[i] || [];
+    if (cells.length < 3) continue;
+    const dateIdx = findColumnIndex(cells, BANK_STMT_DATE_KEYS);
+    const particularsIdx = findColumnIndex(cells, BANK_STMT_PARTICULARS_KEYS);
+    const creditIdx = findColumnIndex(cells, BANK_STMT_CREDIT_KEYS);
+    if (dateIdx !== -1 && particularsIdx !== -1 && creditIdx !== -1) {
+      headerIdx = i;
+      cols = { date: dateIdx, particulars: particularsIdx, credit: creditIdx };
+      break;
+    }
+  }
+  if (headerIdx === -1) return [];
+  const num = (v) => Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, '')) || 0;
+  const out = [];
+  for (let i = headerIdx + 1; i < rows.length; i += 1) {
+    const cells = rows[i] || [];
+    const particulars = String(cells[cols.particulars] == null ? '' : cells[cols.particulars]).trim();
+    if (!particulars) continue;
+    const credit = num(cells[cols.credit]);
+    if (!credit) continue; // a debit or an empty row either way — not money received
+    const up = particulars.toUpperCase();
+    const source = BANK_STMT_PAYMENT_SOURCES.find((s) => s.keywords.some((k) => up.includes(k)));
+    if (!source) continue;
+    // Transfer reference sits as the 2nd "/"-separated segment in every mode
+    // seen so far (NEFT/HDFCH0116.../..., IMPS/6219.../..., UPI/DR/6213.../...)
+    const segs = particulars.split('/');
+    const ref = (segs.length > 2 ? segs[1] : null) || `row${i}`;
+    out.push({ id: `BSPAY-${ref}`, date: normaliseStatementDate(cells[cols.date]), amount: credit, platform: source.platform, reference: ref, particulars });
+  }
+  return out;
 }
 
 
@@ -6459,7 +6538,13 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
   const batchFinancials = useMemo(() => indentBatches.filter((b) => !b.isAdvance).map((b) => {
     const costs = computeBatchArticleCosts(b, orders, articlesByKey, configByKey);
     const grn = grnValueForBatch(b.id, grnReports, items, articlesByKey, configByKey, city, b.platform);
-    const poRows = b.poRows || [];
+    // A batch can have more than one PO — the channel sometimes tops up an
+    // indent with a second PO rather than reissuing the whole thing — so these
+    // accumulate the same way GRN reports do, never replacing an earlier one.
+    const poReports = b.poReports && b.poReports.length > 0
+      ? b.poReports
+      : (b.poRows && b.poRows.length > 0 ? [{ id: 'legacy', fileName: b.poFileName || 'PO', rows: b.poRows }] : []); // older batches saved before multi-PO support
+    const poRows = poReports.flatMap((r) => r.rows);
     const poValue = poRows.length > 0
       ? Math.round(poRows.reduce((s, r) => s + (Number(r.total) || 0), 0) * 100) / 100
       : (b.poValue != null ? Number(b.poValue) : null);
@@ -6469,6 +6554,7 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
       costRows: costs.rows,
       pricedCount: costs.pricedCount,
       totalCount: costs.totalCount,
+      poReports,
       poRows,
       poValue,
       expectedProfit: poValue == null ? null : Math.round((poValue - costs.totalCost) * 100) / 100,
@@ -6690,7 +6776,8 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     setPoError('');
     const finish = (rows, name) => {
       if (!rows.length) { setPoError('Could not find any priced article rows in this PO.'); return; }
-      onUpdateIndentBatch(batch.id, { poRows: rows, poFileName: name, poValue: Math.round(rows.reduce((s, r) => s + (Number(r.total) || 0), 0) * 100) / 100 });
+      const newReport = { id: `PO-${Date.now().toString(36).toUpperCase()}`, fileName: name, rows };
+      onUpdateIndentBatch(batch.id, { poReports: [...bf.poReports, newReport] });
     };
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     if (isPdf) {
@@ -6759,7 +6846,9 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
         <Panel style={{ flex: 1, minWidth: 170 }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PO VALUE</p>
           <p style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{bf.poValue == null ? '-' : money(bf.poValue)}</p>
-          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>{bf.poRows.length > 0 ? bf.poRows.length + ' articles read from PO' : 'No PO uploaded'}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>
+            {bf.poRows.length > 0 ? `${bf.poRows.length} article${bf.poRows.length === 1 ? '' : 's'} from ${bf.poReports.length} PO${bf.poReports.length === 1 ? '' : 's'}` : 'No PO uploaded'}
+          </p>
         </Panel>
         <Panel style={{ flex: 1, minWidth: 170 }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>EXPECTED PROFIT</p>
@@ -6780,7 +6869,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
             <p style={{ margin: 0, fontSize: 11, color: MUTED }}>Indent date {batchDate}</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button onClick={() => poRef.current && poRef.current.click()} style={btn}><Upload size={13} /> {bf.poRows.length ? 'Replace PO' : 'Add PO'}</button>
+            <button onClick={() => poRef.current && poRef.current.click()} style={btn}><Upload size={13} /> {bf.poReports.length ? 'Add another PO' : 'Add PO'}</button>
             <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handlePoFile} style={{ display: 'none' }} />
             <button onClick={() => grnRef.current && grnRef.current.click()} style={btn}><Upload size={13} /> {reports.length ? 'Add another GRN' : 'Upload GRN'}</button>
             <input ref={grnRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
@@ -6788,6 +6877,12 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
         </div>
         {poError && <p style={{ margin: '8px 0 0', fontSize: 11, color: TOMATO }}>{poError}</p>}
         {grnError && <p style={{ margin: '8px 0 0', fontSize: 11, color: TOMATO }}>{grnError}</p>}
+        {bf.poReports.length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + LINE }}>
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PO REPORTS ({bf.poReports.length})</p>
+            {bf.poReports.map((r) => <p key={r.id} style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{r.fileName} - {(r.rows || []).length} rows</p>)}
+          </div>
+        )}
         {reports.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + LINE }}>
             <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>GRN REPORTS ({reports.length})</p>
@@ -6938,6 +7033,9 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
   const [reference, setReference] = useState('');
   const [linkType, setLinkType] = useState('invoice'); // 'invoice' | 'batch' | 'general'
   const [linkedId, setLinkedId] = useState('');
+  const bankRef = useRef(null);
+  const [bankError, setBankError] = useState('');
+  const [bankResult, setBankResult] = useState(null); // { count, total } after a successful upload
 
   const platformInvoices = salesInvoices.filter((inv) => inv.platform === platform);
   const platformBatches = batchFinancials.filter((bf) => bf.batch.platform === platform);
@@ -6951,6 +7049,29 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
       linkedBatchId: linkType === 'batch' ? linkedId : null,
     });
     setLogging(false); setAmount(''); setReference(''); setLinkedId('');
+  };
+
+  // Detects Zomato/Hyperpure (Blinkit) and Duffers Farm (Flipkart) credits in an
+  // uploaded bank statement and logs each one as a payment automatically — using
+  // the bank's own transaction reference as the id, so re-uploading the same (or
+  // an overlapping) statement updates those entries instead of duplicating them.
+  const handleBankStatementFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setBankError(''); setBankResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        const sheetName = wb.SheetNames.find((n) => /statement/i.test(n)) || wb.SheetNames[0];
+        const found = parseBankStatementRows(XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' }));
+        if (!found.length) { setBankError('No Zomato/Hyperpure or Duffers Farm credits were found in this statement.'); return; }
+        found.forEach((f) => onSavePayment({ id: f.id, platform: f.platform, date: f.date, amount: f.amount, reference: f.reference, auto: true, particulars: f.particulars }));
+        setBankResult({ count: found.length, total: Math.round(found.reduce((s, f) => s + f.amount, 0) * 100) / 100 });
+      } catch (err) { setBankError('Could not read this file — use the .xlsx your bank exports.'); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
   };
 
   // Outstanding receivables: Flipkart owed = invoiced total; Blinkit owed = GRN total (no invoice step)
@@ -6973,9 +7094,15 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
         ))}
       </div>
       {!logging ? (
-        <button onClick={() => setLogging(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>
-          <Plus size={14} /> Log payment
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <button onClick={() => setLogging(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            <Plus size={14} /> Log payment
+          </button>
+          <button onClick={() => bankRef.current && bankRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            <Upload size={14} /> Upload bank statement
+          </button>
+          <input ref={bankRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleBankStatementFile} style={{ display: 'none' }} />
+        </div>
       ) : (
         <Panel style={{ maxWidth: 480, marginBottom: 16 }}>
           <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Log a payment received</p>
@@ -7012,6 +7139,9 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
           </div>
         </Panel>
       )}
+      {bankError && <p style={{ margin: '0 0 10px', fontSize: 12, color: TOMATO }}>{bankError}</p>}
+      {bankResult && <p style={{ margin: '0 0 10px', fontSize: 12, color: LEAF }}>Logged {bankResult.count} payment{bankResult.count === 1 ? '' : 's'} from the statement (₹{bankResult.total.toLocaleString('en-IN')}) — Zomato/Hyperpure credits go to Blinkit, Duffers Farm credits go to Flipkart.</p>}
+      {!logging && <p style={{ margin: '0 0 16px', fontSize: 11, color: MUTED }}>Uploading a statement only picks up Zomato/Hyperpure and Duffers Farm credits; everything else is ignored, and uploading the same statement again won't double-count.</p>}
       <Panel>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
