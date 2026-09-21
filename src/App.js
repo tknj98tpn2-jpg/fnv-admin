@@ -158,6 +158,169 @@ function code128ToBits(text) {
 
 // Dispatches to EAN-13 for a 12-13 digit numeric code, Code 128 otherwise.
 // Returns { bars: [{x,w}], totalWidth, height, displayText } ready for SVG rendering.
+// QR Code encoder — Version 1 (21x21), Numeric mode, EC level M, fixed mask 0.
+// A 12-13 digit EAN/UPC comfortably fits Version 1-M's 34-digit numeric capacity,
+// so this deliberately uses one fixed, small configuration rather than a
+// general-purpose encoder — no alignment patterns (those start at version 2+), no
+// version/mask selection, no byte/alphanumeric modes to get subtly wrong.
+// Verified by generating real EAN codes and decoding them back with an independent
+// decoder (OpenCV's QRCodeDetector) before this was ever wired into the app.
+const QR_GF_EXP = new Array(512);
+const QR_GF_LOG = new Array(256);
+(function initQrGF() {
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    QR_GF_EXP[i] = x;
+    QR_GF_LOG[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d; // primitive polynomial specified by the QR standard
+  }
+  for (let i = 255; i < 512; i++) QR_GF_EXP[i] = QR_GF_EXP[i - 255];
+})();
+function qrGfMul(a, b) { if (a === 0 || b === 0) return 0; return QR_GF_EXP[QR_GF_LOG[a] + QR_GF_LOG[b]]; }
+function qrMultiplyPoly(a, b) {
+  const result = new Array(a.length + b.length - 1).fill(0);
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) result[i + j] ^= qrGfMul(a[i], b[j]);
+  return result;
+}
+function qrBuildGeneratorPoly(n) {
+  let g = [1];
+  for (let i = 0; i < n; i++) g = qrMultiplyPoly(g, [1, QR_GF_EXP[i]]);
+  return g;
+}
+function qrComputeECCodewords(dataBytes, numEC) {
+  const gen = qrBuildGeneratorPoly(numEC);
+  const msg = dataBytes.concat(new Array(numEC).fill(0));
+  for (let i = 0; i < dataBytes.length; i++) {
+    const coef = msg[i];
+    if (coef === 0) continue;
+    for (let j = 0; j < gen.length; j++) msg[i + j] ^= qrGfMul(gen[j], coef);
+  }
+  return msg.slice(dataBytes.length);
+}
+// Numeric mode only fits digits 0-9. Codes with letters (rare, but some SKUs have
+// them) fall back to null so the caller can skip the QR rather than emit a wrong one.
+function encodeNumericQR1M(rawDigits) {
+  const digits = String(rawDigits || '');
+  // Must be ALL digits — silently stripping non-digit characters here (as an
+  // earlier version did) would let a code like "BLK-ONI-600" quietly encode as
+  // just "600", so a non-numeric character means this mode doesn't apply at all.
+  if (!/^\d+$/.test(digits) || digits.length > 34) return null; // Version 1-M numeric capacity
+  let bits = '0001' + digits.length.toString(2).padStart(10, '0');
+  for (let i = 0; i < digits.length; i += 3) {
+    const g = digits.slice(i, i + 3);
+    const w = g.length === 3 ? 10 : g.length === 2 ? 7 : 4;
+    bits += parseInt(g, 10).toString(2).padStart(w, '0');
+  }
+  return qrFinish1M(bits);
+}
+// Alphanumeric mode: 0-9, A-Z, space, $ % * + - . / : (45 chars) — needed because
+// SKU-style codes (e.g. "BLK-ONI-600") aren't purely numeric like an EAN/UPC.
+const QR_ALPHANUM_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+function encodeAlphanumericQR1M(rawText) {
+  const text = String(rawText || '').toUpperCase();
+  if (!text || text.length > 20 || ![...text].every((ch) => QR_ALPHANUM_CHARS.includes(ch))) return null;
+  let bits = '0010' + text.length.toString(2).padStart(9, '0');
+  for (let i = 0; i < text.length; i += 2) {
+    if (i + 1 < text.length) {
+      const val = QR_ALPHANUM_CHARS.indexOf(text[i]) * 45 + QR_ALPHANUM_CHARS.indexOf(text[i + 1]);
+      bits += val.toString(2).padStart(11, '0');
+    } else {
+      bits += QR_ALPHANUM_CHARS.indexOf(text[i]).toString(2).padStart(6, '0');
+    }
+  }
+  return qrFinish1M(bits);
+}
+// Tries the more compact numeric mode first, falls back to alphanumeric for
+// SKU-style codes, and gives up (no QR) only for characters neither supports
+// (e.g. lowercase-sensitive text) rather than emit a wrong/truncated code.
+function encodeQR1M(rawCode) {
+  return encodeNumericQR1M(rawCode) || encodeAlphanumericQR1M(rawCode);
+}
+function qrFinish1M(bits) {
+  const CAPACITY_BITS = 16 * 8; // Version 1-M: 16 data codewords
+  if (bits.length > CAPACITY_BITS) return null;
+  bits += '0000'.slice(0, Math.min(4, CAPACITY_BITS - bits.length));
+  while (bits.length % 8 !== 0) bits += '0';
+  const padBytes = ['11101100', '00010001'];
+  let p = 0;
+  while (bits.length < CAPACITY_BITS) { bits += padBytes[p % 2]; p++; }
+
+  const dataBytes = [];
+  for (let i = 0; i < bits.length; i += 8) dataBytes.push(parseInt(bits.slice(i, i + 8), 2));
+  const ecBytes = qrComputeECCodewords(dataBytes, 10);
+  const allCodewords = dataBytes.concat(ecBytes);
+
+  const SIZE = 21;
+  const matrix = Array.from({ length: SIZE }, () => new Array(SIZE).fill(0));
+  const reserved = Array.from({ length: SIZE }, () => new Array(SIZE).fill(false));
+  const setM = (r, c, v) => { if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) { matrix[r][c] = v; reserved[r][c] = true; } };
+
+  function placeFinder(r0, c0) {
+    for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
+      const rr = r0 + r, cc = c0 + c;
+      if (rr < 0 || cc < 0 || rr >= SIZE || cc >= SIZE) continue;
+      let v = 0;
+      if (r >= 0 && r <= 6 && c >= 0 && c <= 6) {
+        const onBorder = r === 0 || r === 6 || c === 0 || c === 6;
+        const onCore = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        v = (onBorder || onCore) ? 1 : 0;
+      }
+      setM(rr, cc, v);
+    }
+  }
+  placeFinder(0, 0); placeFinder(0, 14); placeFinder(14, 0);
+  for (let i = 8; i <= 12; i++) { setM(6, i, i % 2 === 0 ? 1 : 0); setM(i, 6, i % 2 === 0 ? 1 : 0); }
+  setM(13, 8, 1); // dark module — row 4*version+9, col 8; version 1 → row 13
+
+  const FORMAT_TL_POS = [[0,8],[1,8],[2,8],[3,8],[4,8],[5,8],[7,8],[8,8],[8,7],[8,5],[8,4],[8,3],[8,2],[8,1],[8,0]];
+  const FORMAT_OTHER_POS = [
+    [8, SIZE-1], [8, SIZE-2], [8, SIZE-3], [8, SIZE-4], [8, SIZE-5], [8, SIZE-6], [8, SIZE-7],
+    [SIZE-8, 8], [SIZE-7, 8], [SIZE-6, 8], [SIZE-5, 8], [SIZE-4, 8], [SIZE-3, 8], [SIZE-2, 8], [SIZE-1, 8],
+  ];
+  FORMAT_TL_POS.concat(FORMAT_OTHER_POS).forEach(([c, r]) => { reserved[r][c] = true; });
+
+  const allBits = allCodewords.map((b) => b.toString(2).padStart(8, '0')).join('');
+  let bitIdx = 0, col = SIZE - 1, upward = true;
+  while (col > 0) {
+    if (col === 6) col--;
+    for (let i = 0; i < SIZE; i++) {
+      const row = upward ? SIZE - 1 - i : i;
+      for (let c = 0; c < 2; c++) {
+        const cc = col - c;
+        if (!reserved[row][cc]) {
+          const bit = bitIdx < allBits.length ? Number(allBits[bitIdx]) : 0;
+          bitIdx++;
+          matrix[row][cc] = (row + cc) % 2 === 0 ? bit ^ 1 : bit; // fixed mask pattern 0
+        }
+      }
+    }
+    upward = !upward;
+    col -= 2;
+  }
+
+  const FORMAT_CODEWORD = 0x5412; // verified masked codeword for (EC level M, mask 0)
+  const fbits = FORMAT_CODEWORD.toString(2).padStart(15, '0').split('').map(Number);
+  for (let k = 0; k < 15; k++) {
+    const [c1, r1] = FORMAT_TL_POS[k]; matrix[r1][c1] = fbits[k];
+    const [c2, r2] = FORMAT_OTHER_POS[k]; matrix[r2][c2] = fbits[k];
+  }
+  return matrix;
+}
+// Renders the QR matrix as an SVG-markup string sized to fit a `size`×`size` box,
+// matching how barcodeSVGMarkup returns a plain string for the print window.
+function qrSVGMarkup(code, size = 100) {
+  const matrix = encodeQR1M(code);
+  if (!matrix) return '';
+  const n = matrix.length;
+  const module = size / n;
+  let rects = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (matrix[r][c]) rects += `<rect x="${(c * module).toFixed(2)}" y="${(r * module).toFixed(2)}" width="${module.toFixed(2)}" height="${module.toFixed(2)}" fill="#000"/>`;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><rect x="0" y="0" width="${size}" height="${size}" fill="#fff"/>${rects}</svg>`;
+}
+
 function renderBarcodeData(code, width = 200, height = 45) {
   const cleaned = String(code || '').trim();
   if (!cleaned) return null;
@@ -249,12 +412,14 @@ const PERMISSION_SECTIONS = [
   { key: 'vendors', label: 'Vendors' },
   { key: 'cutprocess', label: 'Cut & Process' },
   { key: 'orders', label: 'Orders' },
+  { key: 'advanceindent', label: 'Advance Indent (mobile app)' },
   { key: 'purchase', label: 'Purchases' },
   { key: 'stockcount', label: 'Stock Count' },
   { key: 'spoilage', label: 'Spoilage & Surplus' },
   { key: 'pricing', label: 'Pricing' },
   { key: 'sales', label: 'Sales' },
   { key: 'staff', label: 'Staff' },
+  { key: 'attendance', label: 'Attendance (mobile app)' },
   { key: 'packaging', label: 'Packaging' },
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'crates', label: 'Crates & boxes' },
@@ -266,17 +431,17 @@ const SEED_ROLES = [
   {
     id: 'ROLE-ADMIN',
     name: 'Admin',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, sales: true, staff: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, sales: true, staff: true, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
   },
   {
     id: 'ROLE-WAREHOUSE',
     name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, purchase: false, stockcount: true, spoilage: false, pricing: false, profitloss: false, sales: false, staff: false, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
+    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, advanceindent: false, purchase: false, stockcount: true, spoilage: false, pricing: false, profitloss: false, sales: false, staff: false, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
   },
   {
     id: 'ROLE-PURCHASE',
     name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, sales: true, staff: false, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: false, purchase: true, stockcount: true, spoilage: true, pricing: true, profitloss: true, sales: true, staff: false, attendance: false, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
   },
 ];
 
@@ -504,7 +669,7 @@ export default function AdminPanel() {
   // values until now. This is the single source of truth for what a logged-in
   // user's sidebar and page routing are allowed to show.
   const currentRole = currentUser ? roles.find((r) => r.id === currentUser.roleId) : null;
-  const visibleNav = NAV.filter((n) => hasPermission(currentRole?.permissions, n.key));
+  const visibleNav = NAV.filter((n) => (n.key === 'staff' ? hasSensitivePermission(currentRole?.permissions, 'staff') : hasPermission(currentRole?.permissions, n.key)));
   // If the active tab isn't one this user's role can see — because their role
   // was just restricted, or a stale tab carried over from a previous session —
   // drop them onto the first section they do have access to instead of leaving
@@ -1330,6 +1495,14 @@ const COMPANY_NAME = 'NILGIRI FNV SUPPLIER COMPANY';
 // existing roles never lose access to something they were silently already using.
 function hasPermission(permissions, key) {
   return !permissions || permissions[key] !== false;
+}
+// Sensitive, admin-only features (staff pay/payroll, committing to advance
+// purchases) must be explicitly granted — the opposite default from every
+// other permission. Otherwise a role saved before this permission existed
+// would fail OPEN (missing key = allowed) and suddenly gain access the
+// moment this ships, instead of needing an admin to turn it on.
+function hasSensitivePermission(permissions, key) {
+  return !!permissions && permissions[key] === true;
 }
 
 // Renders a purchase-requirement list as a shareable PNG, styled like a printed order sheet.
@@ -2745,7 +2918,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                       <Td key={s.key} style={{ textAlign: 'center' }}>
                         <input
                           type="checkbox"
-                          checked={hasPermission(r.permissions, s.key)}
+                          checked={['staff', 'advanceindent'].includes(s.key) ? hasSensitivePermission(r.permissions, s.key) : hasPermission(r.permissions, s.key)}
                           onChange={(e) => onToggleRolePermission(r.id, s.key, e.target.checked)}
                         />
                       </Td>
@@ -2945,6 +3118,30 @@ function ReleaseBatchRow({ batch: b, orders, onToggleReleaseBatch }) {
 
 function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete, defaultOpen }) {
   const [open, setOpen] = useState(!!defaultOpen);
+  const [openArticles, setOpenArticles] = useState(() => new Set());
+
+  // A channel indent lists one quantity per dark store, so the same article
+  // legitimately becomes several orders. Showing each of those as its own top
+  // level row buried the article list (85 articles turned into 171 rows), so
+  // articles are grouped here and the per-store orders sit inside.
+  const articleGroups = useMemo(() => {
+    const map = {};
+    groupOrders.forEach((o) => {
+      const name = o.articleName || o.product;
+      const key = `${name}__${o.unit}`;
+      if (!map[key]) map[key] = { key, name, unit: o.unit, rows: [], qty: 0, fulfilmentDate: o.fulfilmentDate || '' };
+      map[key].rows.push(o);
+      map[key].qty = Math.round((map[key].qty + (Number(o.qty) || 0)) * 100) / 100;
+    });
+    return Object.values(map).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [groupOrders]);
+
+  const toggleArticle = (key) => setOpenArticles((s) => {
+    const n = new Set(s);
+    if (n.has(key)) n.delete(key); else n.add(key);
+    return n;
+  });
+
   return (
     <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
       <div
@@ -2957,7 +3154,9 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {badge}
-          <span style={{ background: '#EAF3DE', color: LEAF_DARK, fontWeight: 800, fontSize: 12, padding: '3px 10px', borderRadius: 999 }}>{groupOrders.length}</span>
+          <span style={{ background: '#EAF3DE', color: LEAF_DARK, fontWeight: 800, fontSize: 12, padding: '3px 10px', borderRadius: 999 }}>
+            {articleGroups.length} article{articleGroups.length === 1 ? '' : 's'}
+          </span>
           <ChevronRight size={16} color={MUTED} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
         </div>
       </div>
@@ -2965,29 +3164,64 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr><Th>Order ID</Th><Th>Platform</Th><Th>Product</Th><Th>Qty</Th><Th>UOM</Th><Th>Fulfilment date</Th><Th>Status</Th><Th /></tr>
+            <tr><Th>Product</Th><Th>Total qty</Th><Th>UOM</Th><Th>Stores</Th><Th>Fulfilment date</Th><Th>Status</Th><Th /></tr>
           </thead>
           <tbody>
-            {groupOrders.map((o) => (
-              <tr key={o.id}>
-                <Td>{o.id}</Td>
-                <Td>{o.platform}{orderStore(o) ? ` · ${storeLabel(orderStore(o))}` : ''}</Td>
-                <Td>{o.articleName || o.product}</Td>
-                <Td>{o.qty}</Td>
-                <Td>{o.unit}</Td>
-                <Td>{o.fulfilmentDate || <span style={{ color: MUTED }}>—</span>}</Td>
-                <Td><StatusPill status={o.status} /></Td>
-                <Td>
-                  <button
-                    onClick={() => { if (window.confirm(`Delete order ${o.id}? This can't be undone.`)) onDelete(o.id); }}
-                    style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}
-                    aria-label={`Delete order ${o.id}`}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </Td>
-              </tr>
-            ))}
+            {articleGroups.map((g) => {
+              const isOpen = openArticles.has(g.key);
+              const statuses = Array.from(new Set(g.rows.map((r) => r.status)));
+              return (
+                <React.Fragment key={g.key}>
+                  <tr onClick={() => g.rows.length > 1 && toggleArticle(g.key)} style={{ cursor: g.rows.length > 1 ? 'pointer' : 'default', background: isOpen ? '#FAFAF7' : 'transparent' }}>
+                    <Td style={{ fontWeight: 700 }}>
+                      {g.rows.length > 1 && (
+                        <ChevronRight size={12} color={MUTED} style={{ marginRight: 6, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+                      )}
+                      {g.name}
+                    </Td>
+                    <Td style={{ fontWeight: 700 }}>{g.qty}</Td>
+                    <Td>{g.unit}</Td>
+                    <Td style={{ fontSize: 12, color: MUTED }}>
+                      {g.rows.length === 1
+                        ? (orderStore(g.rows[0]) ? storeLabel(orderStore(g.rows[0])) : '—')
+                        : `${g.rows.length} stores`}
+                    </Td>
+                    <Td>{g.fulfilmentDate || <span style={{ color: MUTED }}>—</span>}</Td>
+                    <Td>{statuses.length === 1 ? <StatusPill status={statuses[0]} /> : <span style={{ fontSize: 11, color: MUTED }}>Mixed</span>}</Td>
+                    <Td>
+                      {g.rows.length === 1 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete order ${g.rows[0].id}? This can't be undone.`)) onDelete(g.rows[0].id); }}
+                          style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}
+                          aria-label={`Delete order ${g.rows[0].id}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </Td>
+                  </tr>
+                  {isOpen && g.rows.map((o) => (
+                    <tr key={o.id} style={{ background: '#FAFAF7' }}>
+                      <Td style={{ paddingLeft: 34, fontSize: 12, color: MUTED }}>{o.id}</Td>
+                      <Td style={{ fontSize: 12 }}>{o.qty}</Td>
+                      <Td style={{ fontSize: 12, color: MUTED }}>{o.unit}</Td>
+                      <Td style={{ fontSize: 12 }}>{o.platform}{orderStore(o) ? ` · ${storeLabel(orderStore(o))}` : ''}</Td>
+                      <Td style={{ fontSize: 12, color: MUTED }}>{o.fulfilmentDate || '—'}</Td>
+                      <Td><StatusPill status={o.status} /></Td>
+                      <Td>
+                        <button
+                          onClick={() => { if (window.confirm(`Delete order ${o.id}? This can't be undone.`)) onDelete(o.id); }}
+                          style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}
+                          aria-label={`Delete order ${o.id}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </Td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
         </div>
@@ -3494,6 +3728,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [selectedVendorId, setSelectedVendorId] = useState('');
   const [showAllVendorItems, setShowAllVendorItems] = useState(false);
+  const [showAllVendorsInDropdown, setShowAllVendorsInDropdown] = useState(false);
   const [purchasedDate, setPurchasedDate] = useState('');
 
   // Multi-select / order sharing (save a requirement list to Vendors → Order Placed)
@@ -3516,6 +3751,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     setSelectedItemId(id);
     if (!keepVendor) setSelectedVendorId('');
     setShowAllVendorItems(false);
+    setShowAllVendorsInDropdown(false);
     setPurchaseQty(''); setUnitPrice(''); setTotalInput('');
     setPaymentMode('cash'); setPurchaseNote('');
     setPurchaseSuccess(false);
@@ -3676,6 +3912,8 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     const it = items.find((x) => x.id === selectedItemId);
     const data = selectedItemData || { needed: 0, stock: 0, toBuy: 0, unit: it?.uom };
     const vendor = vendors.find((v) => v.id === selectedVendorId);
+    const mappedVendors = vendors.filter((v) => (v.itemIds || []).includes(it?.id));
+    const dropdownVendors = mappedVendors.length === 0 || showAllVendorsInDropdown ? vendors : mappedVendors;
     const allVendorItems = vendor ? items.filter((x) => vendor.itemIds.includes(x.id)) : [];
     const sorted = [...allVendorItems].sort((a, b) => {
       if (a.id === it?.id) return -1;
@@ -3719,13 +3957,20 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         <select
           value={selectedVendorId}
           onChange={(e) => { setSelectedVendorId(e.target.value); setShowAllVendorItems(false); }}
-          style={{ ...inputStyle, marginBottom: 10 }}
+          style={{ ...inputStyle, marginBottom: mappedVendors.length === 0 ? 4 : 10 }}
         >
           <option value="">Choose a vendor</option>
-          {vendors.map((v) => (
-            <option key={v.id} value={v.id}>{v.name}{v.itemIds.includes(it?.id) ? ' ✓' : ''}</option>
+          {dropdownVendors.map((v) => (
+            <option key={v.id} value={v.id}>{v.name}</option>
           ))}
         </select>
+        {mappedVendors.length === 0 ? (
+          <p style={{ margin: '0 0 10px', fontSize: 11, color: AMBER }}>No vendor is linked to {it?.name} yet — showing every vendor. Link one in the Vendors section to shorten this list next time.</p>
+        ) : !showAllVendorsInDropdown && (
+          <button onClick={() => setShowAllVendorsInDropdown(true)} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0, marginBottom: 10 }}>
+            Not listed? Show all vendors
+          </button>
+        )}
 
         {/* Vendor supplies list */}
         {selectedVendorId && (
@@ -5362,12 +5607,14 @@ function CratesPanel({ crates, log, onAdjust }) {
 
 const STD_BARCODE_FIELD_DEFS = [
   { key: 'printBarcode', label: 'Print barcode (the scannable graphic itself)' },
+  { key: 'printQR', label: 'Print QR code (same number, as a QR)' },
   { key: 'itemName', label: 'Item Name' },
   { key: 'netWeight', label: 'Net Weight / Net Quantity' },
   { key: 'packingDate', label: 'Packing Date' },
   { key: 'expiryDate', label: 'Expiry Date' },
   { key: 'companyDetails', label: 'Company Details (Name + Address + FSSAI)' },
   { key: 'showBarcodeNumber', label: 'Show barcode number as text' },
+  { key: 'storeTemperature', label: 'Store Temperature' },
 ];
 
 function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias }) {
@@ -5396,9 +5643,9 @@ function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, co
           </button>
         ))}
       </div>
-      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} />}
+      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} onSaveFormat={onSaveFormat} />}
       {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
-      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} onMapFormat={(itemId, channel, formatId) => onUpdateAlias(itemId, channel, { barcodeFormatId: formatId })} onUpdateCode={(itemId, channel, ean) => onUpdateAlias(itemId, channel, { ean })} />}
+      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} onMapFormat={(itemId, channel, formatId) => onUpdateAlias(itemId, channel, { barcodeFormatId: formatId })} onUpdateAlias={onUpdateAlias} />}
       {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
     </div>
   );
@@ -5477,13 +5724,14 @@ function BarcodeFormatEditor({ format, onSave, onCancel }) {
   const [name, setName] = useState(format.name);
   const [standardFields, setStandardFields] = useState(format.standardFields);
   const [customFields, setCustomFields] = useState(format.customFields || []);
+  const [storeTemperatureText, setStoreTemperatureText] = useState(format.storeTemperatureText || '');
 
   const toggleStd = (key) => setStandardFields((s) => ({ ...s, [key]: !s[key] }));
   const addCustom = () => setCustomFields((c) => [...c, { id: `CF-${Date.now().toString(36).toUpperCase()}-${c.length}`, label: '', value: '' }]);
   const updateCustom = (id, patch) => setCustomFields((c) => c.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   const removeCustom = (id) => setCustomFields((c) => c.filter((f) => f.id !== id));
   const canSave = name.trim().length > 0;
-  const save = () => { if (canSave) onSave({ ...format, name: name.trim(), standardFields, customFields: customFields.filter((f) => f.label.trim()) }); };
+  const save = () => { if (canSave) onSave({ ...format, name: name.trim(), standardFields, customFields: customFields.filter((f) => f.label.trim()), storeTemperatureText: storeTemperatureText.trim() }); };
 
   return (
     <Panel style={{ maxWidth: 560 }}>
@@ -5493,10 +5741,20 @@ function BarcodeFormatEditor({ format, onSave, onCancel }) {
 
       <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>FIELDS TO INCLUDE</p>
       {STD_BARCODE_FIELD_DEFS.map((d) => (
-        <label key={d.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13, cursor: 'pointer', color: INK }}>
-          <input type="checkbox" checked={!!standardFields[d.key]} onChange={() => toggleStd(d.key)} />
-          {d.label}
-        </label>
+        <div key={d.key} style={{ marginBottom: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: INK }}>
+            <input type="checkbox" checked={!!standardFields[d.key]} onChange={() => toggleStd(d.key)} />
+            {d.label}
+          </label>
+          {d.key === 'storeTemperature' && standardFields.storeTemperature && (
+            <input
+              value={storeTemperatureText}
+              onChange={(e) => setStoreTemperatureText(e.target.value)}
+              placeholder="e.g. Store below 4°C / Store in a cool, dry place"
+              style={{ ...inputStyle, marginTop: 6, marginBottom: 0, marginLeft: 24, width: 'calc(100% - 24px)' }}
+            />
+          )}
+        </div>
       ))}
 
       <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>CUSTOM FIELDS (any extra number, symbol, or note)</p>
@@ -5519,43 +5777,72 @@ function BarcodeFormatEditor({ format, onSave, onCancel }) {
   );
 }
 
-function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateCode }) {
+function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateAlias }) {
   const [search, setSearch] = useState('');
-  const [codeOverrides, setCodeOverrides] = useState({});
+  const [edits, setEdits] = useState({});
+
+  // Article name and UOM are what actually get printed on the label, so they are
+  // editable here alongside the barcode - the same three fields the Print tab
+  // saves, kept on the channel alias so a correction sticks for good.
   const rows = [];
   items.forEach((it) => {
     (it.aliases || []).forEach((al) => {
-      if (al.code || al.ean) rows.push({ itemId: it.id, itemName: it.name, channel: al.channel, code: al.ean || al.code, barcodeFormatId: al.barcodeFormatId || '' });
+      if (al.code || al.ean) {
+        rows.push({
+          itemId: it.id,
+          itemName: it.name,
+          channel: al.channel,
+          code: al.ean || al.code || '',
+          labelName: al.labelName || it.name,
+          labelUom: al.labelUom || (al.packSize ? `${al.packSize}${al.packUnit || ''}` : ''),
+          barcodeFormatId: al.barcodeFormatId || '',
+        });
+      }
     });
   });
-  const filtered = rows.filter((r) => !search.trim() || r.itemName.toLowerCase().includes(search.trim().toLowerCase()));
+  const filtered = rows.filter((r) => !search.trim()
+    || r.itemName.toLowerCase().includes(search.trim().toLowerCase())
+    || String(r.labelName).toLowerCase().includes(search.trim().toLowerCase()));
+
   const rowKey = (r) => `${r.itemId}__${r.channel}`;
-  const codeFor = (r) => codeOverrides[rowKey(r)] ?? r.code;
-  const commitCode = (r, value) => {
-    const trimmed = value.trim();
-    if (trimmed !== r.code) onUpdateCode(r.itemId, r.channel, trimmed);
+  const valFor = (r, field) => {
+    const e = edits[rowKey(r)];
+    return e && field in e ? e[field] : r[field];
   };
+  const setVal = (r, field, value) => setEdits((s) => ({ ...s, [rowKey(r)]: { ...(s[rowKey(r)] || {}), [field]: value } }));
+  const isDirty = (r) => !!edits[rowKey(r)];
+  const save = (r) => {
+    onUpdateAlias(r.itemId, r.channel, {
+      ean: String(valFor(r, 'code')).trim(),
+      labelName: String(valFor(r, 'labelName')).trim(),
+      labelUom: String(valFor(r, 'labelUom')).trim(),
+    });
+    setEdits((s) => { const n = { ...s }; delete n[rowKey(r)]; return n; });
+  };
+
+  const cell = { fontSize: 12, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' };
 
   return (
     <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Map a format to each article</p>
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Each article can use a different format — this is what makes labels print with exactly the fields that article needs.</p>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Articles &amp; label formats</p>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Everything that prints on a label is editable here. Each article can use a different format, so labels carry exactly the fields that article needs. Changes are saved against the article.</p>
       <input placeholder="Search item..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260 }} />
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Item</Th><Th>Channel</Th><Th>Barcode (EAN)</Th><Th>Format</Th></tr></thead>
+          <thead><tr><Th>Item</Th><Th>Channel</Th><Th>Article name (on label)</Th><Th>UOM (on label)</Th><Th>Barcode (EAN)</Th><Th>Format</Th><Th /></tr></thead>
           <tbody>
             {filtered.map((r, i) => (
               <tr key={i}>
-                <Td>{r.itemName}</Td>
+                <Td style={{ fontSize: 12, color: MUTED }}>{r.itemName}</Td>
                 <Td>{r.channel}</Td>
                 <Td>
-                  <input
-                    value={codeFor(r)}
-                    onChange={(e) => setCodeOverrides((c) => ({ ...c, [rowKey(r)]: e.target.value }))}
-                    onBlur={(e) => commitCode(r, e.target.value)}
-                    style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
-                  />
+                  <input value={valFor(r, 'labelName')} onChange={(e) => setVal(r, 'labelName', e.target.value)} style={{ ...cell, width: 170, fontSize: 13 }} />
+                </Td>
+                <Td>
+                  <input value={valFor(r, 'labelUom')} onChange={(e) => setVal(r, 'labelUom', e.target.value)} placeholder="e.g. 500 g" style={{ ...cell, width: 100 }} />
+                </Td>
+                <Td>
+                  <input value={valFor(r, 'code')} onChange={(e) => setVal(r, 'code', e.target.value)} style={{ ...cell, width: 130, fontFamily: 'monospace' }} />
                 </Td>
                 <Td>
                   <select
@@ -5567,9 +5854,16 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateCode }) {
                     {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                   </select>
                 </Td>
+                <Td>
+                  {isDirty(r) && (
+                    <button onClick={() => save(r)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      <CheckCircle2 size={13} /> Save
+                    </button>
+                  )}
+                </Td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><Td colSpan={4} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
+            {filtered.length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
           </tbody>
         </table>
       </div>
@@ -5577,7 +5871,185 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateCode }) {
   );
 }
 
-function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias }) {
+// ── Label visual editor ──
+// A format has no saved layout until someone opens the editor and hits Save, so
+// this computes a starting arrangement that mirrors the current stacked order —
+// editing from a familiar baseline rather than an empty canvas.
+function defaultLabelLayout(format) {
+  const sf = format?.standardFields || {};
+  const layout = {};
+  const cx = 25; // horizontal center of the 50mm label; fields are centered on x
+  let y = 4;
+  if (sf.itemName) { layout.itemName = { x: cx, y, size: 13 }; y += 6.5; }
+  if (sf.netWeight) { layout.netWeight = { x: cx, y, size: 9.5, prefix: 'Net Wt:' }; y += 4.5; }
+  if (sf.packingDate) { layout.packingDate = { x: cx, y, size: 9.5, prefix: 'Packed:' }; y += 4.5; }
+  if (sf.expiryDate) { layout.expiryDate = { x: cx, y, size: 9.5, prefix: 'Best Before:' }; y += 4.5; }
+  if (sf.storeTemperature) { layout.storeTemperature = { x: cx, y, size: 7 }; y += 3.5; }
+  if (sf.companyDetails) {
+    layout.companyName = { x: cx, y, size: 8 }; y += 3.5;
+    layout.companyAddress = { x: cx, y, size: 6 }; y += 3;
+    layout.fssai = { x: cx, y, size: 8, prefix: 'FSSAI:' }; y += 4.5;
+  }
+  (format?.customFields || []).forEach((cf) => { layout[`custom_${cf.id}`] = { x: cx, y, size: 7, prefix: `${cf.label}:` }; y += 3.5; });
+  if (sf.printBarcode !== false) {
+    const bcSize = sf.printQR ? 36 : 44; // a bit smaller by default when QR also needs room on the same label
+    layout.barcode = { x: cx, y, size: bcSize };
+    y += bcSize * 0.3 + 2; // barcode height is size*0.3 in the print renderer — advance past it, not a fixed guess
+  }
+  if (sf.printQR) {
+    const qrSize = sf.printBarcode !== false ? 20 : 26;
+    layout.qr = { x: cx, y, size: qrSize };
+  }
+  return layout;
+}
+// Fields whose text is a fixed value from elsewhere (article name/UOM already
+// have their own edit fields in the Print tab; company values live in Business
+// Details) — this editor repositions and resizes them, but only the key-value
+// lines' PREFIX text ("Net Wt:", "FSSAI:", ...) is genuinely editable here,
+// since that's the one piece of label wording that has no other home.
+const LABEL_FIELD_DEFS = [
+  { key: 'itemName', kind: 'text', hasPrefix: false },
+  { key: 'netWeight', kind: 'text', hasPrefix: true },
+  { key: 'packingDate', kind: 'text', hasPrefix: true },
+  { key: 'expiryDate', kind: 'text', hasPrefix: true },
+  { key: 'storeTemperature', kind: 'text', hasPrefix: false },
+  { key: 'companyName', kind: 'text', hasPrefix: false },
+  { key: 'companyAddress', kind: 'text', hasPrefix: false },
+  { key: 'fssai', kind: 'text', hasPrefix: true },
+  { key: 'barcode', kind: 'graphic' },
+  { key: 'qr', kind: 'graphic' },
+];
+
+function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
+  const [layout, setLayout] = useState(() => ({ ...defaultLabelLayout(format), ...(format.layout || {}) }));
+  const [selected, setSelected] = useState(null);
+  const dragRef = useRef(null); // { key, startX, startY, origX, origY }
+  const canvasRef = useRef(null);
+  const SCALE = 6; // 50mm label drawn at 300x300px for comfortable dragging
+
+  const sf = format.standardFields || {};
+  const activeKeys = LABEL_FIELD_DEFS
+    .filter((d) => {
+      if (d.key === 'barcode') return sf.printBarcode !== false;
+      if (d.key === 'qr') return !!sf.printQR;
+      if (d.key === 'itemName') return !!sf.itemName;
+      if (d.key === 'netWeight') return !!sf.netWeight;
+      if (d.key === 'packingDate') return !!sf.packingDate;
+      if (d.key === 'expiryDate') return !!sf.expiryDate;
+      if (d.key === 'storeTemperature') return !!sf.storeTemperature;
+      if (['companyName', 'companyAddress', 'fssai'].includes(d.key)) return !!sf.companyDetails;
+      return true;
+    })
+    .map((d) => d.key)
+    .concat((format.customFields || []).map((cf) => `custom_${cf.id}`));
+
+  const contentFor = (key) => {
+    if (key === 'itemName') return article.itemName;
+    if (key === 'netWeight') return article.netWeight;
+    if (key === 'packingDate') return article.packingDate;
+    if (key === 'expiryDate') return article.expiryDate;
+    if (key === 'storeTemperature') return format.storeTemperatureText || '(store temperature)';
+    if (key === 'companyName') return companyDetails.name || '(company name)';
+    if (key === 'companyAddress') return companyDetails.address || '(address)';
+    if (key === 'fssai') return companyDetails.fssai || '(FSSAI number)';
+    const cf = (format.customFields || []).find((c) => `custom_${c.id}` === key);
+    return cf ? cf.value : '';
+  };
+  const defForKey = (key) => LABEL_FIELD_DEFS.find((d) => d.key === key) || { kind: 'text', hasPrefix: true };
+
+  const startDrag = (e, key) => {
+    e.preventDefault();
+    setSelected(key);
+    const entry = layout[key] || { x: 25, y: 25, size: 10 };
+    dragRef.current = { key, startX: e.clientX, startY: e.clientY, origX: entry.x, origY: entry.y };
+  };
+  const onCanvasMouseMove = (e) => {
+    if (!dragRef.current) return;
+    const { key, startX, startY, origX, origY } = dragRef.current;
+    const dx = (e.clientX - startX) / SCALE;
+    const dy = (e.clientY - startY) / SCALE;
+    setLayout((l) => ({ ...l, [key]: { ...l[key], x: Math.max(0, Math.min(50, origX + dx)), y: Math.max(0, Math.min(50, origY + dy)) } }));
+  };
+  const stopDrag = () => { dragRef.current = null; };
+
+  const adjustSize = (key, delta) => setLayout((l) => ({ ...l, [key]: { ...l[key], size: Math.max(4, Math.round(((l[key]?.size || 10) + delta) * 10) / 10) } }));
+  const setPrefix = (key, prefix) => setLayout((l) => ({ ...l, [key]: { ...l[key], prefix } }));
+
+  const save = () => { onSave({ ...format, layout }); onClose(); };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,16,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div style={{ background: '#fff', borderRadius: RADIUS.xl, padding: 24, maxWidth: 720, width: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 15, color: INK }}>Edit label layout — {format.name}</p>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer' }}><X size={18} /></button>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Drag any field to reposition it. Click a field to resize it or (for Net Wt / Packed / Best Before / FSSAI) change its label text. Saving applies to every article using the <strong>{format.name}</strong> format.</p>
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+          <div
+            ref={canvasRef}
+            onMouseMove={onCanvasMouseMove}
+            onMouseUp={stopDrag}
+            onMouseLeave={stopDrag}
+            style={{ position: 'relative', width: 50 * SCALE, height: 50 * SCALE, background: '#fafaf7', border: `1px solid ${LINE}`, flexShrink: 0, userSelect: 'none' }}
+          >
+            {activeKeys.map((key) => {
+              const entry = layout[key] || { x: 25, y: 25, size: 10 };
+              const def = defForKey(key);
+              const isSelected = selected === key;
+              const commonStyle = {
+                position: 'absolute', left: entry.x * SCALE, top: entry.y * SCALE, transform: 'translateX(-50%)',
+                cursor: 'move', outline: isSelected ? `1.5px dashed ${LEAF}` : 'none', outlineOffset: 2, padding: 1, whiteSpace: 'nowrap',
+              };
+              if (def.kind === 'graphic') {
+                const pxSize = entry.size * SCALE * (key === 'qr' ? 1 : 1);
+                const markup = key === 'barcode' ? barcodeSVGMarkup(article.code, pxSize, pxSize * 0.3, true) : qrSVGMarkup(article.code, pxSize);
+                return (
+                  <div key={key} onMouseDown={(e) => startDrag(e, key)} style={commonStyle} dangerouslySetInnerHTML={{ __html: markup }} />
+                );
+              }
+              const text = (def.hasPrefix ? `${entry.prefix ?? ''} ` : '') + contentFor(key);
+              return (
+                <div key={key} onMouseDown={(e) => startDrag(e, key)} style={{ ...commonStyle, fontSize: entry.size * (SCALE / 3.78), fontWeight: key === 'itemName' ? 700 : 600, fontFamily: 'Arial, sans-serif', color: '#000' }}>
+                  {text}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            {!selected ? (
+              <p style={{ fontSize: 12, color: MUTED }}>Click a field on the label to edit it.</p>
+            ) : (
+              <div>
+                <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>{selected}</p>
+                <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{defForKey(selected).kind === 'graphic' ? 'SIZE (mm)' : 'FONT SIZE (px)'}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <button onClick={() => adjustSize(selected, -1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>−</button>
+                  <span style={{ fontSize: 13, minWidth: 30, textAlign: 'center' }}>{layout[selected]?.size ?? 10}</span>
+                  <button onClick={() => adjustSize(selected, 1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>+</button>
+                </div>
+                {defForKey(selected).hasPrefix && (
+                  <>
+                    <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL TEXT</p>
+                    <input value={layout[selected]?.prefix ?? ''} onChange={(e) => setPrefix(selected, e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+          <button onClick={save} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            <CheckCircle2 size={15} /> Save layout
+          </button>
+          <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias, onSaveFormat }) {
   const [platform, setPlatform] = useState(PLATFORMS[0]);
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -5588,6 +6060,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const [uomOverrides, setUomOverrides] = useState({});
   const [bestBeforeOverrides, setBestBeforeOverrides] = useState({});
   const [labelSize, setLabelSize] = useState('thermal5050'); // 'thermal5050' | 'a4'
+  const [editingArticleKey, setEditingArticleKey] = useState(null);
 
   const allArticles = useMemo(() => {
     const dayOrders = orders.filter((o) => o.platform === platform && o.fulfilmentDate === date && o.packQty && o.packSize);
@@ -5632,8 +6105,8 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   // (via the row's Save button) the correction lives on the item's channel alias —
   // same place Code already lives — so it survives navigating away and reappears
   // automatically next time, instead of only lasting this one print session.
-  const nameFor = (a) => nameOverrides[a.key] ?? a.labelName ?? a.articleName;
-  const uomFor = (a) => uomOverrides[a.key] ?? a.labelUom ?? (a.rawUnit || `${a.packSize}${a.packUnit}`);
+  const nameFor = (a) => nameOverrides[a.key] ?? (a.labelName || a.articleName || '');
+  const uomFor = (a) => uomOverrides[a.key] ?? (a.labelUom || a.rawUnit || (a.packSize ? `${a.packSize}${a.packUnit || ''}` : ''));
   const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides;
   const saveRow = (a) => {
     if (!a.itemId) return;
@@ -5669,10 +6142,45 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     // to comfortably fit next to several lines of compliance text on one 50mm-tall label.
     const barcodeW = isThermal ? 44 * 3.78 : 190; // mm→px at 96dpi CSS reference, so the SVG's own coordinate space matches the printed mm size
     const barcodeH = isThermal ? 13 * 3.78 : 40; // sized down from 18mm after feedback that it dwarfed the item name — 13mm still scans reliably at typical warehouse handheld-scanner distance
+    // A saved layout (from the label editor) only applies to the 50x50mm thermal
+    // size, since its coordinates are defined against that exact label — A4
+    // sheets keep the plain stacked layout regardless.
+    const renderWithLayout = (a, format, sf) => {
+      const layout = format.layout;
+      let html = '<div class="label-abs">';
+      LABEL_FIELD_DEFS.forEach((d) => {
+        const entry = layout[d.key];
+        if (!entry) return;
+        if (d.key === 'barcode' && sf.printBarcode === false) return;
+        if (d.key === 'qr' && !sf.printQR) return;
+        const style = `position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap;`;
+        if (d.kind === 'graphic') {
+          const px = entry.size * 3.78;
+          const markup = d.key === 'barcode' ? barcodeSVGMarkup(a.code, px, px * 0.3, sf.showBarcodeNumber !== false) : qrSVGMarkup(a.code, px);
+          if (markup) html += `<div style="${style}">${markup}</div>`;
+        } else {
+          const content = { itemName: nameFor(a), netWeight: uomFor(a), packingDate: date, expiryDate: bestBeforeFor(a) || '___________', storeTemperature: format.storeTemperatureText || '', companyName: companyDetails.name || '', companyAddress: (companyDetails.address || '').replace(/\n/g, '<br/>'), fssai: companyDetails.fssai || '' }[d.key];
+          const prefix = d.hasPrefix && entry.prefix ? `${entry.prefix} ` : '';
+          const weight = d.key === 'itemName' ? 700 : 600;
+          html += `<div style="${style} font-size:${entry.size}px; font-weight:${weight}; font-family:Arial,sans-serif; color:#000;">${prefix}${content}</div>`;
+        }
+      });
+      (format.customFields || []).forEach((cf) => {
+        const entry = layout[`custom_${cf.id}`];
+        if (!entry) return;
+        html += `<div style="position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap; font-size:${entry.size}px; font-weight:600; font-family:Arial,sans-serif; color:#000;">${entry.prefix ? `${entry.prefix} ` : ''}${cf.value}</div>`;
+      });
+      html += '</div>';
+      return html;
+    };
     const labelsHtml = toPrint.map((a) => {
       const format = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
       const sf = format?.standardFields || { printBarcode: true, itemName: true, netWeight: true, showBarcodeNumber: true };
       const qty = Math.max(1, Math.round(qtyFor(a)));
+      if (isThermal && format?.layout) {
+        const oneLabel = renderWithLayout(a, format, sf);
+        return Array(qty).fill(oneLabel).join('');
+      }
       // The indent file's own weight/quantity text (e.g. "280-320 g", "2 Units") is
       // what the platform itself declared for this article — more authoritative for
       // a printed Net Weight than the admin's own configured pack size, which exists
@@ -5684,7 +6192,12 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
       if (sf.netWeight) oneLabel += `<div class="lbl-line lbl-key">Net Wt: ${netWeight}</div>`;
       if (sf.packingDate) oneLabel += `<div class="lbl-line lbl-key">Packed: ${date}</div>`;
       if (sf.expiryDate) oneLabel += `<div class="lbl-line lbl-key">Best Before: ${bestBeforeFor(a) || '___________'}</div>`;
-      if (sf.companyDetails) oneLabel += `<div class="lbl-line lbl-company">${companyDetails.name || ''}<br/>${(companyDetails.address || '').replace(/\n/g, '<br/>')}<br/>FSSAI: ${companyDetails.fssai || ''}</div>`;
+      if (sf.storeTemperature && format?.storeTemperatureText) oneLabel += `<div class="lbl-line lbl-key">${format.storeTemperatureText}</div>`;
+      if (sf.companyDetails) {
+        oneLabel += `<div class="lbl-line lbl-company-name">${companyDetails.name || ''}</div>`;
+        if (companyDetails.address) oneLabel += `<div class="lbl-line lbl-company-addr">${companyDetails.address.replace(/\n/g, '<br/>')}</div>`;
+        if (companyDetails.fssai) oneLabel += `<div class="lbl-line lbl-fssai">FSSAI: ${companyDetails.fssai}</div>`;
+      }
       (format?.customFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label}: ${cf.value}</div>`; });
       if (sf.printBarcode !== false) {
         oneLabel += barcodeSVGMarkup(a.code, barcodeW, barcodeH, sf.showBarcodeNumber !== false);
@@ -5692,6 +6205,11 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         // No scannable graphic on this format, but the code itself can still print
         // as plain text (e.g. for manual lookup) if that toggle is on.
         oneLabel += `<div class="lbl-line lbl-name">${a.code}</div>`;
+      }
+      if (sf.printQR) {
+        const qrSize = isThermal ? 26 * 3.78 : 70; // same mm→px reference as the barcode
+        const qrMarkup = qrSVGMarkup(a.code, qrSize);
+        if (qrMarkup) oneLabel += `<div class="lbl-qr">${qrMarkup}</div>`;
       }
       oneLabel += '</div>';
       return Array(qty).fill(oneLabel).join('');
@@ -5702,10 +6220,14 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         body { font-family: Arial, sans-serif; margin: 0; }
         .grid { display: flex; flex-wrap: wrap; width: 100mm; }
         .label { width: 50mm; height: 50mm; padding: 1.5mm; box-sizing: border-box; overflow: hidden; text-align: center; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .label-abs { position: relative; width: 50mm; height: 50mm; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; }
         .lbl-line { font-size: 7px; margin-top: 1.5px; line-height: 1.25; word-break: break-word; }
         .lbl-key { font-size: 9.5px; font-weight: 600; }
         .lbl-name { font-weight: 700; font-size: 13px; margin-top: 3px; line-height: 1.2; }
-        .lbl-company { font-size: 5.5px; color: #333; margin-top: 2px; }
+        .lbl-company-name { font-size: 8px; font-weight: 700; color: #000; margin-top: 3px; line-height: 1.2; }
+        .lbl-company-addr { font-size: 6px; color: #333; margin-top: 1px; line-height: 1.2; }
+        .lbl-fssai { font-size: 8px; font-weight: 700; color: #000; margin-top: 1px; }
+        .lbl-qr { margin-top: 2px; }
       `;
     const a4Style = `
         @page { margin: 8mm; }
@@ -5715,7 +6237,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         .lbl-line { font-size: 9px; margin-top: 2px; line-height: 1.3; word-break: break-word; }
         .lbl-key { font-size: 10px; font-weight: 600; }
         .lbl-name { font-weight: 700; font-size: 11px; }
-        .lbl-company { font-size: 7px; color: #333; }
+        .lbl-company-name { font-size: 9.5px; font-weight: 700; color: #000; }
+        .lbl-company-addr { font-size: 7px; color: #333; }
+        .lbl-fssai { font-size: 9.5px; font-weight: 700; color: #000; }
+        .lbl-qr { margin-top: 3px; }
       `;
 
     const html = `<!DOCTYPE html><html><head><title>Barcode Labels — ${platform} — ${date}</title>
@@ -5729,7 +6254,12 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     w.document.close();
   };
 
+  const editingArticle = editingArticleKey ? articles.find((a) => a.key === editingArticleKey) : null;
+  const editingFormat = editingArticle ? barcodeFormats.find((f) => f.id === editingArticle.barcodeFormatId) : null;
+  const saveFormatLayout = (updatedFormat) => onSaveFormat(updatedFormat);
+
   return (
+    <>
     <Panel>
       <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Print pack labels</p>
       <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Pulls today's packed articles automatically — adjust quantities if needed before printing.</p>
@@ -5832,6 +6362,14 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                         >
                           <Barcode size={13} />
                         </button>
+                        <button
+                          onClick={() => setEditingArticleKey(a.key)}
+                          title="Edit this label's layout"
+                          disabled={!a.barcodeFormatId}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: a.barcodeFormatId ? MUTED : '#C9C2AE', border: `1px solid ${a.barcodeFormatId ? LINE : '#E5E1D4'}`, borderRadius: 6, padding: '6px 8px', cursor: a.barcodeFormatId ? 'pointer' : 'default', flexShrink: 0 }}
+                        >
+                          <Pencil size={13} />
+                        </button>
                       </div>
                     </Td>
                   </tr>
@@ -5845,6 +6383,22 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         </>
       )}
     </Panel>
+    {editingArticle && editingFormat && (
+      <LabelDesigner
+        format={editingFormat}
+        article={{
+          itemName: nameFor(editingArticle),
+          netWeight: uomFor(editingArticle),
+          packingDate: date,
+          expiryDate: bestBeforeFor(editingArticle) || '___________',
+          code: editingArticle.code,
+        }}
+        companyDetails={companyDetails}
+        onSave={saveFormatLayout}
+        onClose={() => setEditingArticleKey(null)}
+      />
+    )}
+    </>
   );
 }
 
