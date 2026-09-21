@@ -912,6 +912,18 @@ export default function AdminPanel() {
   const importOrder  = (o)   => fbSetDoc('orders', o.id, { ...o, city: effectiveCity });
   const deleteOrder  = (id)  => fbDelete('orders', id);
   const advanceMany   = (ids, next) => { const b = writeBatch(db); ids.forEach((id) => b.update(doc(db,'orders',id), { status: next })); b.commit(); };
+  // Uploading a fresh indent means today's real requirement has moved on — an
+  // item that couldn't be bought for the old indent (e.g. not available in
+  // mandi that day) shouldn't keep inflating the purchase list forever. This
+  // only hides the OLD orders from the "needs purchase" total; their own
+  // status, packing and dispatch are completely untouched, so if they still
+  // need to ship, that work isn't lost — only re-buying for them is skipped.
+  const excludeOldOrdersFromPurchase = (ids) => {
+    if (!ids.length) return;
+    const b = writeBatch(db);
+    ids.forEach((id) => b.update(doc(db, 'orders', id), { excludeFromPurchase: true }));
+    b.commit();
+  };
 
   // ── Crates ──────────────────────────────────────────────
   const adjustCrates = async (type, delta, note) => {
@@ -1147,6 +1159,7 @@ export default function AdminPanel() {
               onUpdateAlias={updateAliasById}
               onCreateIndentBatch={createIndentBatch}
               onToggleReleaseBatch={toggleReleaseBatch}
+              onExcludeOldFromPurchase={excludeOldOrdersFromPurchase}
             />
           )}
           {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} />}
@@ -3276,7 +3289,7 @@ function OrdersListPanel({ orders, indentBatches, onDelete }) {
   );
 }
 
-function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch }) {
+function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch, onExcludeOldFromPurchase }) {
   const [platform, setPlatform] = useState('Blinkit');
   const [product, setProduct] = useState('');
   const [qty, setQty] = useState('');
@@ -3453,6 +3466,17 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
         purchaseRowIds: [],
         isAdvance: !!pendingIndent.isAdvance,
       });
+      // A regular (non-advance) indent means today's real requirement has
+      // arrived — clear old, still-open orders out of the purchase list so a
+      // mandi-unavailable item from a past indent doesn't linger forever.
+      // Advance indents don't trigger this: they're a future heads-up, not a
+      // fresh day's requirement, so today's purchase list should stay as is.
+      if (!pendingIndent.isAdvance) {
+        const staleIds = orders
+          .filter((o) => o.batchId && o.batchId !== batchId && o.status !== 'dispatched' && !o.isAdvance && !o.excludeFromPurchase)
+          .map((o) => o.id);
+        onExcludeOldFromPurchase(staleIds);
+      }
     }
     if (!remaining.length && !pendingIndent.isAdvance) setIndentFulfilmentDate('');
     setPendingIndent(remaining.length ? { ...pendingIndent, rows: remaining } : null);
@@ -3821,6 +3845,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     const dates = new Set();
     orders
       .filter((o) => o.status !== 'dispatched')
+      .filter((o) => !o.excludeFromPurchase)
       .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
       .forEach((o) => { if (o.fulfilmentDate) dates.add(o.fulfilmentDate); });
     return Array.from(dates).sort();
@@ -3835,6 +3860,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     const releasedBatchIds = new Set(indentBatches.filter((b) => b.released).map((b) => b.id));
     orders
       .filter((o) => o.status !== 'dispatched')
+      .filter((o) => !o.excludeFromPurchase)
       .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
       .filter((o) => fulfilmentDateFilter === 'ALL' || o.fulfilmentDate === fulfilmentDateFilter)
       .forEach((o) => {
