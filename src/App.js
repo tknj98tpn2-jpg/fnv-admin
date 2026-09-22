@@ -1154,7 +1154,7 @@ export default function AdminPanel() {
               onExcludeOldFromPurchase={excludeOldOrdersFromPurchase}
             />
           )}
-          {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} onDeleteOldPurchases={removePurchasesByIds} />}
+          {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} onDeleteOldPurchases={removePurchasesByIds} onResetPurchaseNeeds={excludeOldOrdersFromPurchase} />}
           {tab === 'stockcount' && <StockCountPanel items={cityItems} stockCounts={cityStockCounts} purchases={cityPurchases} dispatchLog={cityDispatchLog} onRecord={recordStockCount} onReset={resetStockCounts} />}
           {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} />}
           {tab === 'sales' && (
@@ -1760,6 +1760,7 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
   const [vendorSearch, setVendorSearch] = useState('');
   const [openVendorId, setOpenVendorId] = useState(null);
   const [ledgerFilter, setLedgerFilter] = useState('due'); // 'due' | 'all'
+  const [showLedgerDownload, setShowLedgerDownload] = useState(false);
   const [selectedDates, setSelectedDates] = useState([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [payModal, setPayModal] = useState(null);
@@ -1911,7 +1912,8 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
   if (openVendor) {
     const vendorDueEntries = dueEntriesOf(openVendor.id);
     const vendorDue = sumEffective(vendorDueEntries);
-    const groups = ledgerGroupsOf(openVendor.id).filter((g) => ledgerFilter === 'all' || g.due.length > 0);
+    const allLedgerGroups = ledgerGroupsOf(openVendor.id); // unfiltered, for download — independent of the on-screen Outstanding/All toggle
+    const groups = allLedgerGroups.filter((g) => ledgerFilter === 'all' || g.due.length > 0);
     const selectedEntries = groups.filter((g) => selectedDates.includes(g.date)).flatMap((g) => g.due);
     const selectedDays = groups.filter((g) => selectedDates.includes(g.date) && g.due.length > 0).length;
 
@@ -1932,7 +1934,31 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
             <div style={{ textAlign: 'right' }}>
               <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL OUTSTANDING</p>
               <p style={{ margin: '0 0 10px', fontWeight: 800, fontSize: 22, color: vendorDue > 0 ? AMBER : LEAF }}>{money(vendorDue)}</p>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', position: 'relative' }}>
+                <button
+                  onClick={() => setShowLedgerDownload((x) => !x)}
+                  style={{ background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 9, padding: '10px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Download size={14} /> Download ledger
+                </button>
+                {showLedgerDownload && (
+                  <div style={{ position: 'absolute', top: '110%', right: 0, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', padding: 6, zIndex: 20, minWidth: 240 }}>
+                    <button
+                      onClick={() => { downloadVendorLedgerCsv(openVendor.name, allLedgerGroups, false); setShowLedgerDownload(false); }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: 6, padding: '9px 10px', fontSize: 13, color: INK, cursor: 'pointer' }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#F6F3EA'} onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                    >
+                      <span style={{ fontWeight: 700 }}>Complete ledger</span><br /><span style={{ fontSize: 11, color: MUTED }}>Every entry, date-wise</span>
+                    </button>
+                    <button
+                      onClick={() => { downloadVendorLedgerCsv(openVendor.name, allLedgerGroups, true); setShowLedgerDownload(false); }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: 6, padding: '9px 10px', fontSize: 13, color: INK, cursor: 'pointer' }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#F6F3EA'} onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                    >
+                      <span style={{ fontWeight: 700 }}>Only unpaid entries</span><br /><span style={{ fontSize: 11, color: MUTED }}>Just what's still outstanding</span>
+                    </button>
+                  </div>
+                )}
                 <button
                   onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: new Date().toISOString().split('T')[0] })}
                   style={{ background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 9, padding: '10px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
@@ -3689,6 +3715,32 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
 
 const PURCHASE_CATEGORY_OPTIONS = ['ALL', 'FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
 
+// Downloads a vendor's ledger as CSV — using a direct Blob download (not a print
+// window) since that's the pattern that reliably works from inside the app's
+// Android WebView, where window.open()/print() can silently fail to show anything.
+function downloadVendorLedgerCsv(vendorName, groups, onlyOutstanding) {
+  const rows = [];
+  groups.forEach((g) => {
+    (onlyOutstanding ? g.due : g.entries).forEach((e) => {
+      const status = e.payment === 'credit' ? (e.settled ? 'Paid (was credit)' : 'Outstanding') : `Paid (${e.payment})`;
+      rows.push([e.date || '', e.itemName || '', e.qty ?? '', e.unit || '', e.unitPrice ?? '', e.total ?? '', status]);
+    });
+  });
+  const header = ['Date', 'Item', 'Qty', 'Unit', 'Unit Price', 'Total', 'Status'];
+  const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' }); // BOM so Excel opens ₹/non-ASCII text correctly
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeName = vendorName.replace(/[^a-z0-9]+/gi, '_');
+  a.download = `${safeName}_ledger_${onlyOutstanding ? 'outstanding' : 'complete'}_${new Date().toISOString().split('T')[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function downloadPurchasePdf(rows) {
   const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   const rowsHtml = rows.map((it) => `
@@ -3733,11 +3785,12 @@ function downloadPurchasePdf(rows) {
   };
 }
 
-function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, indentBatches, onAdd, onAddLedgerEntry, onSavePlacedOrder, onDeleteOldPurchases }) {
+function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, indentBatches, onAdd, onAddLedgerEntry, onSavePlacedOrder, onDeleteOldPurchases, onResetPurchaseNeeds }) {
   const [categoryFilter, setCategoryFilter] = usePersistedState('fnv_purchase_category', 'ALL');
   const [vendorFilterId, setVendorFilterId] = usePersistedState('fnv_purchase_vendor', '');
   const [qtySort, setQtySort] = usePersistedState('fnv_purchase_qtysort', 'none'); // 'none' | 'asc' | 'desc'
   const [fulfilmentDateFilter, setFulfilmentDateFilter] = usePersistedState('fnv_purchase_fulfilmentdate', 'ALL'); // 'ALL' = All Purchase
+  const [confirmingPurchaseReset, setConfirmingPurchaseReset] = useState(false);
   const [itemSearch, setItemSearch] = useState('');
   const [view, setView] = useState('list'); // 'list' | 'purchased'
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -3873,6 +3926,18 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       });
     return map;
   }, [orders, recipes, items, indentBatches, fulfilmentDateFilter]);
+
+  // Every order still counted as "needing purchase", regardless of the date
+  // filter currently on screen — Reset clears the whole list, not just what's
+  // visible right now, matching the same rule as Reset Stock.
+  const allPurchaseNeedOrderIds = useMemo(() => {
+    const releasedBatchIds = new Set(indentBatches.filter((b) => b.released).map((b) => b.id));
+    return orders
+      .filter((o) => o.status !== 'dispatched')
+      .filter((o) => !o.excludeFromPurchase)
+      .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
+      .map((o) => o.id);
+  }, [orders, indentBatches]);
 
   const filteredItems = useMemo(() => {
     const vendorItemIds = vendorFilterId ? new Set(vendors.find((v) => v.id === vendorFilterId)?.itemIds || []) : null;
@@ -4156,12 +4221,36 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
           )}
           <div style={{ flex: 1 }} />
           <button
+            onClick={() => setConfirmingPurchaseReset((x) => !x)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            <RotateCcw size={13} /> Reset
+          </button>
+          <button
             onClick={() => setView('purchased')}
             style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
             Purchased ({allPurchasedCount})
           </button>
         </div>
+        {confirmingPurchaseReset && (
+          <div style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', borderRadius: 10, padding: 14, marginTop: 12 }}>
+            <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13, color: INK }}>Reset "Items needing purchase"?</p>
+            <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED, lineHeight: 1.5 }}>
+              This marks every item currently on this list as handled — <strong>all {allPurchaseNeedOrderIds.length} pending order(s)</strong>, not just the ones your filters are showing. It doesn't touch what was already bought or dispatched; it only stops these from asking to be bought again. If a new indent later needs the same item, it'll reappear on its own. Anything you forgot can still be logged directly from Vendors.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => { onResetPurchaseNeeds(allPurchaseNeedOrderIds); setConfirmingPurchaseReset(false); }}
+                disabled={!allPurchaseNeedOrderIds.length}
+                style={{ background: allPurchaseNeedOrderIds.length ? TOMATO : '#E5E1D4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: allPurchaseNeedOrderIds.length ? 'pointer' : 'default' }}
+              >
+                Reset all {allPurchaseNeedOrderIds.length > 0 ? allPurchaseNeedOrderIds.length : ''}
+              </button>
+              <button onClick={() => setConfirmingPurchaseReset(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        )}
         <p style={{ margin: '10px 0 0', fontSize: 11, color: MUTED }}>
           Items are hidden below once stock already covers demand — they don't need buying right now.
         </p>
@@ -5026,6 +5115,18 @@ function parsePoSheetRows(rows) {
 // Hyperpure's PO PDF flattens to: productNo name HSN MRP margin qty pricePerUnit
 // UoM gst% taxPerUnit total. The UoM is free text ("200 g", "1 unit (150 - 160 g)")
 // so it's matched loosely between the two numeric runs.
+// Neither PO parser currently captures a header-level PO number (they only
+// read the article-line table) — this pulls it separately, from the same raw
+// text/filename already available at upload time. Hyperpure's own PDF states
+// it explicitly ("PO Number: 21265209..."); other exports (Flipkart's own
+// per-store Excel PO) carry no such field, so the filename itself — which is
+// already a unique per-PO reference — is used as a readable fallback.
+function extractPoNumber(rawText, fileName) {
+  const m = rawText && String(rawText).match(/PO\s*Number\s*:?\s*([A-Za-z0-9-]+)/i);
+  if (m) return m[1];
+  return String(fileName || '').replace(/\.(xlsx|xls|csv|pdf)$/i, '').replace(/^purchase[_\s-]*order[_\s-]*/i, '').trim() || fileName || '';
+}
+
 function parsePoPdfText(text) {
   const flat = text.replace(/\s+/g, ' ').trim();
   const pattern = /(\d{7,9}) (.+?) (\d{8}) (\d+\.\d{2}) (\d+\.\d{2}) (\d+) (\d+\.\d{2}) .*?(\d+)% (\d+\.\d{2}) (\d+\.\d{2})/g;
@@ -6565,6 +6666,10 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
   const batchFinancials = useMemo(() => indentBatches.filter((b) => !b.isAdvance).map((b) => {
     const costs = computeBatchArticleCosts(b, orders, articlesByKey, configByKey);
     const grn = grnValueForBatch(b.id, grnReports, items, articlesByKey, configByKey, city, b.platform);
+    // Fulfilment date lives on each order (set once, at indent-upload time), not
+    // on the batch document itself — every order in one indent shares the same
+    // date, so the first match is representative of the whole batch.
+    const fulfilmentDate = orders.find((o) => o.batchId === b.id && o.fulfilmentDate)?.fulfilmentDate || '';
     // A batch can have more than one PO — the channel sometimes tops up an
     // indent with a second PO rather than reissuing the whole thing — so these
     // accumulate the same way GRN reports do, never replacing an earlier one.
@@ -6577,6 +6682,7 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
       : (b.poValue != null ? Number(b.poValue) : null);
     return {
       batch: b,
+      fulfilmentDate,
       indentCost: costs.totalCost,
       costRows: costs.rows,
       pricedCount: costs.pricedCount,
@@ -6739,24 +6845,27 @@ function SalesBatchesTab({ batchFinancials, onOpen }) {
       <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Each indent runs the same course: cost from purchases, then the PO tells us what they will pay, then the GRN confirms what they took. Open one to see it article by article.</p>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Indent</Th><Th>Channel</Th><Th>Indent cost</Th><Th>PO value</Th><Th>Expected profit</Th><Th>Sales (GRN)</Th><Th>Net profit</Th><Th /></tr></thead>
+          <thead><tr><Th>Indent</Th><Th>Channel</Th><Th>Fulfilment date</Th><Th>Indent cost</Th><Th>PO value</Th><Th>PO number</Th><Th>Sales (GRN)</Th><Th /></tr></thead>
           <tbody>
-            {sorted.map((bf) => (
-              <tr key={bf.batch.id}>
-                <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{bf.batch.id}</Td>
-                <Td>{bf.batch.platform}</Td>
-                <Td>{money(bf.indentCost)}</Td>
-                <Td>{bf.poValue == null ? <span style={{ color: AMBER, fontSize: 12 }}>No PO yet</span> : money(bf.poValue)}</Td>
-                <Td style={{ fontWeight: 700, color: bf.expectedProfit == null ? MUTED : (bf.expectedProfit >= 0 ? LEAF : TOMATO) }}>{bf.expectedProfit == null ? '-' : money(bf.expectedProfit)}</Td>
-                <Td>{bf.hasGrn ? money(bf.grnValue) : <span style={{ color: AMBER, fontSize: 12 }}>No GRN yet</span>}</Td>
-                <Td style={{ fontWeight: 800, color: bf.netProfit == null ? MUTED : (bf.netProfit >= 0 ? LEAF : TOMATO) }}>{bf.netProfit == null ? '-' : money(bf.netProfit)}</Td>
-                <Td>
-                  <button onClick={() => onOpen(bf.batch.id)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', color: LEAF, border: '1px solid ' + LEAF, borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    Open <ChevronRight size={12} />
-                  </button>
-                </Td>
-              </tr>
-            ))}
+            {sorted.map((bf) => {
+              const poNumbers = bf.poReports.map((r) => r.poNumber).filter(Boolean);
+              return (
+                <tr key={bf.batch.id}>
+                  <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{bf.batch.id}</Td>
+                  <Td>{bf.batch.platform}</Td>
+                  <Td style={{ fontSize: 12 }}>{bf.fulfilmentDate || '-'}</Td>
+                  <Td>{money(bf.indentCost)}</Td>
+                  <Td>{bf.poValue == null ? <span style={{ color: AMBER, fontSize: 12 }}>No PO yet</span> : money(bf.poValue)}</Td>
+                  <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{poNumbers.length ? poNumbers.join(', ') : <span style={{ color: AMBER, fontSize: 12, fontFamily: 'inherit' }}>No PO yet</span>}</Td>
+                  <Td>{bf.hasGrn ? money(bf.grnValue) : <span style={{ color: AMBER, fontSize: 12 }}>No GRN yet</span>}</Td>
+                  <Td>
+                    <button onClick={() => onOpen(bf.batch.id)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', color: LEAF, border: '1px solid ' + LEAF, borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                      Open <ChevronRight size={12} />
+                    </button>
+                  </Td>
+                </tr>
+              );
+            })}
             {sorted.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No indent batches yet.</Td></tr>}
           </tbody>
         </table>
@@ -6801,14 +6910,14 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     const file = e.target.files[0];
     if (!file) return;
     setPoError('');
-    const finish = (rows, name) => {
+    const finish = (rows, name, rawText) => {
       if (!rows.length) { setPoError('Could not find any priced article rows in this PO.'); return; }
-      const newReport = { id: `PO-${Date.now().toString(36).toUpperCase()}`, fileName: name, rows };
+      const newReport = { id: `PO-${Date.now().toString(36).toUpperCase()}`, fileName: name, rows, poNumber: extractPoNumber(rawText, name) };
       onUpdateIndentBatch(batch.id, { poReports: [...bf.poReports, newReport] });
     };
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     if (isPdf) {
-      extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name)).catch(() => setPoError('Could not read this PDF.'));
+      extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name, t)).catch(() => setPoError('Could not read this PDF.'));
       e.target.value = '';
       return;
     }
@@ -6816,7 +6925,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: 'array' });
-        finish(parsePoSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })), file.name);
+        finish(parsePoSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })), file.name, null);
       } catch (err) { setPoError('Could not read this file - use .xlsx, .xls, .csv or .pdf.'); }
     };
     reader.readAsArrayBuffer(file);
