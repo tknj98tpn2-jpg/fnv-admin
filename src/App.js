@@ -754,6 +754,18 @@ export default function AdminPanel() {
     const nextAliases = (it.aliases || []).map((a) => (a.id === aliasId ? { ...a, ...patch } : a));
     fbUpdate('items', itemId, { aliases: nextAliases });
   };
+  // Deletes one or more article/barcode mappings — pairs can span different
+  // items (a multi-select delete in the Map Formats to Articles table), so
+  // this groups by item and writes each item's aliases once.
+  const deleteAliasesByIds = (pairs) => {
+    const byItem = {};
+    pairs.forEach(({ itemId, aliasId }) => { (byItem[itemId] = byItem[itemId] || []).push(aliasId); });
+    Object.entries(byItem).forEach(([itemId, aliasIds]) => {
+      const it = items.find((x) => x.id === itemId); if (!it) return;
+      const nextAliases = (it.aliases || []).filter((a) => !aliasIds.includes(a.id));
+      fbUpdate('items', itemId, { aliases: nextAliases });
+    });
+  };
 
   // ── Recipes ─────────────────────────────────────────────
   const addRecipe    = (r)  => fbSetDoc('recipes', r.id, r);
@@ -1237,6 +1249,7 @@ export default function AdminPanel() {
               onUpdateCompanyDetails={updateCompanyDetails}
               onUpdateAlias={mapChannelField}
               onUpdateAliasById={updateAliasById}
+              onDeleteAliases={deleteAliasesByIds}
             />
           )}
           {tab === 'users' && (
@@ -6018,7 +6031,7 @@ const STD_BARCODE_FIELD_DEFS = [
   { key: 'storeTemperature', label: 'Store Temperature' },
 ];
 
-function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias, onUpdateAliasById }) {
+function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias, onUpdateAliasById, onDeleteAliases }) {
   const [view, setView] = useState('print'); // 'print' | 'formats' | 'mapping' | 'business'
   const views = [
     { key: 'print', label: 'Print Labels' },
@@ -6046,7 +6059,7 @@ function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, co
       </div>
       {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} onSaveFormat={onSaveFormat} />}
       {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
-      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} orders={orders} onMapFormat={(itemId, aliasId, formatId) => onUpdateAliasById(itemId, aliasId, { barcodeFormatId: formatId })} onUpdateAliasById={onUpdateAliasById} />}
+      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} orders={orders} onMapFormat={(itemId, aliasId, formatId) => onUpdateAliasById(itemId, aliasId, { barcodeFormatId: formatId })} onUpdateAliasById={onUpdateAliasById} onUpdateAlias={onUpdateAlias} onDeleteAliases={onDeleteAliases} />}
       {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
     </div>
   );
@@ -6178,9 +6191,14 @@ function BarcodeFormatEditor({ format, onSave, onCancel }) {
   );
 }
 
-function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasById }) {
+function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasById, onUpdateAlias, onDeleteAliases }) {
   const [search, setSearch] = useState('');
   const [edits, setEdits] = useState({});
+  const [selected, setSelected] = useState(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const importRef = useRef(null);
+  const [importResult, setImportResult] = useState(null); // { created, updated, skipped, errors }
+  const [importError, setImportError] = useState('');
 
   // Article name and UOM are what actually get printed on the label, so they are
   // editable here alongside the barcode - the same three fields the Print tab
@@ -6204,6 +6222,8 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
           itemName: it.name,
           indentArticleName: matchingOrder?.articleName || '',
           channel: al.channel,
+          packSize: al.packSize || '',
+          packUnit: al.packUnit || '',
           code: al.ean || al.code || '',
           labelName: al.labelName || it.name,
           labelUom: al.labelUom || (al.packSize ? `${al.packSize}${al.packUnit || ''}` : ''),
@@ -6233,19 +6253,152 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
     setEdits((s) => { const n = { ...s }; delete n[rowKey(r)]; return n; });
   };
 
+  const toggleSelected = (aliasId) => setSelected((s) => { const n = new Set(s); if (n.has(aliasId)) n.delete(aliasId); else n.add(aliasId); return n; });
+  const selectAll = () => setSelected(new Set(filtered.map((r) => r.aliasId)));
+  const clearSelected = () => setSelected(new Set());
+  const deleteSelected = () => {
+    const pairs = filtered.filter((r) => selected.has(r.aliasId)).map((r) => ({ itemId: r.itemId, aliasId: r.aliasId }));
+    onDeleteAliases(pairs);
+    setSelected(new Set());
+    setConfirmingDelete(false);
+  };
+
+  // Downloads every current article/format row as a CSV — doubles as a
+  // template (the headers show exactly what Bulk Import expects) and as an
+  // editable export of what's already mapped, since re-uploading the same
+  // rows (with Pack Size unchanged) updates those exact articles rather than
+  // creating duplicates.
+  const downloadTemplate = () => {
+    const header = ['Item', 'Channel', 'Pack Size', 'Pack Unit', 'Article Name (on label)', 'UOM (on label)', 'Barcode (EAN)', 'Format'];
+    const formatNameById = {}; formats.forEach((f) => { formatNameById[f.id] = f.name; });
+    const dataRows = rows.map((r) => [r.itemName, r.channel, r.packSize, r.packUnit, r.labelName, r.labelUom, r.code, formatNameById[r.barcodeFormatId] || '']);
+    const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+    const csv = [header, ...dataRows].map((row) => row.map(esc).join(',')).join('\r\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `barcode_articles_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Matches each uploaded row to an item by name and, within that item's
+  // channel, to the alias with the same pack size (same rule the rest of this
+  // screen uses) — if none matches, a new article/alias is created, so this
+  // one file can both correct existing articles and add new ones.
+  const handleBulkImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportError(''); setImportResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        const sheetRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        const header = (sheetRows[0] || []).map((h) => String(h || '').toLowerCase().trim());
+        const idx = (candidates) => header.findIndex((h) => candidates.some((c) => h.includes(c)));
+        const cols = {
+          item: idx(['item']), channel: idx(['channel']), packSize: idx(['pack size']), packUnit: idx(['pack unit']),
+          labelName: idx(['article name']), labelUom: idx(['uom']), code: idx(['barcode', 'ean']), format: idx(['format']),
+        };
+        if (cols.item === -1 || cols.channel === -1) { setImportError('Could not find "Item" and "Channel" columns — use Download Format to get the right column headings.'); return; }
+        const formatIdByName = {}; formats.forEach((f) => { formatIdByName[f.name.toLowerCase()] = f.id; });
+        let created = 0, updated = 0, skipped = 0;
+        const errors = [];
+        for (let i = 1; i < sheetRows.length; i += 1) {
+          const row = sheetRows[i];
+          if (!row || row.every((c) => c === '')) continue;
+          const itemName = String(row[cols.item] || '').trim();
+          const channel = String(row[cols.channel] || '').trim();
+          if (!itemName || !channel) continue;
+          const item = items.find((it) => it.name.toLowerCase() === itemName.toLowerCase());
+          if (!item) { skipped += 1; errors.push(`Row ${i + 1}: item "${itemName}" not found`); continue; }
+          const packSize = cols.packSize !== -1 ? String(row[cols.packSize] || '').trim() : '';
+          const packUnit = cols.packUnit !== -1 ? String(row[cols.packUnit] || '').trim() : '';
+          const formatName = cols.format !== -1 ? String(row[cols.format] || '').trim() : '';
+          const patch = {
+            ean: cols.code !== -1 ? String(row[cols.code] || '').trim() : '',
+            labelName: cols.labelName !== -1 ? String(row[cols.labelName] || '').trim() : '',
+            labelUom: cols.labelUom !== -1 ? String(row[cols.labelUom] || '').trim() : '',
+          };
+          if (formatName) {
+            const fid = formatIdByName[formatName.toLowerCase()];
+            if (fid) patch.barcodeFormatId = fid;
+            else errors.push(`Row ${i + 1}: format "${formatName}" not found — left as-is`);
+          }
+          const existed = !!findAlias(item, channel, packSize, packUnit);
+          onUpdateAlias(item.id, channel, patch, packSize, packUnit);
+          if (existed) updated += 1; else created += 1;
+        }
+        setImportResult({ created, updated, skipped, errors });
+      } catch (err) {
+        setImportError('Could not read this file — use the CSV from Download Format, or an Excel file with the same columns.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
   const cell = { fontSize: 12, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' };
 
   return (
     <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Articles &amp; label formats</p>
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Everything that prints on a label is editable here. Each article can use a different format, so labels carry exactly the fields that article needs. Changes are saved against the article.</p>
-      <input placeholder="Search item or article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260 }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Articles &amp; label formats</p>
+          <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 560 }}>Everything that prints on a label is editable here. Each article can use a different format, so labels carry exactly the fields that article needs. Changes are saved against the article.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button onClick={downloadTemplate} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <Download size={13} /> Download format
+          </button>
+          <button onClick={() => importRef.current && importRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <Upload size={13} /> Bulk import
+          </button>
+          <input ref={importRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleBulkImport} style={{ display: 'none' }} />
+        </div>
+      </div>
+      {importError && <p style={{ margin: '8px 0 0', fontSize: 12, color: TOMATO }}>{importError}</p>}
+      {importResult && (
+        <div style={{ margin: '10px 0 0', padding: '10px 12px', background: '#F6F3EA', borderRadius: 8, fontSize: 12 }}>
+          <p style={{ margin: 0, fontWeight: 700, color: INK }}>
+            Imported: {importResult.created} new article{importResult.created === 1 ? '' : 's'}, {importResult.updated} updated{importResult.skipped ? `, ${importResult.skipped} skipped` : ''}.
+          </p>
+          {importResult.errors.length > 0 && (
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: AMBER }}>
+              {importResult.errors.slice(0, 10).map((e, i) => <li key={i}>{e}</li>)}
+              {importResult.errors.length > 10 && <li>...and {importResult.errors.length - 10} more</li>}
+            </ul>
+          )}
+        </div>
+      )}
+      <input placeholder="Search item or article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260, marginTop: 14 }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '10px 0' }}>
+        <button onClick={selectAll} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
+        <button onClick={clearSelected} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
+        {selected.size > 0 && !confirmingDelete && (
+          <button onClick={() => setConfirmingDelete(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            <Trash2 size={13} /> Delete selected ({selected.size})
+          </button>
+        )}
+        {confirmingDelete && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: TOMATO, fontWeight: 700 }}>Delete {selected.size} article{selected.size === 1 ? '' : 's'} for good?</span>
+            <button onClick={deleteSelected} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
+            <button onClick={() => setConfirmingDelete(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>No</button>
+          </span>
+        )}
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Article (from indent)</Th><Th>Item</Th><Th>Channel</Th><Th>Article name (on label)</Th><Th>UOM (on label)</Th><Th>Barcode (EAN)</Th><Th>Format</Th><Th /></tr></thead>
+          <thead><tr><Th /><Th>Article (from indent)</Th><Th>Item</Th><Th>Channel</Th><Th>Article name (on label)</Th><Th>UOM (on label)</Th><Th>Barcode (EAN)</Th><Th>Format</Th><Th /></tr></thead>
           <tbody>
             {filtered.map((r) => (
               <tr key={r.aliasId}>
+                <Td><input type="checkbox" checked={selected.has(r.aliasId)} onChange={() => toggleSelected(r.aliasId)} /></Td>
                 <Td style={{ fontSize: 12 }}>{r.indentArticleName || <span style={{ color: MUTED }}>—</span>}</Td>
                 <Td style={{ fontSize: 12, color: MUTED }}>{r.itemName}</Td>
                 <Td>{r.channel}</Td>
@@ -6277,7 +6430,7 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
                 </Td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
+            {filtered.length === 0 && <tr><Td colSpan={9} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
           </tbody>
         </table>
       </div>
