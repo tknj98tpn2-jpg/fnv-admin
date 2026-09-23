@@ -396,6 +396,13 @@ const SEED_ORDERS = [];
 
 const SEED_PURCHASES = [];
 
+// Strips a trailing quantity+unit (e.g. "2 Units", "500 gm", "500.0g", "_100 gm")
+// from a raw article name, so auto-mapping can still recognise an item whose
+// own name was simplified to drop the unit — "Apple Red Delicious 2 Units"
+// (from an indent file) should still match an item saved as "Apple Red Delicious".
+function stripQtyUom(name) {
+  return String(name || '').replace(/[\s_]+\d+(?:\.\d+)?\s*(?:Units?|gm|g|Kg|Ft)\.?$/i, '').trim();
+}
 function findAlias(item, channel, packSize, packUnit) {
   const aliases = item?.aliases || [];
   // An item can have more than one alias for the same channel — e.g. "Baby
@@ -3471,10 +3478,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           return;
         }
         const rows = rawRows.map((r) => {
+          const rawNameStripped = stripQtyUom(r.rawName).toLowerCase();
           const match = items.find(
             (it) =>
               (r.rawCode && (it.aliases || []).some((a) => a.channel === indentPlatform && a.code && a.code.toLowerCase() === r.rawCode.toLowerCase())) ||
-              it.name.toLowerCase() === r.rawName.toLowerCase()
+              it.name.toLowerCase() === r.rawName.toLowerCase() ||
+              (rawNameStripped && it.name.toLowerCase() === rawNameStripped)
           );
           // Each distinct article code gets its own alias — even when it shares a base
           // item with another article on the same channel (e.g. two different pack sizes).
