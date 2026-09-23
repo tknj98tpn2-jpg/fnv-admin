@@ -396,8 +396,18 @@ const SEED_ORDERS = [];
 
 const SEED_PURCHASES = [];
 
-function findAlias(item, channel) {
-  return item?.aliases?.find((a) => a.channel === channel);
+function findAlias(item, channel, packSize, packUnit) {
+  const aliases = item?.aliases || [];
+  // An item can have more than one alias for the same channel — e.g. "Baby
+  // Banana" (500g) and "Banana 3pc" (600g) are different articles that both
+  // map to the item "Banana" on Blinkit. Channel alone can't tell them apart,
+  // so when a pack size is known, only an exact match on it counts — falling
+  // back to "any alias on this channel" here would just recreate the same
+  // mix-up for whichever pack-size variant doesn't have its own alias yet.
+  if (packSize != null && packSize !== '') {
+    return aliases.find((a) => a.channel === channel && String(a.packSize) === String(packSize) && String(a.packUnit || '') === String(packUnit || ''));
+  }
+  return aliases.find((a) => a.channel === channel);
 }
 function newAliasId() {
   return `AL-${Date.now().toString(36).toUpperCase().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
@@ -688,12 +698,12 @@ export default function AdminPanel() {
   const addItemsBulk = (rows) => { const b = writeBatch(db); rows.forEach((r) => b.set(doc(db,'items',r.id), { ...r, city: effectiveCity })); b.commit(); };
   const deleteItem   = (id)   => fbDelete('items', id);
   const updateItem   = (id, patch) => fbUpdate('items', id, patch);
-  const mapChannelField = (itemId, channel, patch) => {
+  const mapChannelField = (itemId, channel, patch, packSize, packUnit) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
-    const existing = findAlias(it, channel);
+    const existing = findAlias(it, channel, packSize, packUnit);
     const nextAliases = existing
-      ? it.aliases.map((a) => (a.channel === channel ? { ...a, ...patch } : a))
-      : [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: '', packUnit: 'kg', ...patch }];
+      ? it.aliases.map((a) => (a.id === existing.id ? { ...a, ...patch } : a))
+      : [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: packSize || '', packUnit: packUnit || 'kg', ...patch }];
     fbUpdate('items', itemId, { aliases: nextAliases });
   };
   // Barcode label formats — each is a named, reusable set of which fields print on a
@@ -883,7 +893,7 @@ export default function AdminPanel() {
   const addLedgerEntry = (entry) => {
     fbSetDoc('vendorLedger', entry.id, { ...entry, city: effectiveCity });
     const pid = `P-${Date.now().toString(36).toUpperCase().slice(-5)}`;
-    addPurchase({ id: pid, item: entry.itemName, supplier: entry.vendorName, qty: entry.qty, unit: entry.unit, cost: entry.total, source: entry.payment === 'credit' ? `Credit — ${entry.vendorName}` : entry.payment, date: entry.date });
+    addPurchase({ id: pid, itemId: entry.itemId || null, item: entry.itemName, supplier: entry.vendorName, qty: entry.qty, unit: entry.unit, cost: entry.total, source: entry.payment === 'credit' ? `Credit — ${entry.vendorName}` : entry.payment, date: entry.date });
   };
   const savePlacedOrder = (order) => fbSetDoc('placedOrders', order.id, order);
   const updatePlacedOrder = (id, itemsList) => fbUpdate('placedOrders', id, { items: itemsList });
@@ -1226,6 +1236,7 @@ export default function AdminPanel() {
               onDeleteFormat={deleteBarcodeFormat}
               onUpdateCompanyDetails={updateCompanyDetails}
               onUpdateAlias={mapChannelField}
+              onUpdateAliasById={updateAliasById}
             />
           )}
           {tab === 'users' && (
@@ -1260,6 +1271,27 @@ function Th({ children }) {
 }
 function Td({ children, style }) {
   return <td style={{ padding: `${SPACE.md}px ${SPACE.md}px`, fontSize: 13, color: INK, borderTop: `1px solid ${LINE}`, ...style }}>{children}</td>;
+}
+// A plain window.confirm() popup does not reliably appear inside this app's
+// Android WebView — a click can silently do nothing. This is the safe
+// replacement used everywhere a single delete action needs a yes/no step:
+// tapping once arms it, a second tap (Yes) commits it, and nothing native
+// is involved.
+function ConfirmDeleteButton({ onConfirm, icon: Icon = Trash2, size = 14, title, style }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    return (
+      <button onClick={() => setConfirming(true)} title={title} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'inline-flex', ...style }}>
+        <Icon size={size} />
+      </button>
+    );
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <button onClick={onConfirm} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
+      <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>No</button>
+    </span>
+  );
 }
 function Panel({ children, style }) {
   return <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: RADIUS.lg, boxShadow: SHADOW_SM, padding: SPACE.xxl, ...style }}>{children}</div>;
@@ -1673,37 +1705,57 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
   const [qty, setQty] = useState('');
   const [unitPrice, setUnitPrice] = useState('');
   const [totalInput, setTotalInput] = useState('');
+  const [note, setNote] = useState('');
   const [date, setDate] = useState(defaultDate);
   const [paymentMode, setPaymentMode] = useState('credit');
-  const [note, setNote] = useState('');
+  // Items added to this visit but not yet saved — lets several purchases from
+  // the same vendor visit be logged in one go, instead of reopening this
+  // modal for every single item.
+  const [stagedItems, setStagedItems] = useState([]);
 
   const selectedItem = items.find((it) => it.id === itemId);
   const derivedTotal = qty && unitPrice ? Math.round(Number(qty) * Number(unitPrice) * 100) / 100 : null;
   const derivedUnitPrice = qty && totalInput && !unitPrice ? Math.round((Number(totalInput) / Number(qty)) * 100) / 100 : null;
   const totalPrice = derivedTotal ?? (totalInput ? Number(totalInput) : 0);
   const finalUnitPrice = unitPrice ? Number(unitPrice) : (derivedUnitPrice ?? 0);
-  const canSubmit = itemId && qty && (unitPrice || totalInput) && date;
+  const canAddLine = itemId && qty && (unitPrice || totalInput);
 
   const handleUnitPriceChange = (v) => { setUnitPrice(v); if (v && qty) setTotalInput(''); };
   const handleTotalChange = (v) => { setTotalInput(v); if (v && qty) setUnitPrice(''); };
 
-  const submit = () => {
-    if (!canSubmit) return;
-    onSave({
-      id: `LED-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+  const addLine = () => {
+    if (!canAddLine) return;
+    setStagedItems((prev) => [...prev, {
+      key: `${Date.now().toString(36)}-${prev.length}`,
+      itemId, itemName: selectedItem?.name || '', unit: selectedItem?.uom || '',
+      qty: Number(qty), unitPrice: finalUnitPrice, total: totalPrice, note: note.trim(),
+    }]);
+    // Reset just the item-entry fields so the next item can be typed straight
+    // away — date and payment mode stay as set, since they apply to the whole visit.
+    setItemId(itemOptions[0]?.id || '');
+    setQty(''); setUnitPrice(''); setTotalInput(''); setNote('');
+  };
+  const removeLine = (key) => setStagedItems((prev) => prev.filter((l) => l.key !== key));
+  const batchTotal = Math.round(stagedItems.reduce((s, l) => s + l.total, 0) * 100) / 100;
+
+  const submitAll = () => {
+    if (!stagedItems.length || !date) return;
+    const entries = stagedItems.map((line, i) => ({
+      id: `LED-${Date.now().toString(36).toUpperCase()}${i}`,
       vendorId: vendor.id,
       vendorName: vendor.name,
-      itemId,
-      itemName: selectedItem?.name || '',
-      qty: Number(qty),
-      unit: selectedItem?.uom || '',
-      unitPrice: finalUnitPrice,
-      total: totalPrice,
+      itemId: line.itemId,
+      itemName: line.itemName,
+      qty: line.qty,
+      unit: line.unit,
+      unitPrice: line.unitPrice,
+      total: line.total,
       payment: paymentMode,
       date,
-      note: note.trim(),
+      note: line.note,
       settled: paymentMode !== 'credit',
-    });
+    }));
+    onSave(entries);
   };
 
   const today = new Date().toISOString().split('T')[0];
@@ -1711,14 +1763,14 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div style={{ background: '#fff', borderRadius: 18, padding: 28, width: 460, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 28, width: 480, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <p style={{ margin: 0, fontWeight: 800, fontSize: 17, color: INK }}>Add purchase</p>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
         </div>
-        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>For {vendor.name} — missed logging a purchase? Set the date to whichever day it actually happened.</p>
+        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>For {vendor.name} — add as many items as this visit needs, then save them all together. Missed logging a purchase? Set the date to whichever day it actually happened.</p>
 
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE (applies to this whole visit)</p>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={today} style={{ ...inputStyle, borderColor: isBackdated ? AMBER : LINE, fontWeight: 700 }} />
         {isBackdated && (
           <p style={{ margin: '-6px 0 10px', fontSize: 11, color: AMBER, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1726,7 +1778,27 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
           </p>
         )}
 
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>ITEM</p>
+        {stagedItems.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <p style={{ margin: '0 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>ADDED SO FAR ({stagedItems.length})</p>
+            <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, overflow: 'hidden' }}>
+              {stagedItems.map((line, i) => (
+                <div key={line.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', borderTop: i > 0 ? `1px solid ${LINE}` : 'none' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{line.itemName}</p>
+                    <p style={{ margin: 0, fontSize: 11, color: MUTED }}>{line.qty} {line.unit} × ₹{line.unitPrice} {line.note ? `· ${line.note}` : ''}</p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>₹{line.total.toLocaleString('en-IN')}</span>
+                    <button onClick={() => removeLine(line.key)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', padding: 0, display: 'flex' }}><X size={15} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{stagedItems.length > 0 ? 'ADD ANOTHER ITEM' : 'ITEM'}</p>
         <select value={itemId} onChange={(e) => setItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
           {itemOptions.length === 0 && <option value="">No items available</option>}
           {itemOptions.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
@@ -1750,14 +1822,17 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
           </div>
         </div>
 
-        {totalPrice > 0 && (
-          <div style={{ background: BG, borderRadius: 8, padding: '8px 12px', marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: MUTED }}>Confirmed total</span>
-            <span style={{ fontWeight: 800, fontSize: 15 }}>₹{totalPrice.toLocaleString('en-IN')}</span>
-          </div>
-        )}
+        <input placeholder="Note for this item (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...inputStyle }} />
 
-        <p style={{ margin: '0 0 6px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PAYMENT MODE</p>
+        <button
+          onClick={addLine}
+          disabled={!canAddLine}
+          style={{ width: '100%', background: '#fff', color: canAddLine ? LEAF : '#B9B29C', border: `1px solid ${canAddLine ? LEAF : LINE}`, borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: canAddLine ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 18 }}
+        >
+          <Plus size={14} /> Add this item{totalPrice > 0 ? ` — ₹${totalPrice.toLocaleString('en-IN')}` : ''} to the list
+        </button>
+
+        <p style={{ margin: '0 0 6px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PAYMENT MODE (applies to this whole visit)</p>
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           {[{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank' }, { key: 'credit', label: '📒 Credit' }].map((m) => (
             <button key={m.key} onClick={() => setPaymentMode(m.key)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `1px solid ${paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF) : LINE}`, background: paymentMode === m.key ? (m.key === 'credit' ? '#FBEFDC' : '#EAF3DE') : '#fff', color: paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF_DARK) : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
@@ -1766,10 +1841,10 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
           ))}
         </div>
 
-        <input placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...inputStyle }} />
-
-        <button onClick={submit} disabled={!canSubmit} style={{ width: '100%', background: !canSubmit ? '#C9C2AE' : (paymentMode === 'credit' ? AMBER : LEAF), color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: !canSubmit ? 'default' : 'pointer' }}>
-          {paymentMode === 'credit' ? `Add on credit — ₹${totalPrice.toLocaleString('en-IN')}` : `Add purchase — ₹${totalPrice.toLocaleString('en-IN')}`}
+        <button onClick={submitAll} disabled={!stagedItems.length} style={{ width: '100%', background: !stagedItems.length ? '#C9C2AE' : (paymentMode === 'credit' ? AMBER : LEAF), color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: !stagedItems.length ? 'default' : 'pointer' }}>
+          {stagedItems.length === 0
+            ? 'Add at least one item above'
+            : (paymentMode === 'credit' ? `Add ${stagedItems.length} item${stagedItems.length === 1 ? '' : 's'} on credit — ₹${batchTotal.toLocaleString('en-IN')}` : `Add ${stagedItems.length} item${stagedItems.length === 1 ? '' : 's'} — ₹${batchTotal.toLocaleString('en-IN')}`)}
         </button>
       </div>
     </div>
@@ -2146,7 +2221,7 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
             vendor={addPurchaseModal.vendor}
             items={items}
             defaultDate={addPurchaseModal.defaultDate}
-            onSave={(entry) => { onAddLedgerEntry(entry); setAddPurchaseModal(null); }}
+            onSave={(entries) => { entries.forEach(onAddLedgerEntry); setAddPurchaseModal(null); }}
             onClose={() => setAddPurchaseModal(null)}
           />
         )}
@@ -3259,13 +3334,9 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete
                     <Td>{statuses.length === 1 ? <StatusPill status={statuses[0]} /> : <span style={{ fontSize: 11, color: MUTED }}>Mixed</span>}</Td>
                     <Td>
                       {g.rows.length === 1 && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete order ${g.rows[0].id}? This can't be undone.`)) onDelete(g.rows[0].id); }}
-                          style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}
-                          aria-label={`Delete order ${g.rows[0].id}`}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <ConfirmDeleteButton onConfirm={() => onDelete(g.rows[0].id)} title={`Delete order ${g.rows[0].id}`} />
+                        </span>
                       )}
                     </Td>
                   </tr>
@@ -3278,13 +3349,7 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete
                       <Td style={{ fontSize: 12, color: MUTED }}>{o.fulfilmentDate || '—'}</Td>
                       <Td><StatusPill status={o.status} /></Td>
                       <Td>
-                        <button
-                          onClick={() => { if (window.confirm(`Delete order ${o.id}? This can't be undone.`)) onDelete(o.id); }}
-                          style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}
-                          aria-label={`Delete order ${o.id}`}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <ConfirmDeleteButton onConfirm={() => onDelete(o.id)} title={`Delete order ${o.id}`} />
                       </Td>
                     </tr>
                   ))}
@@ -3498,6 +3563,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           platform: pendingIndent.platform,
           store,
           product: item.name,
+          itemId: item.id,
           articleName: r.rawName,
           qty: storeQty,
           unit: item.uom,
@@ -4733,15 +4799,26 @@ function computeFinalPrice(basePrice, config) {
 }
 
 function buildLatestUnitPriceByItem(purchases) {
-  const map = {};
+  // Two maps, not one — an order created before itemId was tracked only has a
+  // name to look up by, so a *newer* purchase (which does carry itemId) must
+  // still be reachable through its name. Every purchase that has a name is
+  // recorded in byName regardless of whether it also has an itemId, so the
+  // two maps independently reflect the true latest purchase either way could
+  // find; buildPricingArticles then takes whichever of the two is newer.
+  const byId = {};
+  const byName = {};
   purchases
     .filter((p) => p.type !== 'requirement' && p.qty > 0)
     .forEach((p) => {
-      if (!map[p.item] || (p.date || '') >= (map[p.item].date || '')) {
-        map[p.item] = { date: p.date || '', unitPrice: p.cost / p.qty };
+      const entry = { date: p.date || '', unitPrice: p.cost / p.qty };
+      if (p.itemId) {
+        if (!byId[p.itemId] || entry.date >= byId[p.itemId].date) byId[p.itemId] = entry;
+      }
+      if (p.item) {
+        if (!byName[p.item] || entry.date >= byName[p.item].date) byName[p.item] = entry;
       }
     });
-  return map;
+  return { byId, byName };
 }
 
 // One entry per distinct article that has come through an indent — same product can have
@@ -4762,7 +4839,9 @@ function buildPricingArticles(orders, items, purchases, city, configByKey) {
       const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
       if (map[key]) return;
       const item = items.find((it) => it.name === o.product);
-      const unitPriceInfo = latestUnitPriceByItem[o.product];
+      const byIdInfo = o.itemId ? latestUnitPriceByItem.byId[o.itemId] : null;
+      const byNameInfo = latestUnitPriceByItem.byName[o.product];
+      const unitPriceInfo = !byIdInfo ? byNameInfo : (!byNameInfo ? byIdInfo : (byIdInfo.date >= byNameInfo.date ? byIdInfo : byNameInfo));
       const autoBasePrice = unitPriceInfo ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100 : null;
       // A base price fetched from the latest purchase is the default — but a specific
       // article's config can carry a manual override (e.g. before any purchase exists yet,
@@ -5939,7 +6018,7 @@ const STD_BARCODE_FIELD_DEFS = [
   { key: 'storeTemperature', label: 'Store Temperature' },
 ];
 
-function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias }) {
+function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias, onUpdateAliasById }) {
   const [view, setView] = useState('print'); // 'print' | 'formats' | 'mapping' | 'business'
   const views = [
     { key: 'print', label: 'Print Labels' },
@@ -5967,7 +6046,7 @@ function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, co
       </div>
       {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} onSaveFormat={onSaveFormat} />}
       {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
-      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} onMapFormat={(itemId, channel, formatId) => onUpdateAlias(itemId, channel, { barcodeFormatId: formatId })} onUpdateAlias={onUpdateAlias} />}
+      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} orders={orders} onMapFormat={(itemId, aliasId, formatId) => onUpdateAliasById(itemId, aliasId, { barcodeFormatId: formatId })} onUpdateAliasById={onUpdateAliasById} />}
       {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
     </div>
   );
@@ -6034,7 +6113,7 @@ function BarcodeFormatsTab({ formats, onSave, onDelete }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button onClick={() => setEditing(f)} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer' }}><Pencil size={15} /></button>
-            <button onClick={() => { if (window.confirm(`Delete format "${f.name}"? Articles using it will need a new format mapped.`)) onDelete(f.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={15} /></button>
+            <ConfirmDeleteButton onConfirm={() => onDelete(f.id)} size={15} title={`Delete format "${f.name}"`} />
           </div>
         </Panel>
       ))}
@@ -6099,20 +6178,31 @@ function BarcodeFormatEditor({ format, onSave, onCancel }) {
   );
 }
 
-function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateAlias }) {
+function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasById }) {
   const [search, setSearch] = useState('');
   const [edits, setEdits] = useState({});
 
   // Article name and UOM are what actually get printed on the label, so they are
   // editable here alongside the barcode - the same three fields the Print tab
   // saves, kept on the channel alias so a correction sticks for good.
+  // Each alias is tracked by its own id — an item can have more than one alias
+  // for the same channel (different pack sizes are different articles), so a
+  // shared "item + channel" key would let editing one silently overwrite another.
   const rows = [];
   items.forEach((it) => {
     (it.aliases || []).forEach((al) => {
       if (al.code || al.ean) {
+        // The name the article actually carried on the indent, for context —
+        // this table's "item" is the internal purchase item, which can read
+        // very differently from what the channel itself calls the article
+        // (same idea as the name shown in Packaging).
+        const matchingOrder = orders.find((o) => o.product === it.name && o.platform === al.channel
+          && (al.packSize === '' || al.packSize == null || (String(o.packSize) === String(al.packSize) && String(o.packUnit || '') === String(al.packUnit || ''))));
         rows.push({
           itemId: it.id,
+          aliasId: al.id,
           itemName: it.name,
+          indentArticleName: matchingOrder?.articleName || '',
           channel: al.channel,
           code: al.ean || al.code || '',
           labelName: al.labelName || it.name,
@@ -6124,9 +6214,10 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateAlias }) {
   });
   const filtered = rows.filter((r) => !search.trim()
     || r.itemName.toLowerCase().includes(search.trim().toLowerCase())
+    || r.indentArticleName.toLowerCase().includes(search.trim().toLowerCase())
     || String(r.labelName).toLowerCase().includes(search.trim().toLowerCase()));
 
-  const rowKey = (r) => `${r.itemId}__${r.channel}`;
+  const rowKey = (r) => r.aliasId;
   const valFor = (r, field) => {
     const e = edits[rowKey(r)];
     return e && field in e ? e[field] : r[field];
@@ -6134,7 +6225,7 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateAlias }) {
   const setVal = (r, field, value) => setEdits((s) => ({ ...s, [rowKey(r)]: { ...(s[rowKey(r)] || {}), [field]: value } }));
   const isDirty = (r) => !!edits[rowKey(r)];
   const save = (r) => {
-    onUpdateAlias(r.itemId, r.channel, {
+    onUpdateAliasById(r.itemId, r.aliasId, {
       ean: String(valFor(r, 'code')).trim(),
       labelName: String(valFor(r, 'labelName')).trim(),
       labelUom: String(valFor(r, 'labelUom')).trim(),
@@ -6148,28 +6239,29 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateAlias }) {
     <Panel>
       <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Articles &amp; label formats</p>
       <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Everything that prints on a label is editable here. Each article can use a different format, so labels carry exactly the fields that article needs. Changes are saved against the article.</p>
-      <input placeholder="Search item..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260 }} />
+      <input placeholder="Search item or article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260 }} />
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Item</Th><Th>Channel</Th><Th>Article name (on label)</Th><Th>UOM (on label)</Th><Th>Barcode (EAN)</Th><Th>Format</Th><Th /></tr></thead>
+          <thead><tr><Th>Article (from indent)</Th><Th>Item</Th><Th>Channel</Th><Th>Article name (on label)</Th><Th>UOM (on label)</Th><Th>Barcode (EAN)</Th><Th>Format</Th><Th /></tr></thead>
           <tbody>
-            {filtered.map((r, i) => (
-              <tr key={i}>
+            {filtered.map((r) => (
+              <tr key={r.aliasId}>
+                <Td style={{ fontSize: 12 }}>{r.indentArticleName || <span style={{ color: MUTED }}>—</span>}</Td>
                 <Td style={{ fontSize: 12, color: MUTED }}>{r.itemName}</Td>
                 <Td>{r.channel}</Td>
                 <Td>
-                  <input value={valFor(r, 'labelName')} onChange={(e) => setVal(r, 'labelName', e.target.value)} style={{ ...cell, width: 170, fontSize: 13 }} />
+                  <input value={valFor(r, 'labelName')} onChange={(e) => setVal(r, 'labelName', e.target.value)} onBlur={() => save(r)} style={{ ...cell, width: 170, fontSize: 13 }} />
                 </Td>
                 <Td>
-                  <input value={valFor(r, 'labelUom')} onChange={(e) => setVal(r, 'labelUom', e.target.value)} placeholder="e.g. 500 g" style={{ ...cell, width: 100 }} />
+                  <input value={valFor(r, 'labelUom')} onChange={(e) => setVal(r, 'labelUom', e.target.value)} onBlur={() => save(r)} placeholder="e.g. 500 g" style={{ ...cell, width: 100 }} />
                 </Td>
                 <Td>
-                  <input value={valFor(r, 'code')} onChange={(e) => setVal(r, 'code', e.target.value)} style={{ ...cell, width: 130, fontFamily: 'monospace' }} />
+                  <input value={valFor(r, 'code')} onChange={(e) => setVal(r, 'code', e.target.value)} onBlur={() => save(r)} style={{ ...cell, width: 130, fontFamily: 'monospace' }} />
                 </Td>
                 <Td>
                   <select
                     value={r.barcodeFormatId}
-                    onChange={(e) => onMapFormat(r.itemId, r.channel, e.target.value)}
+                    onChange={(e) => onMapFormat(r.itemId, r.aliasId, e.target.value)}
                     style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }}
                   >
                     <option value="">— No format (skipped on print) —</option>
@@ -6185,7 +6277,7 @@ function BarcodeMappingTab({ items, formats, onMapFormat, onUpdateAlias }) {
                 </Td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
+            {filtered.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
           </tbody>
         </table>
       </div>
@@ -6396,9 +6488,9 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     return Object.values(groups)
       .map((g) => {
         const item = items.find((it) => it.name === g.product);
-        const alias = (item?.aliases || []).find((a) => a.channel === platform);
+        const alias = findAlias(item, platform, g.packSize, g.packUnit);
         const progress = packingProgress[g.key] || { packedQty: 0 };
-        return { ...g, itemId: item?.id || '', category: item?.category || '', code: alias?.ean || alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: alias?.ean || alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
   }, [orders, items, packingProgress, platform, date]);
@@ -6432,7 +6524,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides;
   const saveRow = (a) => {
     if (!a.itemId) return;
-    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() });
+    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() }, a.packSize, a.packUnit);
     setNameOverrides((n) => { const c = { ...n }; delete c[a.key]; return c; });
     setUomOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
     setCodeOverrides((c) => { const d = { ...c }; delete d[a.key]; return d; });
@@ -6445,7 +6537,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const commitBestBefore = (a, value) => {
     if (!value || !a.itemId) return;
     const days = diffDaysBetween(date, value);
-    onUpdateAlias(a.itemId, platform, { shelfLifeDays: days });
+    onUpdateAlias(a.itemId, platform, { shelfLifeDays: days }, a.packSize, a.packUnit);
   };
 
   // A checked "Company Details" box on a format only decides WHETHER that section
@@ -6495,10 +6587,12 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
       html += '</div>';
       return html;
     };
+    let totalLabelCount = 0;
     const labelsHtml = toPrint.map((a) => {
       const format = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
       const sf = format?.standardFields || { printBarcode: true, itemName: true, netWeight: true, showBarcodeNumber: true };
       const qty = Math.max(1, Math.round(qtyFor(a)));
+      totalLabelCount += qty;
       if (isThermal && format?.layout) {
         const oneLabel = renderWithLayout(a, format, sf);
         return Array(qty).fill(oneLabel).join('');
@@ -6537,9 +6631,17 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
       return Array(qty).fill(oneLabel).join('');
     }).join('');
 
+    // One page tall enough for every row, instead of a fixed 50mm (one row) —
+    // a fixed single-row page forces the browser to paginate a bigger batch
+    // into several separate pages, and many thermal label printers visibly
+    // pause at each page boundary. A single page long enough for the whole
+    // batch lets it feed through continuously.
+    const labelsPerRow = 2; // 100mm page ÷ 50mm label width
+    const totalRows = Math.max(1, Math.ceil(totalLabelCount / labelsPerRow));
     const thermalStyle = `
-        @page { size: 100mm 50mm; margin: 0; }
-        body { font-family: Arial, sans-serif; margin: 0; }
+        @page { size: 100mm ${totalRows * 50}mm; margin: 0; }
+        html, body { width: 100mm; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
         .grid { display: flex; flex-wrap: wrap; width: 100mm; }
         .label { width: 50mm; height: 50mm; padding: 1.5mm; box-sizing: border-box; overflow: hidden; text-align: center; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .label-abs { position: relative; width: 50mm; height: 50mm; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; }
@@ -6634,6 +6736,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                       <input
                         value={nameFor(a)}
                         onChange={(e) => setNameOverrides((n) => ({ ...n, [a.key]: e.target.value }))}
+                        onBlur={() => saveRow(a)}
                         style={{ fontSize: 13, width: 160, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
                     </Td>
@@ -6641,6 +6744,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                       <input
                         value={uomFor(a)}
                         onChange={(e) => setUomOverrides((u) => ({ ...u, [a.key]: e.target.value }))}
+                        onBlur={() => saveRow(a)}
                         style={{ fontSize: 12, width: 100, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
                     </Td>
@@ -6648,6 +6752,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                       <input
                         value={codeFor(a)}
                         onChange={(e) => setCodeOverrides((c) => ({ ...c, [a.key]: e.target.value }))}
+                        onBlur={() => saveRow(a)}
                         placeholder="No code"
                         style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
@@ -7013,6 +7118,24 @@ function matchChannelRow(row, costRows, items) {
   }) || null;
 }
 
+function PoReportRow({ report, onRemove }) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
+      <p style={{ margin: 0, fontSize: 11, color: MUTED }}>{report.fileName} - {(report.rows || []).length} rows</p>
+      {!confirming ? (
+        <button onClick={() => setConfirming(true)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0, padding: 0 }}>Remove</button>
+      ) : (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: TOMATO, fontWeight: 700 }}>Remove?</span>
+          <button onClick={onRemove} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
+          <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>No</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateIndentBatch }) {
   const poRef = useRef(null);
   const grnRef = useRef(null);
@@ -7131,7 +7254,9 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
         {bf.poReports.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + LINE }}>
             <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PO REPORTS ({bf.poReports.length})</p>
-            {bf.poReports.map((r) => <p key={r.id} style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{r.fileName} - {(r.rows || []).length} rows</p>)}
+            {bf.poReports.map((r) => (
+              <PoReportRow key={r.id} report={r} onRemove={() => onUpdateIndentBatch(batch.id, { poReports: bf.poReports.filter((x) => x.id !== r.id) })} />
+            ))}
           </div>
         )}
         {reports.length > 0 && (
@@ -7263,7 +7388,7 @@ function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSav
                     <Td style={{ fontSize: 11, color: MUTED }}>{(inv.batchIds || []).join(', ')}</Td>
                     <Td style={{ color: LEAF }}>₹{received.toLocaleString('en-IN')}</Td>
                     <Td style={{ color: outstanding > 0 ? TOMATO : LEAF, fontWeight: 700 }}>₹{outstanding.toLocaleString('en-IN')}</Td>
-                    <Td><button onClick={() => { if (window.confirm(`Delete invoice ${inv.invoiceNumber}?`)) onDeleteInvoice(inv.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button></Td>
+                    <Td><ConfirmDeleteButton onConfirm={() => onDeleteInvoice(inv.id)} title={`Delete invoice ${inv.invoiceNumber}`} /></Td>
                   </tr>
                 );
               })}
@@ -7405,7 +7530,7 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
                   <Td>₹{Number(p.amount).toLocaleString('en-IN')}</Td>
                   <Td style={{ fontSize: 12, color: MUTED }}>{p.reference || '—'}</Td>
                   <Td style={{ fontSize: 12, color: MUTED }}>{p.linkedInvoiceId || p.linkedBatchId || 'General'}</Td>
-                  <Td><button onClick={() => { if (window.confirm('Delete this payment record?')) onDeletePayment(p.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button></Td>
+                  <Td><ConfirmDeleteButton onConfirm={() => onDeletePayment(p.id)} title="Delete this payment record" /></Td>
                 </tr>
               ))}
               {salesPayments.length === 0 && <tr><Td colSpan={6} style={{ color: MUTED, textAlign: 'center' }}>No payments logged yet.</Td></tr>}
@@ -7580,7 +7705,7 @@ function StaffPeopleTab({ staff, onSaveStaff, onDeleteStaff }) {
                   <Td>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => setEditing({ ...blank, ...p })} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer' }}><Pencil size={14} /></button>
-                      <button onClick={() => { if (window.confirm(`Delete ${p.name}? Their attendance and advance records stay in the database but will no longer be shown.`)) onDeleteStaff(p.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button>
+                      <ConfirmDeleteButton onConfirm={() => onDeleteStaff(p.id)} title={`Delete ${p.name} (their attendance/advance records stay in the database)`} />
                     </div>
                   </Td>
                 </tr>
@@ -7730,7 +7855,7 @@ function StaffAdvancesTab({ staff, advances, month, onSave, onDelete }) {
                   <Td style={{ fontWeight: 700 }}>{nameOf(a.staffId)}</Td>
                   <Td style={{ fontWeight: 700, color: AMBER }}>{money(a.amount)}</Td>
                   <Td style={{ fontSize: 12, color: MUTED }}>{a.note || '—'}</Td>
-                  <Td><button onClick={() => { if (window.confirm('Delete this advance?')) onDelete(a.id); }} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}><Trash2 size={14} /></button></Td>
+                  <Td><ConfirmDeleteButton onConfirm={() => onDelete(a.id)} title="Delete this advance" /></Td>
                 </tr>
               ))}
               {monthAdvances.length === 0 && <tr><Td colSpan={5} style={{ color: MUTED, textAlign: 'center' }}>No advances given in {month}.</Td></tr>}
