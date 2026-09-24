@@ -6745,6 +6745,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [qtyOverrides, setQtyOverrides] = useState({});
   const [codeOverrides, setCodeOverrides] = useState({});
+  const [upcOverrides, setUpcOverrides] = useState({});
   const [nameOverrides, setNameOverrides] = useState({});
   const [uomOverrides, setUomOverrides] = useState({});
   const [bestBeforeOverrides, setBestBeforeOverrides] = useState({});
@@ -6769,7 +6770,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         // time — a saved alias only fills in where the channel's own file left
         // something blank (e.g. no EAN yet for a brand-new article), so it
         // never overrides fresh indent data with a possibly-stale save.
-        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: g.rawEan || g.rawCode || alias?.ean || alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: g.rawEan || g.rawCode || alias?.ean || alias?.code || '', upc: alias?.upc || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
   }, [orders, items, packingProgress, platform, date]);
@@ -6783,6 +6784,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     setSelectedKeys(new Set());
     setQtyOverrides({});
     setCodeOverrides({});
+    setUpcOverrides({});
     setNameOverrides({});
     setUomOverrides({});
     setBestBeforeOverrides({});
@@ -6794,19 +6796,21 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const clearAllArticles = () => setSelectedKeys(new Set());
   const qtyFor = (a) => qtyOverrides[a.key] ?? (a.packedQty || a.targetPacks || 0);
   const codeFor = (a) => codeOverrides[a.key] ?? a.code;
+  const upcFor = (a) => upcOverrides[a.key] ?? a.upc ?? '';
   // Article Name and UOM default from this print run's order data, but once saved
   // (via the row's Save button) the correction lives on the item's channel alias —
   // same place Code already lives — so it survives navigating away and reappears
   // automatically next time, instead of only lasting this one print session.
   const nameFor = (a) => nameOverrides[a.key] ?? (a.labelName || a.articleName || '');
   const uomFor = (a) => uomOverrides[a.key] ?? (a.rawUnit || a.labelUom || (a.packSize ? `${a.packSize}${a.packUnit || ''}` : ''));
-  const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides;
+  const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides || a.key in upcOverrides;
   const saveRow = (a) => {
     if (!a.itemId) return;
-    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
+    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim(), upc: upcFor(a).trim() }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
     setNameOverrides((n) => { const c = { ...n }; delete c[a.key]; return c; });
     setUomOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
     setCodeOverrides((c) => { const d = { ...c }; delete d[a.key]; return d; });
+    setUpcOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
   };
   // Best Before shows the auto-calculated date (packing date + this article's
   // remembered shelf life) until the user edits it for this print run — editing it
@@ -6827,7 +6831,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const companyDetailsEmpty = !companyDetails.name?.trim() && !companyDetails.address?.trim() && !companyDetails.fssai?.trim();
 
   const printLabels = (onlyArticles) => {
-    const toPrint = (onlyArticles || articles.filter((a) => selectedKeys.has(a.key))).filter((a) => a.code);
+    const toPrint = (onlyArticles || articles.filter((a) => selectedKeys.has(a.key))).filter((a) => (platform === 'Blinkit' && a.upc) || a.code);
     if (toPrint.length === 0) { alert('Select at least one article that has a code before printing.'); return; }
     const isThermal = labelSize === 'thermal5050';
     // The TVS LP-46 Neo's 2-up roll is two 50mm labels side by side (100mm total),
@@ -6835,11 +6839,17 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     // to comfortably fit next to several lines of compliance text on one 50mm-tall label.
     const barcodeW = isThermal ? 44 * 3.78 : 190; // mm→px at 96dpi CSS reference, so the SVG's own coordinate space matches the printed mm size
     const barcodeH = isThermal ? 13 * 3.78 : 40; // sized down from 18mm after feedback that it dwarfed the item name — 13mm still scans reliably at typical warehouse handheld-scanner distance
+    // Blinkit's own indent only ever supplies its internal item code, never a real
+    // retail UPC — so the printed barcode/QR graphic uses the UPC entered here when
+    // there is one, falling back to the item code so nothing prints blank. Flipkart's
+    // own code is already a genuine EAN, so this never applies to it.
+    const barcodeValueFor = (a) => (platform === 'Blinkit' && a.upc) ? a.upc : a.code;
     // A saved layout (from the label editor) only applies to the 50x50mm thermal
     // size, since its coordinates are defined against that exact label — A4
     // sheets keep the plain stacked layout regardless.
     const renderWithLayout = (a, format, sf) => {
       const layout = format.layout;
+      const barcodeValue = barcodeValueFor(a);
       let html = '<div class="label-abs">';
       LABEL_FIELD_DEFS.forEach((d) => {
         const entry = layout[d.key];
@@ -6849,7 +6859,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         const style = `position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap;`;
         if (d.kind === 'graphic') {
           const px = entry.size * 3.78;
-          const markup = d.key === 'barcode' ? barcodeSVGMarkup(a.code, px, px * 0.3, sf.showBarcodeNumber !== false) : qrSVGMarkup(a.code, px);
+          const markup = d.key === 'barcode' ? barcodeSVGMarkup(barcodeValue, px, px * 0.3, sf.showBarcodeNumber !== false) : qrSVGMarkup(barcodeValue, px);
           if (markup) html += `<div style="${style}">${markup}</div>`;
         } else {
           const content = { itemName: nameFor(a), netWeight: uomFor(a), packingDate: date, expiryDate: bestBeforeFor(a) || '___________', storeTemperature: format.storeTemperatureText || '', companyName: companyDetails.name || '', companyAddress: (companyDetails.address || '').replace(/\n/g, '<br/>'), fssai: companyDetails.fssai || '' }[d.key];
@@ -6895,15 +6905,15 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
       }
       (format?.customFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label}: ${cf.value}</div>`; });
       if (sf.printBarcode !== false) {
-        oneLabel += barcodeSVGMarkup(a.code, barcodeW, barcodeH, sf.showBarcodeNumber !== false);
-      } else if (sf.showBarcodeNumber !== false && a.code) {
+        oneLabel += barcodeSVGMarkup(barcodeValueFor(a), barcodeW, barcodeH, sf.showBarcodeNumber !== false);
+      } else if (sf.showBarcodeNumber !== false && barcodeValueFor(a)) {
         // No scannable graphic on this format, but the code itself can still print
         // as plain text (e.g. for manual lookup) if that toggle is on.
-        oneLabel += `<div class="lbl-line lbl-name">${a.code}</div>`;
+        oneLabel += `<div class="lbl-line lbl-name">${barcodeValueFor(a)}</div>`;
       }
       if (sf.printQR) {
         const qrSize = isThermal ? 26 * 3.78 : 70; // same mm→px reference as the barcode
-        const qrMarkup = qrSVGMarkup(a.code, qrSize);
+        const qrMarkup = qrSVGMarkup(barcodeValueFor(a), qrSize);
         if (qrMarkup) oneLabel += `<div class="lbl-qr">${qrMarkup}</div>`;
       }
       oneLabel += '</div>';
@@ -7006,7 +7016,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Barcode (EAN)</Th><Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
+              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Barcode (EAN)</Th>{platform === 'Blinkit' && <Th>UPC Code</Th>}<Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
               <tbody>
                 {articles.map((a) => (
                   <tr key={a.key}>
@@ -7036,6 +7046,18 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                         style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
                     </Td>
+                    {platform === 'Blinkit' && (
+                      <Td>
+                        <input
+                          value={upcFor(a)}
+                          onChange={(e) => setUpcOverrides((u) => ({ ...u, [a.key]: e.target.value }))}
+                          onBlur={() => saveRow(a)}
+                          placeholder="No UPC yet"
+                          title="Blinkit's indent only gives its own item code — enter the article's real UPC here so the printed barcode is scannable at retail"
+                          style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
+                        />
+                      </Td>
+                    )}
                     <Td>
                       {rowDirty(a) && (
                         <button
