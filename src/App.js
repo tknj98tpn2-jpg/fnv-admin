@@ -7049,7 +7049,18 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                       />
                       {a.shelfLifeDays != null && <p style={{ margin: '2px 0 0', fontSize: 10, color: MUTED }}>{a.shelfLifeDays}-day shelf life (remembered)</p>}
                     </Td>
-                    <Td>{barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.name || <span style={{ color: AMBER }}>Not mapped</span>}</Td>
+                    <Td>
+                      <select
+                        value={a.barcodeFormatId || ''}
+                        onChange={(e) => onUpdateAlias(a.itemId, platform, { barcodeFormatId: e.target.value }, a.packSize, a.packUnit)}
+                        disabled={!a.itemId}
+                        title={!a.itemId ? 'This article isn\'t mapped to an item yet — map it in Orders first' : ''}
+                        style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px', background: a.itemId ? '#fff' : '#F6F3EA', color: a.itemId ? INK : MUTED }}
+                      >
+                        <option value="">Not mapped</option>
+                        {barcodeFormats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select>
+                    </Td>
                     <Td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <input type="number" value={qtyFor(a)} onChange={(e) => setQtyOverrides((q) => ({ ...q, [a.key]: Number(e.target.value) }))} style={{ width: 70, padding: '6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }} />
