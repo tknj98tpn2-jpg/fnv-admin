@@ -730,30 +730,40 @@ export default function AdminPanel() {
   // code, which makes future auto-matching pick whichever item happens to come first.
   const ensureAliasForCode = (itemId, channel, code, ean) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
-    if (!code) {
-      const exists = (it.aliases || []).some((a) => a.channel === channel && !a.code);
+    if (!code && !ean) {
+      const exists = (it.aliases || []).some((a) => a.channel === channel && !a.code && !a.ean);
       if (exists) return;
-      fbUpdate('items', itemId, { aliases: [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: '', packUnit: 'kg' }] });
+      fbUpdate('items', itemId, { aliases: [...(it.aliases || []), { id: newAliasId(), channel, code: '', ean: '', packSize: '', packUnit: 'kg' }] });
       return;
     }
-    const codeLower = code.toLowerCase();
-    const existing = (it.aliases || []).find((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
+    // EAN is the item's permanent retail barcode; the channel's own FSN/SKU
+    // code can be reissued (e.g. a relisting) even though the physical
+    // product — and its EAN — hasn't changed. Checking EAN first means a
+    // changed FSN updates the existing alias instead of creating a duplicate.
+    const eanLower = ean ? String(ean).toLowerCase() : '';
+    const codeLower = code ? code.toLowerCase() : '';
+    const existing = (it.aliases || []).find((a) => a.channel === channel && (
+      (eanLower && a.ean && String(a.ean).toLowerCase() === eanLower) ||
+      (codeLower && a.code && a.code.toLowerCase() === codeLower)
+    ));
     if (existing) {
-      // Alias already exists, but may predate the EAN field — backfill it so
-      // barcode printing has the retail code to work with.
-      if (ean && !existing.ean) {
-        fbUpdate('items', itemId, { aliases: it.aliases.map((a) => (a.id === existing.id ? { ...a, ean } : a)) });
-      }
+      const patch = {};
+      if (ean && !existing.ean) patch.ean = ean;
+      if (code && existing.code !== code) patch.code = code; // FSN changed for the same EAN — keep the current one
+      if (Object.keys(patch).length) fbUpdate('items', itemId, { aliases: it.aliases.map((a) => (a.id === existing.id ? { ...a, ...patch } : a)) });
       return;
     }
     items.forEach((other) => {
       if (other.id === itemId) return;
-      const hasIt = (other.aliases || []).some((a) => a.channel === channel && a.code && a.code.toLowerCase() === codeLower);
+      const hasIt = (other.aliases || []).some((a) => a.channel === channel && (
+        (eanLower && a.ean && String(a.ean).toLowerCase() === eanLower) ||
+        (codeLower && a.code && a.code.toLowerCase() === codeLower)
+      ));
       if (hasIt) {
-        fbUpdate('items', other.id, { aliases: other.aliases.filter((a) => !(a.channel === channel && a.code && a.code.toLowerCase() === codeLower)) });
+        fbUpdate('items', other.id, { aliases: other.aliases.filter((a) => !(a.channel === channel && ((eanLower && a.ean && String(a.ean).toLowerCase() === eanLower) || (codeLower && a.code && a.code.toLowerCase() === codeLower)))) });
       }
     });
-    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code, ean: ean || '', packSize: '', packUnit: 'kg' }];
+    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code: code || '', ean: ean || '', packSize: '', packUnit: 'kg' }];
     fbUpdate('items', itemId, { aliases: nextAliases });
   };
   const updateAliasById = (itemId, aliasId, patch) => {
@@ -3175,11 +3185,12 @@ function parseIndentRows(json, platform) {
     .map((r, idx) => {
       const headers = Object.keys(r);
       const rawName = String(pickField(r, ['title', 'article', 'product', 'item', 'description']) || '').trim();
-      // Articles are matched on the channel's own SKU/FSN — that is also what the
-      // GRN and PO exports carry, so one code ties the whole chain together.
+      // The channel's own SKU/FSN code — kept as a fallback matching key and
+      // for tying together the PO/GRN chain, which still reference it.
       const rawCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
-      // The EAN is kept separately: it is the retail barcode, used only for
-      // printing labels, never for matching.
+      // The EAN is the article's permanent retail barcode — the primary key for
+      // matching an indent row to an item, since a channel's own FSN/SKU code can
+      // be reissued on a relisting even when the physical product hasn't changed.
       const rawEan = String(pickField(r, ['eancode', 'ean']) || '').trim();
       let qty = Number(pickField(r, ['indent', 'qty', 'quantity', 'orderedqty']) || 0);
       let storeQtys = null;
@@ -3479,8 +3490,10 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
         }
         const rows = rawRows.map((r) => {
           const rawNameStripped = stripQtyUom(r.rawName).toLowerCase();
+          const rawEanLower = r.rawEan ? r.rawEan.toLowerCase() : '';
           const match = items.find(
             (it) =>
+              (rawEanLower && (it.aliases || []).some((a) => a.channel === indentPlatform && a.ean && String(a.ean).toLowerCase() === rawEanLower)) ||
               (r.rawCode && (it.aliases || []).some((a) => a.channel === indentPlatform && a.code && a.code.toLowerCase() === r.rawCode.toLowerCase())) ||
               it.name.toLowerCase() === r.rawName.toLowerCase() ||
               (rawNameStripped && it.name.toLowerCase() === rawNameStripped)
