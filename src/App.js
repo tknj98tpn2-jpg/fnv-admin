@@ -347,11 +347,28 @@ function renderBarcodeData(code, width = 200, height = 45) {
 // between packing date and best-before gets stored as a day-count on that article's
 // alias, so future print runs auto-advance the best-before date along with the
 // packing date instead of it needing to be re-typed every single day.
+// Formats a Date using its LOCAL calendar fields — never use toISOString()
+// for this: that renders in UTC, which silently shifts the date by a day
+// whenever local time and UTC fall on different calendar dates (e.g. in IST,
+// any local time before 5:30am is still "yesterday" in UTC).
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+// Today's date, in the browser's local timezone — the correct replacement
+// for the old `new Date().toISOString().split('T')[0]` pattern that used to
+// appear throughout this file, which returns the wrong calendar day during
+// part of the night in any timezone ahead of UTC (all of India, for instance).
+function todayLocalDate() {
+  return formatLocalDate(new Date());
+}
 function addDaysToDateStr(dateStr, days) {
   if (!dateStr) return '';
   const d = new Date(`${dateStr}T00:00:00`);
   d.setDate(d.getDate() + Number(days));
-  return d.toISOString().split('T')[0];
+  return formatLocalDate(d);
 }
 function diffDaysBetween(fromStr, toStr) {
   const from = new Date(`${fromStr}T00:00:00`);
@@ -408,11 +425,21 @@ function findAlias(item, channel, packSize, packUnit) {
   // An item can have more than one alias for the same channel — e.g. "Baby
   // Banana" (500g) and "Banana 3pc" (600g) are different articles that both
   // map to the item "Banana" on Blinkit. Channel alone can't tell them apart,
-  // so when a pack size is known, only an exact match on it counts — falling
-  // back to "any alias on this channel" here would just recreate the same
-  // mix-up for whichever pack-size variant doesn't have its own alias yet.
+  // so when a pack size is known, only a match on it counts — falling back to
+  // "any alias on this channel" here would just recreate the same mix-up for
+  // whichever pack-size variant doesn't have its own alias yet. The match
+  // tolerates numeric-formatting differences (e.g. "2" vs "2.0") since both
+  // plainly mean the same pack size — but never bridges a genuine unit
+  // mismatch (e.g. a raw "500 gm" label against a value actually in kg).
   if (packSize != null && packSize !== '') {
-    return aliases.find((a) => a.channel === channel && String(a.packSize) === String(packSize) && String(a.packUnit || '') === String(packUnit || ''));
+    const numTarget = parseFloat(packSize);
+    return aliases.find((a) => {
+      if (a.channel !== channel) return false;
+      if (String(a.packUnit || '') !== String(packUnit || '')) return false;
+      if (String(a.packSize) === String(packSize)) return true;
+      const numA = parseFloat(a.packSize);
+      return !Number.isNaN(numA) && !Number.isNaN(numTarget) && Math.abs(numA - numTarget) < 0.001;
+    });
   }
   return aliases.find((a) => a.channel === channel);
 }
@@ -791,8 +818,8 @@ export default function AdminPanel() {
   // ── Purchases ───────────────────────────────────────────
   // "purchased" rows are real, completed transactions and count toward stock.
   // "requirement" rows are just a to-buy queue (from indent release / recipe push) — they do NOT count as stock until actually purchased.
-  const addPurchase            = (p)   => fbSetDoc('purchases', p.id, { date: new Date().toISOString().split('T')[0], type: 'purchased', ...p, city: effectiveCity });
-  const addPurchaseRequirements = (rows, dateOverride) => { const b = writeBatch(db); const today = dateOverride || new Date().toISOString().split('T')[0]; rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r, city: effectiveCity })); b.commit(); };
+  const addPurchase            = (p)   => fbSetDoc('purchases', p.id, { date: todayLocalDate(), type: 'purchased', ...p, city: effectiveCity });
+  const addPurchaseRequirements = (rows, dateOverride) => { const b = writeBatch(db); const today = dateOverride || todayLocalDate(); rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r, city: effectiveCity })); b.commit(); };
   const removePurchasesByIds   = (ids) => { const b = writeBatch(db); ids.forEach((id) => b.delete(doc(db,'purchases',id))); b.commit(); };
 
   // ── Stock count (nightly closing stock) ─────────────────
@@ -824,7 +851,7 @@ export default function AdminPanel() {
   // ── GRN reports (Goods Received Note — uploaded per channel + day to reconcile) ─
   const uploadGrnReport = (channel, date, fileName, rows, batchId) => {
     const id = `GRN-${channel.slice(0, 3).toUpperCase()}-${date}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: new Date().toISOString().split('T')[0], rows, batchId: batchId || null });
+    fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: todayLocalDate(), rows, batchId: batchId || null });
   };
 
   // ── Sales tracking: Flipkart is invoiced then paid; Blinkit settles straight off
@@ -935,7 +962,7 @@ export default function AdminPanel() {
       const qty = d.qty !== undefined ? Number(d.qty) : e.qty;
       const unitPrice = d.unitPrice !== undefined ? Number(d.unitPrice) : e.unitPrice;
       const total = d.total !== undefined ? Number(d.total) : Math.round(qty * unitPrice * 100) / 100;
-      b.update(doc(db, 'vendorLedger', id), { qty, unitPrice, total, settled: true, settledPayment: paymentMode, settledNote: note, settledDate: new Date().toISOString().split('T')[0] });
+      b.update(doc(db, 'vendorLedger', id), { qty, unitPrice, total, settled: true, settledPayment: paymentMode, settledNote: note, settledDate: todayLocalDate() });
     });
     b.commit();
   };
@@ -1017,7 +1044,7 @@ export default function AdminPanel() {
       });
     });
     b.commit();
-    const dispatchDate = new Date().toISOString().split('T')[0];
+    const dispatchDate = todayLocalDate();
     if (cratesUsed > 0) adjustCrates('crates', -cratesUsed, `Dispatch ${vehicleNo || ''}`.trim());
     if (boxesUsed > 0)  adjustCrates('boxes',  -boxesUsed,  `Dispatch ${vehicleNo || ''}`.trim());
     const did = `DSP-${Date.now().toString(36).toUpperCase().slice(-6)}`;
@@ -1423,6 +1450,49 @@ function downloadItemsTemplate() {
   URL.revokeObjectURL(url);
 }
 
+// Exports every current item in the same column layout as the Bulk Import
+// template, so the file round-trips straight back through "Bulk import
+// items" — either into another city's Items section, or back into this one
+// after editing in a spreadsheet. An item can carry more than one alias per
+// channel (different pack sizes are different articles) but this format only
+// has room for one Blinkit + one Flipkart line per item, so only the first
+// alias of each channel is exported; anything beyond that is noted in a
+// trailing "Notes" column rather than silently dropped.
+function downloadAllItems(items) {
+  const rows = items.map((it) => {
+    const blinkitAliases = (it.aliases || []).filter((a) => a.channel === 'Blinkit');
+    const flipkartAliases = (it.aliases || []).filter((a) => a.channel === 'Flipkart');
+    const b = blinkitAliases[0];
+    const f = flipkartAliases[0];
+    const extraCount = Math.max(0, blinkitAliases.length - 1) + Math.max(0, flipkartAliases.length - 1);
+    return {
+      'Item Name': it.name,
+      UOM: it.uom || 'kg',
+      Category: it.category || '',
+      'Blinkit Code': b?.code || '',
+      'Blinkit Pack Size': b?.packSize ?? '',
+      'Blinkit Pack Unit': b?.packUnit || '',
+      'Flipkart Code': f?.ean || f?.code || '',
+      'Flipkart Pack Size': f?.packSize ?? '',
+      'Flipkart Pack Unit': f?.packUnit || '',
+      Notes: extraCount > 0 ? `Has ${extraCount} more alias(es) not shown here — see Map Formats to Articles` : '',
+    };
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Items');
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `fnv-items-export-${todayLocalDate()}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function parseBulkItemRows(json) {
   const results = { valid: [], skipped: 0 };
   json.forEach((r) => {
@@ -1788,7 +1858,7 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
     onSave(entries);
   };
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocalDate();
   const isBackdated = date && date < today;
 
   return (
@@ -2087,7 +2157,7 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
                   </div>
                 )}
                 <button
-                  onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: new Date().toISOString().split('T')[0] })}
+                  onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: todayLocalDate() })}
                   style={{ background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 9, padding: '10px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
                 >
                   <Plus size={14} /> Add purchase
@@ -2542,6 +2612,18 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
               <AlertCircle size={13} /> {bulkError}
             </p>
           )}
+        </Panel>
+        <Panel style={{ alignSelf: 'start', marginTop: 14 }}>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Download item list</p>
+          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
+            Every item, as a spreadsheet in the same layout Bulk Import expects — to copy into another city's Items section, or to bulk-edit and re-upload here.
+          </p>
+          <button
+            onClick={() => downloadAllItems(items)}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+          >
+            <Download size={14} /> Download {items.length} item{items.length === 1 ? '' : 's'}
+          </button>
         </Panel>
       </div>
 
@@ -3600,6 +3682,8 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           product: item.name,
           itemId: item.id,
           articleName: r.rawName,
+          rawCode: r.rawCode || '',
+          rawEan: r.rawEan || '',
           qty: storeQty,
           unit: item.uom,
           status: 'pending',
@@ -3936,7 +4020,7 @@ function downloadVendorLedgerCsv(vendorName, groups, onlyOutstanding) {
   const a = document.createElement('a');
   a.href = url;
   const safeName = vendorName.replace(/[^a-z0-9]+/gi, '_');
-  a.download = `${safeName}_ledger_${onlyOutstanding ? 'outstanding' : 'complete'}_${new Date().toISOString().split('T')[0]}.csv`;
+  a.download = `${safeName}_ledger_${onlyOutstanding ? 'outstanding' : 'complete'}_${todayLocalDate()}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -4054,7 +4138,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       unitPrice: finalUnitPrice,
       total: totalPrice,
       payment: paymentMode,
-      date: new Date().toISOString().split('T')[0],
+      date: todayLocalDate(),
       note: purchaseNote.trim(),
       settled: paymentMode !== 'credit',
     };
@@ -4174,7 +4258,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     const orderItems = filteredItems
       .filter((it) => selectedItemIds.includes(it.id))
       .map((it, idx) => ({ no: idx + 1, itemId: it.id, itemName: it.name, uom: it.unit, qty: it.toBuy }));
-    onSavePlacedOrder({ id: `ORD-${Date.now().toString(36).toUpperCase().slice(-6)}`, name: orderNameDraft.trim() || `Order ${new Date().toLocaleDateString('en-IN')}`, date: new Date().toISOString().split('T')[0], items: orderItems });
+    onSavePlacedOrder({ id: `ORD-${Date.now().toString(36).toUpperCase().slice(-6)}`, name: orderNameDraft.trim() || `Order ${new Date().toLocaleDateString('en-IN')}`, date: todayLocalDate(), items: orderItems });
     setShowOrderNameModal(false);
     setOrderNameDraft('');
     exitSelectMode();
@@ -4716,7 +4800,7 @@ function StockCountRow({ item, existingCount, lastKnown, unit, expected, onSave 
 }
 
 function StockCountPanel({ items, stockCounts, purchases, dispatchLog, onRecord, onReset }) {
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocalDate());
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [search, setSearch] = useState('');
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -5090,7 +5174,7 @@ function downloadPricingSheet(rows) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `fnv-pricing-sheet-${new Date().toISOString().split('T')[0]}.xlsx`;
+  a.download = `fnv-pricing-sheet-${todayLocalDate()}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -6215,6 +6299,7 @@ function BarcodeFormatEditor({ format, onSave, onCancel }) {
 
 function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasById, onUpdateAlias, onDeleteAliases }) {
   const [search, setSearch] = useState('');
+  const [channelFilter, setChannelFilter] = useState('ALL');
   const [edits, setEdits] = useState({});
   const [selected, setSelected] = useState(new Set());
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -6254,10 +6339,11 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
       }
     });
   });
-  const filtered = rows.filter((r) => !search.trim()
-    || r.itemName.toLowerCase().includes(search.trim().toLowerCase())
-    || r.indentArticleName.toLowerCase().includes(search.trim().toLowerCase())
-    || String(r.labelName).toLowerCase().includes(search.trim().toLowerCase()));
+  const filtered = rows.filter((r) => (channelFilter === 'ALL' || r.channel === channelFilter)
+    && (!search.trim()
+      || r.itemName.toLowerCase().includes(search.trim().toLowerCase())
+      || r.indentArticleName.toLowerCase().includes(search.trim().toLowerCase())
+      || String(r.labelName).toLowerCase().includes(search.trim().toLowerCase())));
 
   const rowKey = (r) => r.aliasId;
   const valFor = (r, field) => {
@@ -6300,7 +6386,7 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `barcode_articles_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `barcode_articles_${todayLocalDate()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -6397,7 +6483,13 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
           )}
         </div>
       )}
-      <input placeholder="Search item or article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260, marginTop: 14 }} />
+      <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
+        <input placeholder="Search item or article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260, marginTop: 0 }} />
+        <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '9px 8px' }}>
+          <option value="ALL">All channels</option>
+          {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '10px 0' }}>
         <button onClick={selectAll} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
         <button onClick={clearSelected} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
@@ -6641,7 +6733,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
 function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias, onSaveFormat }) {
   const [platform, setPlatform] = useState(PLATFORMS[0]);
   const [categoryFilter, setCategoryFilter] = useState('ALL');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocalDate());
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [qtyOverrides, setQtyOverrides] = useState({});
   const [codeOverrides, setCodeOverrides] = useState({});
@@ -6657,7 +6749,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     dayOrders.forEach((o) => {
       const cityKey = o.city || CITIES[0];
       const key = `${cityKey}__${date}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-      if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0 };
+      if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, rawCode: o.rawCode || '', rawEan: o.rawEan || '', packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0 };
       groups[key].targetPacks += Number(o.packQty) || 0;
     });
     return Object.values(groups)
@@ -6665,7 +6757,11 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         const item = items.find((it) => it.name === g.product);
         const alias = findAlias(item, platform, g.packSize, g.packUnit);
         const progress = packingProgress[g.key] || { packedQty: 0 };
-        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: alias?.ean || alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+        // The indent is the trustworthy source for what actually shipped this
+        // time — a saved alias only fills in where the channel's own file left
+        // something blank (e.g. no EAN yet for a brand-new article), so it
+        // never overrides fresh indent data with a possibly-stale save.
+        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: g.rawEan || g.rawCode || alias?.ean || alias?.code || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
   }, [orders, items, packingProgress, platform, date]);
@@ -6694,8 +6790,8 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   // (via the row's Save button) the correction lives on the item's channel alias —
   // same place Code already lives — so it survives navigating away and reappears
   // automatically next time, instead of only lasting this one print session.
-  const nameFor = (a) => nameOverrides[a.key] ?? (a.labelName || a.articleName || '');
-  const uomFor = (a) => uomOverrides[a.key] ?? (a.labelUom || a.rawUnit || (a.packSize ? `${a.packSize}${a.packUnit || ''}` : ''));
+  const nameFor = (a) => nameOverrides[a.key] ?? (a.articleName || a.labelName || '');
+  const uomFor = (a) => uomOverrides[a.key] ?? (a.rawUnit || a.labelUom || (a.packSize ? `${a.packSize}${a.packUnit || ''}` : ''));
   const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides;
   const saveRow = (a) => {
     if (!a.itemId) return;
@@ -6861,7 +6957,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     <>
     <Panel>
       <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Print pack labels</p>
-      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Pulls today's packed articles automatically — adjust quantities if needed before printing.</p>
+      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Pulls every article from that day's indent automatically — as soon as it's mapped, not once it's packed. Adjust quantities if needed before printing.</p>
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
@@ -7317,7 +7413,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
   const [poError, setPoError] = useState('');
   const [grnError, setGrnError] = useState('');
   const batch = bf.batch;
-  const batchDate = batch.purchaseDate || new Date().toISOString().split('T')[0];
+  const batchDate = batch.purchaseDate || todayLocalDate();
 
   const handlePoFile = (e) => {
     const file = e.target.files[0];
@@ -7499,7 +7595,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
 function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSaveInvoice, onDeleteInvoice }) {
   const [creating, setCreating] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [invoiceDate, setInvoiceDate] = useState(todayLocalDate());
   const [amount, setAmount] = useState('');
   const [selectedBatchIds, setSelectedBatchIds] = useState([]);
 
@@ -7579,7 +7675,7 @@ function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSav
 function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSavePayment, onDeletePayment }) {
   const [logging, setLogging] = useState(false);
   const [platform, setPlatform] = useState(PLATFORMS[0]);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocalDate());
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
   const [linkType, setLinkType] = useState('invoice'); // 'invoice' | 'batch' | 'general'
@@ -7813,7 +7909,7 @@ function StaffPanel({ staff, attendance, advances, onSaveStaff, onDeleteStaff, o
 }
 
 function StaffPeopleTab({ staff, onSaveStaff, onDeleteStaff }) {
-  const blank = { id: '', name: '', phone: '', role: '', joiningDate: new Date().toISOString().split('T')[0], monthlySalary: '', status: 'active' };
+  const blank = { id: '', name: '', phone: '', role: '', joiningDate: todayLocalDate(), monthlySalary: '', status: 'active' };
   const [editing, setEditing] = useState(null);
 
   const save = () => {
@@ -7975,7 +8071,7 @@ function StaffAttendanceTab({ staff, attendance, month, onMark, onClear }) {
 function StaffAdvancesTab({ staff, advances, month, onSave, onDelete }) {
   const [adding, setAdding] = useState(false);
   const [staffId, setStaffId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocalDate());
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
 
