@@ -420,8 +420,16 @@ const SEED_PURCHASES = [];
 function stripQtyUom(name) {
   return String(name || '').replace(/[\s_]+\d+(?:\.\d+)?\s*(?:Units?|gm|g|Kg|Ft)\.?$/i, '').trim();
 }
-function findAlias(item, channel, packSize, packUnit) {
+function findAlias(item, channel, packSize, packUnit, ean) {
   const aliases = item?.aliases || [];
+  // EAN is the article's permanent retail barcode, so it's the most reliable
+  // way to reattach a saved label/format to the right alias — a manually-set
+  // pack size (kept for the admin's own costing) can drift slightly from what
+  // a given day's indent reports, which would otherwise break the match.
+  if (ean) {
+    const byEan = aliases.find((a) => a.channel === channel && a.ean && String(a.ean).toLowerCase() === String(ean).toLowerCase());
+    if (byEan) return byEan;
+  }
   // An item can have more than one alias for the same channel — e.g. "Baby
   // Banana" (500g) and "Banana 3pc" (600g) are different articles that both
   // map to the item "Banana" on Blinkit. Channel alone can't tell them apart,
@@ -732,9 +740,9 @@ export default function AdminPanel() {
   const addItemsBulk = (rows) => { const b = writeBatch(db); rows.forEach((r) => b.set(doc(db,'items',r.id), { ...r, city: effectiveCity })); b.commit(); };
   const deleteItem   = (id)   => fbDelete('items', id);
   const updateItem   = (id, patch) => fbUpdate('items', id, patch);
-  const mapChannelField = (itemId, channel, patch, packSize, packUnit) => {
+  const mapChannelField = (itemId, channel, patch, packSize, packUnit, ean) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
-    const existing = findAlias(it, channel, packSize, packUnit);
+    const existing = findAlias(it, channel, packSize, packUnit, ean);
     const nextAliases = existing
       ? it.aliases.map((a) => (a.id === existing.id ? { ...a, ...patch } : a))
       : [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: packSize || '', packUnit: packUnit || 'kg', ...patch }];
@@ -6755,7 +6763,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     return Object.values(groups)
       .map((g) => {
         const item = items.find((it) => it.name === g.product);
-        const alias = findAlias(item, platform, g.packSize, g.packUnit);
+        const alias = findAlias(item, platform, g.packSize, g.packUnit, g.rawEan || g.rawCode);
         const progress = packingProgress[g.key] || { packedQty: 0 };
         // The indent is the trustworthy source for what actually shipped this
         // time — a saved alias only fills in where the channel's own file left
@@ -6790,12 +6798,12 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   // (via the row's Save button) the correction lives on the item's channel alias —
   // same place Code already lives — so it survives navigating away and reappears
   // automatically next time, instead of only lasting this one print session.
-  const nameFor = (a) => nameOverrides[a.key] ?? (a.articleName || a.labelName || '');
+  const nameFor = (a) => nameOverrides[a.key] ?? (a.labelName || a.articleName || '');
   const uomFor = (a) => uomOverrides[a.key] ?? (a.rawUnit || a.labelUom || (a.packSize ? `${a.packSize}${a.packUnit || ''}` : ''));
   const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides;
   const saveRow = (a) => {
     if (!a.itemId) return;
-    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() }, a.packSize, a.packUnit);
+    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim() }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
     setNameOverrides((n) => { const c = { ...n }; delete c[a.key]; return c; });
     setUomOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
     setCodeOverrides((c) => { const d = { ...c }; delete d[a.key]; return d; });
@@ -6808,7 +6816,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const commitBestBefore = (a, value) => {
     if (!value || !a.itemId) return;
     const days = diffDaysBetween(date, value);
-    onUpdateAlias(a.itemId, platform, { shelfLifeDays: days }, a.packSize, a.packUnit);
+    onUpdateAlias(a.itemId, platform, { shelfLifeDays: days }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
   };
 
   // A checked "Company Details" box on a format only decides WHETHER that section
@@ -7052,7 +7060,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                     <Td>
                       <select
                         value={a.barcodeFormatId || ''}
-                        onChange={(e) => onUpdateAlias(a.itemId, platform, { barcodeFormatId: e.target.value }, a.packSize, a.packUnit)}
+                        onChange={(e) => onUpdateAlias(a.itemId, platform, { barcodeFormatId: e.target.value }, a.packSize, a.packUnit, a.rawEan || a.rawCode)}
                         disabled={!a.itemId}
                         title={!a.itemId ? 'This article isn\'t mapped to an item yet — map it in Orders first' : ''}
                         style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px', background: a.itemId ? '#fff' : '#F6F3EA', color: a.itemId ? INK : MUTED }}
