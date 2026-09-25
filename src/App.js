@@ -6838,6 +6838,32 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const needsCompanyDetails = articles.some((a) => barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.standardFields?.companyDetails);
   const companyDetailsEmpty = !companyDetails.name?.trim() && !companyDetails.address?.trim() && !companyDetails.fssai?.trim();
 
+  // Exports the selected articles as a CSV, for admins who print through their
+  // own BarTender template instead of this app's built-in print — BarTender
+  // reads a data source like this and merges each row into its template, so
+  // the columns here are named to be easy to map in BarTender's Data Source
+  // wizard, and every value matches what would otherwise appear on the printed label.
+  const downloadForBarTender = () => {
+    const selected = articles.filter((a) => selectedKeys.has(a.key));
+    if (selected.length === 0) { alert('Select at least one article first.'); return; }
+    const header = ['Item Name', 'UOM', 'Barcode', 'Best Before', 'Format', 'Qty to Print'];
+    const rows = selected.map((a) => [
+      nameFor(a), uomFor(a), codeFor(a), bestBeforeFor(a) || '',
+      barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.name || '', qtyFor(a),
+    ]);
+    const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bartender_labels_${platform}_${date}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const printLabels = (onlyArticles) => {
     const toPrint = (onlyArticles || articles.filter((a) => selectedKeys.has(a.key))).filter((a) => (platform === 'Blinkit' && a.upc) || a.code);
     if (toPrint.length === 0) { alert('Select at least one article that has a code before printing.'); return; }
@@ -7124,9 +7150,14 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
               </tbody>
             </table>
           </div>
-          <button onClick={() => printLabels()} style={{ display: 'flex', alignItems: 'center', gap: 8, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            <Barcode size={15} /> Print labels
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => printLabels()} style={{ display: 'flex', alignItems: 'center', gap: 8, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              <Barcode size={15} /> Print labels
+            </button>
+            <button onClick={downloadForBarTender} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              <Download size={15} /> Export for BarTender
+            </button>
+          </div>
         </>
       )}
     </Panel>
