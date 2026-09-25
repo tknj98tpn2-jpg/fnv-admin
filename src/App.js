@@ -1649,6 +1649,14 @@ function formatLedgerDate(d, short) {
     ? dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
     : dt.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
 }
+// Barcode labels print dates as DD/MM/YY (e.g. "25/09/26") rather than the
+// underlying YYYY-MM-DD value used internally for date math and filtering.
+function formatLabelDate(d) {
+  if (!d) return d;
+  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return d;
+  return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
+}
 const isDueEntry = (e) => e.payment === 'credit' && !e.settled;
 const money = (n) => `₹${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-IN')}`;
 const COMPANY_NAME = 'NILGIRI FNV SUPPLIER COMPANY';
@@ -6862,7 +6870,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
           const markup = d.key === 'barcode' ? barcodeSVGMarkup(barcodeValue, px, px * 0.3, sf.showBarcodeNumber !== false) : qrSVGMarkup(barcodeValue, px);
           if (markup) html += `<div style="${style}">${markup}</div>`;
         } else {
-          const content = { itemName: nameFor(a), netWeight: uomFor(a), packingDate: date, expiryDate: bestBeforeFor(a) || '___________', storeTemperature: format.storeTemperatureText || '', companyName: companyDetails.name || '', companyAddress: (companyDetails.address || '').replace(/\n/g, '<br/>'), fssai: companyDetails.fssai || '' }[d.key];
+          const content = { itemName: nameFor(a), netWeight: uomFor(a), packingDate: formatLabelDate(date), expiryDate: formatLabelDate(bestBeforeFor(a)) || '___________', storeTemperature: format.storeTemperatureText || '', companyName: companyDetails.name || '', companyAddress: (companyDetails.address || '').replace(/\n/g, '<br/>'), fssai: companyDetails.fssai || '' }[d.key];
           const prefix = d.hasPrefix && entry.prefix ? `${entry.prefix} ` : '';
           const weight = d.key === 'itemName' ? 700 : 600;
           html += `<div style="${style} font-size:${entry.size}px; font-weight:${weight}; font-family:Arial,sans-serif; color:#000;">${prefix}${content}</div>`;
@@ -6895,8 +6903,8 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
       let oneLabel = '<div class="label">';
       if (sf.itemName) oneLabel += `<div class="lbl-line lbl-name">${nameFor(a)}</div>`;
       if (sf.netWeight) oneLabel += `<div class="lbl-line lbl-key">Net Wt: ${netWeight}</div>`;
-      if (sf.packingDate) oneLabel += `<div class="lbl-line lbl-key">Packed: ${date}</div>`;
-      if (sf.expiryDate) oneLabel += `<div class="lbl-line lbl-key">Best Before: ${bestBeforeFor(a) || '___________'}</div>`;
+      if (sf.packingDate) oneLabel += `<div class="lbl-line lbl-key">Packed: ${formatLabelDate(date)}</div>`;
+      if (sf.expiryDate) oneLabel += `<div class="lbl-line lbl-key">Best Before: ${formatLabelDate(bestBeforeFor(a)) || '___________'}</div>`;
       if (sf.storeTemperature && format?.storeTemperatureText) oneLabel += `<div class="lbl-line lbl-key">${format.storeTemperatureText}</div>`;
       if (sf.companyDetails) {
         oneLabel += `<div class="lbl-line lbl-company-name">${companyDetails.name || ''}</div>`;
@@ -7128,8 +7136,8 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         article={{
           itemName: nameFor(editingArticle),
           netWeight: uomFor(editingArticle),
-          packingDate: date,
-          expiryDate: bestBeforeFor(editingArticle) || '___________',
+          packingDate: formatLabelDate(date),
+          expiryDate: formatLabelDate(bestBeforeFor(editingArticle)) || '___________',
           code: editingArticle.code,
         }}
         companyDetails={companyDetails}
