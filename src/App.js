@@ -4940,6 +4940,10 @@ function buildLatestUnitPriceByItem(purchases) {
   // recorded in byName regardless of whether it also has an itemId, so the
   // two maps independently reflect the true latest purchase either way could
   // find; buildPricingArticles then takes whichever of the two is newer.
+  // The name key is normalized (trimmed, lowercased) since it's a fallback for
+  // when itemId isn't available — a stray case or whitespace difference
+  // between how an order and a purchase recorded the same item's name
+  // shouldn't silently break the match the way an exact-string key would.
   const byId = {};
   const byName = {};
   purchases
@@ -4949,11 +4953,27 @@ function buildLatestUnitPriceByItem(purchases) {
       if (p.itemId) {
         if (!byId[p.itemId] || entry.date >= byId[p.itemId].date) byId[p.itemId] = entry;
       }
-      if (p.item) {
-        if (!byName[p.item] || entry.date >= byName[p.item].date) byName[p.item] = entry;
+      const nameKey = p.item ? p.item.trim().toLowerCase() : '';
+      if (nameKey) {
+        if (!byName[nameKey] || entry.date >= byName[nameKey].date) byName[nameKey] = entry;
       }
     });
   return { byId, byName };
+}
+
+// Resolves an item by its channel alias's EAN/code — used when an order's own
+// itemId is missing (an older order predating that field), so the fallback is
+// still an unambiguous identifier chain (order's EAN/code -> item's alias ->
+// item) rather than a fragile match on the product's display name.
+function resolveItemIdByChannelCode(items, channel, ean, code) {
+  const target = (ean || code || '').toString().trim().toLowerCase();
+  if (!target) return null;
+  for (const it of items) {
+    const hit = (it.aliases || []).some((a) => a.channel === channel
+      && ((a.ean && String(a.ean).toLowerCase() === target) || (a.code && String(a.code).toLowerCase() === target)));
+    if (hit) return it.id;
+  }
+  return null;
 }
 
 // One entry per distinct article that has come through an indent — same product can have
@@ -4974,8 +4994,13 @@ function buildPricingArticles(orders, items, purchases, city, configByKey) {
       const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
       if (map[key]) return;
       const item = items.find((it) => it.name === o.product);
-      const byIdInfo = o.itemId ? latestUnitPriceByItem.byId[o.itemId] : null;
-      const byNameInfo = latestUnitPriceByItem.byName[o.product];
+      // itemId is the reliable match; when this order predates that field, its own
+      // EAN/code (from the indent) resolves the same item unambiguously via the
+      // item's channel alias — only when neither is available does name matching
+      // (case/whitespace-insensitive) become the last resort.
+      const resolvedItemId = o.itemId || resolveItemIdByChannelCode(items, o.platform, o.rawEan, o.rawCode);
+      const byIdInfo = resolvedItemId ? latestUnitPriceByItem.byId[resolvedItemId] : null;
+      const byNameInfo = latestUnitPriceByItem.byName[o.product?.trim().toLowerCase() || ''];
       const unitPriceInfo = !byIdInfo ? byNameInfo : (!byNameInfo ? byIdInfo : (byIdInfo.date >= byNameInfo.date ? byIdInfo : byNameInfo));
       const autoBasePrice = unitPriceInfo ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100 : null;
       // A base price fetched from the latest purchase is the default — but a specific
@@ -4984,7 +5009,7 @@ function buildPricingArticles(orders, items, purchases, city, configByKey) {
       const config = configByKey?.[key] || configByKey?.[legacyKey];
       const hasOverride = config?.basePriceOverride != null;
       const basePrice = hasOverride ? config.basePriceOverride : autoBasePrice;
-      const alias = (item?.aliases || []).find((al) => al.channel === o.platform && String(al.packSize) === String(o.packSize) && al.packUnit === o.packUnit);
+      const alias = findAlias(item, o.platform, o.packSize, o.packUnit, o.rawEan || o.rawCode);
       map[key] = {
         key,
         legacyKey,
@@ -4992,7 +5017,7 @@ function buildPricingArticles(orders, items, purchases, city, configByKey) {
         product: o.product,
         category: item?.category || '',
         platform: o.platform,
-        code: alias?.code || '',
+        code: alias?.ean || alias?.code || '',
         packSize: o.packSize,
         packUnit: o.packUnit,
         basePrice,
@@ -6748,6 +6773,13 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
 
 function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias }) {
   const [platform, setPlatform] = useState(PLATFORMS[0]);
+  // Blinkit's own indent only ever supplies its internal item code, never a real
+  // retail UPC — so the printed barcode/QR graphic uses the UPC entered for this
+  // article when there is one, falling back to the item code so nothing prints
+  // blank. Flipkart's own code is already a genuine EAN, so this never applies to
+  // it. Shared by the actual print output and the layout editor's live preview,
+  // so the two can never show a different number than what actually prints.
+  const barcodeValueFor = (a) => (platform === 'Blinkit' && a.upc) ? a.upc : a.code;
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [date, setDate] = useState(todayLocalDate());
   const [selectedKeys, setSelectedKeys] = useState(new Set());
@@ -6876,11 +6908,6 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     // to comfortably fit next to several lines of compliance text on one 50mm-tall label.
     const barcodeW = isThermal ? 44 * 3.78 : 190; // mm→px at 96dpi CSS reference, so the SVG's own coordinate space matches the printed mm size
     const barcodeH = isThermal ? 13 * 3.78 : 40; // sized down from 18mm after feedback that it dwarfed the item name — 13mm still scans reliably at typical warehouse handheld-scanner distance
-    // Blinkit's own indent only ever supplies its internal item code, never a real
-    // retail UPC — so the printed barcode/QR graphic uses the UPC entered here when
-    // there is one, falling back to the item code so nothing prints blank. Flipkart's
-    // own code is already a genuine EAN, so this never applies to it.
-    const barcodeValueFor = (a) => (platform === 'Blinkit' && a.upc) ? a.upc : a.code;
     // A saved layout (from the label editor) only applies to the 50x50mm thermal
     // size, since its coordinates are defined against that exact label — A4
     // sheets keep the plain stacked layout regardless.
@@ -6919,7 +6946,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
       const sf = format?.standardFields || { printBarcode: true, itemName: true, netWeight: true, showBarcodeNumber: true };
       const qty = Math.max(1, Math.round(qtyFor(a)));
       totalLabelCount += qty;
-      if (isThermal && format?.layout) {
+      if (isThermal && (a.layoutOverride || format?.layout)) {
         const oneLabel = renderWithLayout(a, format, sf);
         return Array(qty).fill(oneLabel).join('');
       }
@@ -7175,7 +7202,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
           netWeight: uomFor(editingArticle),
           packingDate: formatLabelDate(date),
           expiryDate: formatLabelDate(bestBeforeFor(editingArticle)) || '___________',
-          code: editingArticle.code,
+          code: barcodeValueFor(editingArticle),
           layoutOverride: editingArticle.layoutOverride,
         }}
         companyDetails={companyDetails}
