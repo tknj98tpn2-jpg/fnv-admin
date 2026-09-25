@@ -1252,7 +1252,7 @@ export default function AdminPanel() {
           )}
           {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} onDeleteOldPurchases={removePurchasesByIds} onResetPurchaseNeeds={excludeOldOrdersFromPurchase} onRestoreExcluded={restoreExcludedOrders} />}
           {tab === 'stockcount' && <StockCountPanel items={cityItems} stockCounts={cityStockCounts} purchases={cityPurchases} dispatchLog={cityDispatchLog} onRecord={recordStockCount} onReset={resetStockCounts} />}
-          {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} />}
+          {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} recipes={recipes} />}
           {tab === 'sales' && (
             <SalesPanel
               items={cityItems}
@@ -1271,6 +1271,7 @@ export default function AdminPanel() {
               onDeletePayment={deleteSalesPayment}
               onUploadGrn={uploadGrnReport}
               onUpdateIndentBatch={updateIndentBatch}
+              recipes={recipes}
             />
           )}
           {tab === 'staff' && (
@@ -4976,12 +4977,37 @@ function resolveItemIdByChannelCode(items, channel, ean, code) {
   return null;
 }
 
+// A Cut & Process item (e.g. "Cauliflower Florets") is never itself bought from a
+// vendor — only its raw ingredients are (e.g. whole Cauliflower) — so its cost has
+// to come from its recipe rather than from a direct purchase record. This sums
+// each ingredient's own latest purchase price (kg or piece, matching how recipe
+// quantities are normalized) times the quantity the recipe uses per one output
+// unit. Returns null (rather than a partial total) if the item has no recipe, or
+// if any ingredient has never been purchased — a partial sum would understate the
+// true cost and look like a real price rather than an incomplete one.
+function computeRecipeUnitCost(item, recipes, items, latestUnitPriceByItem) {
+  if (!item) return null;
+  const recipe = recipes.find((r) => r.outputItemId === item.id);
+  if (!recipe || !recipe.ingredients?.length) return null;
+  let total = 0;
+  for (const ing of recipe.ingredients) {
+    const ingItem = items.find((it) => it.id === ing.itemId);
+    const byId = ing.itemId ? latestUnitPriceByItem.byId[ing.itemId] : null;
+    const byName = ingItem ? latestUnitPriceByItem.byName[ingItem.name.trim().toLowerCase()] : null;
+    const info = !byId ? byName : (!byName ? byId : (byId.date >= byName.date ? byId : byName));
+    if (!info) return null; // this ingredient has never been purchased - can't give a complete cost yet
+    const normalized = normalizeIngredientQty(ing.qtyPerUnit, ing.unit);
+    total += normalized.value * info.unitPrice;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 // One entry per distinct article that has come through an indent — same product can have
 // several pack sizes (e.g. 500g "Baby Banana" vs 600g "Banana 3pc"), each priced separately.
 // Shared by the Pricing tab and the Profit & Loss tab so both agree on cost.
 // The key is prefixed with city so that two cities selling the same product/platform/pack
 // combo never share the same pricing config (grading %, margins, etc. stay per-city).
-function buildPricingArticles(orders, items, purchases, city, configByKey) {
+function buildPricingArticles(orders, items, purchases, city, configByKey, recipes) {
   const latestUnitPriceByItem = buildLatestUnitPriceByItem(purchases);
   const map = {};
   orders
@@ -5002,7 +5028,13 @@ function buildPricingArticles(orders, items, purchases, city, configByKey) {
       const byIdInfo = resolvedItemId ? latestUnitPriceByItem.byId[resolvedItemId] : null;
       const byNameInfo = latestUnitPriceByItem.byName[o.product?.trim().toLowerCase() || ''];
       const unitPriceInfo = !byIdInfo ? byNameInfo : (!byNameInfo ? byIdInfo : (byIdInfo.date >= byNameInfo.date ? byIdInfo : byNameInfo));
-      const autoBasePrice = unitPriceInfo ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100 : null;
+      // A Cut & Process item is never purchased directly, so when no purchase-based
+      // price exists at all, fall back to what its own recipe says it costs to make.
+      const recipeUnitCost = unitPriceInfo ? null : computeRecipeUnitCost(item, recipes || [], items, latestUnitPriceByItem);
+      const autoBasePrice = unitPriceInfo
+        ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100
+        : (recipeUnitCost != null ? Math.round(recipeUnitCost * o.packSize * 100) / 100 : null);
+      const autoBasePriceSource = unitPriceInfo ? 'purchase' : (recipeUnitCost != null ? 'recipe' : null);
       // A base price fetched from the latest purchase is the default — but a specific
       // article's config can carry a manual override (e.g. before any purchase exists yet,
       // or to correct a one-off odd purchase price) which always wins when set.
@@ -5022,6 +5054,7 @@ function buildPricingArticles(orders, items, purchases, city, configByKey) {
         packUnit: o.packUnit,
         basePrice,
         autoBasePrice,
+        autoBasePriceSource,
         hasBasePriceOverride: hasOverride,
       };
     });
@@ -5179,7 +5212,7 @@ function PricingRow({ article, config, onUpdate }) {
             <button onClick={resetBasePrice} style={{ background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 10, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>use purchase price</button>
           </p>
         ) : (
-          <p style={{ margin: '3px 0 0', fontSize: 10, color: MUTED }}>{article.autoBasePrice == null ? 'No purchase yet' : 'From latest purchase'}</p>
+          <p style={{ margin: '3px 0 0', fontSize: 10, color: MUTED }}>{article.autoBasePrice == null ? 'No purchase yet' : (article.autoBasePriceSource === 'recipe' ? 'From recipe (ingredient cost)' : 'From latest purchase')}</p>
         )}
       </Td>
       <Td>{cellInput(grading, setGrading, 'gradingPercent')}</Td>
@@ -5222,7 +5255,7 @@ function downloadPricingSheet(rows) {
   URL.revokeObjectURL(url);
 }
 
-function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate }) {
+function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate, recipes }) {
   const [search, setSearch] = useState('');
   const [channelFilter, setChannelFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
@@ -5233,7 +5266,7 @@ function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate 
     return map;
   }, [pricingConfig]);
 
-  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey), [orders, items, purchases, city, configByKey]);
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes), [orders, items, purchases, city, configByKey, recipes]);
 
   const categoriesPresent = useMemo(() => ['ALL', ...Array.from(new Set(articles.map((a) => a.category).filter(Boolean)))], [articles]);
 
@@ -7258,11 +7291,11 @@ function grnValueForBatch(batchId, grnReports, items, articlesByKey, configByKey
   return { value: Math.round(value * 100) / 100, pricedRows, unpricedRows };
 }
 
-function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onUpdateIndentBatch }) {
+function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onUpdateIndentBatch, recipes }) {
   const [view, setView] = useState('overview');
   const [openBatchId, setOpenBatchId] = useState(null);
   const configByKey = useMemo(() => { const m = {}; pricingConfig.forEach((x) => { m[x.id] = x; }); return m; }, [pricingConfig]);
-  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey), [orders, items, purchases, city, configByKey]);
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes), [orders, items, purchases, city, configByKey, recipes]);
   const articlesByKey = useMemo(() => { const m = {}; articles.forEach((a) => { m[a.key] = a; }); return m; }, [articles]);
 
   // Advance indents are a buying heads-up only — the channel fixes their real
