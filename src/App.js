@@ -6179,7 +6179,7 @@ function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, co
           </button>
         ))}
       </div>
-      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} onSaveFormat={onSaveFormat} />}
+      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} />}
       {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
       {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} orders={orders} onMapFormat={(itemId, aliasId, formatId) => onUpdateAliasById(itemId, aliasId, { barcodeFormatId: formatId })} onUpdateAliasById={onUpdateAliasById} onUpdateAlias={onUpdateAlias} onDeleteAliases={onDeleteAliases} />}
       {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
@@ -6618,7 +6618,7 @@ const LABEL_FIELD_DEFS = [
 ];
 
 function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
-  const [layout, setLayout] = useState(() => ({ ...defaultLabelLayout(format), ...(format.layout || {}) }));
+  const [layout, setLayout] = useState(() => ({ ...defaultLabelLayout(format), ...(format.layout || {}), ...(article.layoutOverride || {}) }));
   const [selected, setSelected] = useState(null);
   const dragRef = useRef(null); // { key, startX, startY, origX, origY }
   const canvasRef = useRef(null);
@@ -6672,7 +6672,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
   const adjustSize = (key, delta) => setLayout((l) => ({ ...l, [key]: { ...l[key], size: Math.max(4, Math.round(((l[key]?.size || 10) + delta) * 10) / 10) } }));
   const setPrefix = (key, prefix) => setLayout((l) => ({ ...l, [key]: { ...l[key], prefix } }));
 
-  const save = () => { onSave({ ...format, layout }); onClose(); };
+  const save = () => { onSave(layout); onClose(); };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,16,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
@@ -6681,7 +6681,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
           <p style={{ margin: 0, fontWeight: 700, fontSize: 15, color: INK }}>Edit label layout — {format.name}</p>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer' }}><X size={18} /></button>
         </div>
-        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Drag any field to reposition it. Click a field to resize it or (for Net Wt / Packed / Best Before / FSSAI) change its label text. Saving applies to every article using the <strong>{format.name}</strong> format.</p>
+        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Drag any field to reposition it. Click a field to resize it or (for Net Wt / Packed / Best Before / FSSAI) change its label text. This layout is saved for <strong>this article only</strong> — other articles using the {format.name} format keep their own design.</p>
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
           <div
             ref={canvasRef}
@@ -6746,7 +6746,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
   );
 }
 
-function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias, onSaveFormat }) {
+function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias }) {
   const [platform, setPlatform] = useState(PLATFORMS[0]);
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [date, setDate] = useState(todayLocalDate());
@@ -6778,7 +6778,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         // time — a saved alias only fills in where the channel's own file left
         // something blank (e.g. no EAN yet for a brand-new article), so it
         // never overrides fresh indent data with a possibly-stale save.
-        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: g.rawEan || g.rawCode || alias?.ean || alias?.code || '', upc: alias?.upc || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
+        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: g.rawEan || g.rawCode || alias?.ean || alias?.code || '', upc: alias?.upc || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', layoutOverride: alias?.layoutOverride || null, shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
   }, [orders, items, packingProgress, platform, date]);
@@ -6853,7 +6853,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     ]);
     const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
     const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    // No BOM here (unlike other CSV exports in this file) - BarTender's Text/CSV
+    // database driver can read it as part of the first header's name, which
+    // then fails to match that field when binding it in the label template.
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -6882,7 +6885,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     // size, since its coordinates are defined against that exact label — A4
     // sheets keep the plain stacked layout regardless.
     const renderWithLayout = (a, format, sf) => {
-      const layout = format.layout;
+      const layout = a.layoutOverride || format.layout;
       const barcodeValue = barcodeValueFor(a);
       let html = '<div class="label-abs">';
       LABEL_FIELD_DEFS.forEach((d) => {
@@ -7003,7 +7006,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
 
   const editingArticle = editingArticleKey ? articles.find((a) => a.key === editingArticleKey) : null;
   const editingFormat = editingArticle ? barcodeFormats.find((f) => f.id === editingArticle.barcodeFormatId) : null;
-  const saveFormatLayout = (updatedFormat) => onSaveFormat(updatedFormat);
+  const saveArticleLayout = (layout) => {
+    if (!editingArticle.itemId) return;
+    onUpdateAlias(editingArticle.itemId, platform, { layoutOverride: layout }, editingArticle.packSize, editingArticle.packUnit, editingArticle.rawEan || editingArticle.rawCode);
+  };
 
   return (
     <>
@@ -7170,9 +7176,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
           packingDate: formatLabelDate(date),
           expiryDate: formatLabelDate(bestBeforeFor(editingArticle)) || '___________',
           code: editingArticle.code,
+          layoutOverride: editingArticle.layoutOverride,
         }}
         companyDetails={companyDetails}
-        onSave={saveFormatLayout}
+        onSave={saveArticleLayout}
         onClose={() => setEditingArticleKey(null)}
       />
     )}
