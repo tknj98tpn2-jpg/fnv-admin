@@ -5399,7 +5399,7 @@ function parseGrnSheetRows(rows) {
     const name = cols.name === -1 ? '' : String(cells[cols.name] ?? '').trim();
     // The footer row has "Total" where the code/name belongs and no real article.
     if (!code && !name) continue;
-    if (normaliseHeader(code) === 'total' || normaliseHeader(name) === 'total') continue;
+    if (normaliseHeader(code).startsWith('total') || normaliseHeader(name).startsWith('total')) continue;
     const qty = Number(String(cells[cols.qty] ?? '').replace(/,/g, '')) || 0;
     const price = cols.price === -1 ? 0 : Number(String(cells[cols.price] ?? '').replace(/,/g, '')) || 0;
     if (qty > 0) out.push({ code, name, qty, price });
@@ -5489,7 +5489,12 @@ function parsePoSheetRows(rows) {
     const code = cols.code === -1 ? '' : String(cells[cols.code] == null ? '' : cells[cols.code]).trim();
     const name = cols.name === -1 ? '' : String(cells[cols.name] == null ? '' : cells[cols.name]).trim();
     if (!code && !name) continue;
-    if (normaliseHeader(code) === 'total' || normaliseHeader(name) === 'total') continue;
+    // A footer/summary line (e.g. "Total Quantity=", "Total:", "Grand Total")
+    // isn't a real article row — its own "total" cell typically holds the whole
+    // PO's grand total, so letting it slip through would silently double the
+    // PO value computed by summing every row's total. Checking "starts with
+    // total" (rather than requiring an exact match) catches these variants.
+    if (normaliseHeader(code).startsWith('total') || normaliseHeader(name).startsWith('total')) continue;
     const qty = num(cells[cols.qty]);
     let price = cols.price === -1 ? 0 : num(cells[cols.price]);
     const total = cols.total === -1 ? 0 : num(cells[cols.total]);
