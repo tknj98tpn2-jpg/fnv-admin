@@ -2454,6 +2454,7 @@ function ItemForm({ initial, onSave, onCancel }) {
   const [name, setName] = useState(initial?.name || '');
   const [uom, setUom] = useState(initial?.uom || 'kg');
   const [category, setCategory] = useState(initial?.category || 'VEGETABLES');
+  const [buffer, setBuffer] = useState(initial?.buffer != null ? String(initial.buffer) : '');
   const [aliases, setAliases] = useState((initial?.aliases || []).map((a) => ({ ...a })));
 
   const addAliasRow = () => setAliases((p) => [...p, { id: newAliasId(), channel: '', code: '', packSize: '', packUnit: 'kg' }]);
@@ -2468,6 +2469,7 @@ function ItemForm({ initial, onSave, onCancel }) {
       name: name.trim(),
       uom,
       category,
+      buffer: Number(buffer) || 0,
       aliases: aliases.filter((a) => a.channel.trim()).map((a) => ({ ...a, channel: a.channel.trim(), code: a.code.trim() })),
     });
   };
@@ -2499,6 +2501,20 @@ function ItemForm({ initial, onSave, onCancel }) {
               {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+        </div>
+
+        <div style={{ marginBottom: 4 }}>
+          <p style={label13}>BUFFER STOCK ({uom})</p>
+          <input
+            type="number"
+            placeholder="0"
+            value={buffer}
+            onChange={(e) => setBuffer(e.target.value)}
+            style={inputStyle}
+          />
+          <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>
+            A safety margin to always keep in hand. This item will keep showing in Purchases — with this much added to what's needed — until stock covers demand plus this buffer.
+          </p>
         </div>
 
         <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14, marginTop: 8 }}>
@@ -2676,7 +2692,7 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <Th>Item ID</Th><Th>Name</Th><Th>UOM</Th><Th>Category</Th><Th>Aliases</Th><Th />
+                <Th>Item ID</Th><Th>Name</Th><Th>UOM</Th><Th>Category</Th><Th>Buffer</Th><Th>Aliases</Th><Th />
               </tr>
             </thead>
             <tbody>
@@ -2686,6 +2702,7 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
                   <Td style={{ fontWeight: 700 }}>{it.name}</Td>
                   <Td>{it.uom}</Td>
                   <Td>{it.category}</Td>
+                  <Td>{it.buffer ? `${it.buffer} ${it.uom}` : '—'}</Td>
                   <Td>
                     {(it.aliases && it.aliases.length > 0) ? (
                       <div style={{ display: 'flex', flexWrap: 'wrap', maxWidth: 260 }}>
@@ -4258,11 +4275,15 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         const needed = neededByProduct[it.name].needed;
         const unit = neededByProduct[it.name].unit;
         const stock = stockByItem[it.name] || 0;
-        const toBuy = Math.max(0, Math.round((needed - stock) * 100) / 100);
-        return { ...it, needed, unit, stock, toBuy };
+        const buffer = Number(it.buffer) || 0;
+        // Buffer is a safety margin on top of actual demand — the item keeps
+        // showing (and the buy quantity keeps including it) until stock covers
+        // both the order and the buffer, not just the order alone.
+        const toBuy = Math.max(0, Math.round((needed + buffer - stock) * 100) / 100);
+        return { ...it, needed, unit, stock, buffer, toBuy };
       })
-      // Already sufficiently stocked — no need to buy right now.
-      .filter((it) => it.stock <= it.needed);
+      // Already sufficiently stocked (covers demand + buffer) — no need to buy right now.
+      .filter((it) => it.stock <= it.needed + it.buffer);
     if (qtySort === 'asc') result = result.slice().sort((a, b) => a.toBuy - b.toBuy);
     else if (qtySort === 'desc') result = result.slice().sort((a, b) => b.toBuy - a.toBuy);
     return result;
@@ -4315,7 +4336,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       </Panel>
     );
     const it = items.find((x) => x.id === selectedItemId);
-    const data = selectedItemData || { needed: 0, stock: 0, toBuy: 0, unit: it?.uom };
+    const data = selectedItemData || { needed: 0, stock: 0, buffer: Number(it?.buffer) || 0, toBuy: 0, unit: it?.uom };
     const vendor = vendors.find((v) => v.id === selectedVendorId);
     const mappedVendors = vendors.filter((v) => (v.itemIds || []).includes(it?.id));
     const dropdownVendors = mappedVendors.length === 0 || showAllVendorsInDropdown ? vendors : mappedVendors;
@@ -4351,6 +4372,12 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
             <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>STOCK</p>
             <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>{data.stock} {data.unit}</p>
           </div>
+          {data.buffer > 0 && (
+            <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
+              <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>BUFFER</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>{data.buffer} {data.unit}</p>
+            </div>
+          )}
           <div style={{ flex: 1, border: `1px solid ${TOMATO}`, background: '#FBEAE3', borderRadius: 8, padding: '8px 10px' }}>
             <p style={{ margin: '0 0 4px', fontSize: 10, color: TOMATO, fontWeight: 700 }}>TO BUY</p>
             <p style={{ margin: 0, fontSize: 14, fontWeight: 800, color: TOMATO }}>{data.toBuy} {data.unit}</p>
