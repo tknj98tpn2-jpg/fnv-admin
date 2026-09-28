@@ -3989,7 +3989,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
               <thead>
-                <tr><Th /><Th>Article (from file)</Th><Th>Code</Th><Th>Qty</Th><Th>UOM</Th><Th>Type</Th><Th>Map to item</Th><Th>Pack size</Th></tr>
+                <tr><Th /><Th>Article (from file)</Th><Th>{EAN_ONLY_PLATFORMS.has(pendingIndent.platform) ? 'EAN' : 'Code'}</Th><Th>Qty</Th><Th>UOM</Th><Th>Type</Th><Th>Map to item</Th><Th>Pack size</Th></tr>
               </thead>
               <tbody>
                 {pendingIndent.rows.map((r) => {
@@ -4002,7 +4002,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
                         <input type="checkbox" checked={selectedRowKeys.has(r.key)} onChange={() => toggleRowSelected(r.key)} />
                       </Td>
                       <Td>{r.rawName}</Td>
-                      <Td>{r.rawCode || <span style={{ color: MUTED }}>—</span>}</Td>
+                      <Td>{(EAN_ONLY_PLATFORMS.has(pendingIndent.platform) ? r.rawEan : r.rawCode) || <span style={{ color: MUTED }}>—</span>}</Td>
                       <Td>{r.qty}</Td>
                       <Td>{r.unit || <span style={{ color: MUTED }}>—</span>}</Td>
                       <Td>{r.rawCategory || <span style={{ color: MUTED }}>—</span>}</Td>
