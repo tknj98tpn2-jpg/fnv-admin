@@ -94,7 +94,11 @@ const STATUS_COLORS = {
   neutral: { bg: '#F1EFE6', fg: MUTED },
 };
 
-const PLATFORMS = ['Blinkit', 'Flipkart'];
+const PLATFORMS = ['Blinkit', 'Flipkart', 'Zepto'];
+// Channels whose own item code is not a reliable identifier (it can be
+// reissued on a relisting, or — for Zepto — is an internal UUID rather than a
+// stable article code) — matching for these channels relies on EAN only.
+const EAN_ONLY_PLATFORMS = new Set(['Flipkart', 'Zepto']);
 
 // ── Barcode rendering — EAN-13 for numeric codes (Flipkart's EANs), Code 128
 // Set B for anything else (Blinkit's alphanumeric SKUs like "BLK-ONI-600").
@@ -775,12 +779,12 @@ export default function AdminPanel() {
     // code can be reissued (e.g. a relisting) even though the physical
     // product — and its EAN — hasn't changed. Checking EAN first means a
     // changed FSN updates the existing alias instead of creating a duplicate.
-    // Flipkart's code is never used to identify/dedupe an alias — per
-    // instruction, only EAN drives Flipkart matching; the code is still saved
-    // on the alias purely as a reference field, never compared against.
+    // For EAN_ONLY_PLATFORMS (Flipkart, Zepto), the code is never used to
+    // identify/dedupe an alias — only EAN drives matching there; the code is
+    // still saved on the alias purely as a reference field, never compared against.
     const eanLower = ean ? String(ean).toLowerCase() : '';
     const rawCodeLower = code ? code.toLowerCase() : '';
-    const codeLower = channel === 'Flipkart' ? '' : rawCodeLower;
+    const codeLower = EAN_ONLY_PLATFORMS.has(channel) ? '' : rawCodeLower;
     const existing = (it.aliases || []).find((a) => a.channel === channel && (
       (eanLower && a.ean && String(a.ean).toLowerCase() === eanLower) ||
       (codeLower && a.code && a.code.toLowerCase() === codeLower)
@@ -2448,8 +2452,12 @@ function AliasChip({ alias }) {
 function AliasRow({ alias, onChange, onRemove }) {
   return (
     <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-      <input placeholder="Channel (e.g. Blinkit)" value={alias.channel} onChange={(e) => onChange({ ...alias, channel: e.target.value })} style={{ flex: 1.2, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
-      <input placeholder="Item code" value={alias.code} onChange={(e) => onChange({ ...alias, code: e.target.value })} style={{ flex: 1.4, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
+      <select value={alias.channel} onChange={(e) => onChange({ ...alias, channel: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
+        <option value="">Channel</option>
+        {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+      <input placeholder="Item code" value={alias.code} onChange={(e) => onChange({ ...alias, code: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
+      <input placeholder="EAN" value={alias.ean || ''} onChange={(e) => onChange({ ...alias, ean: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
       <input placeholder="Pack size" type="number" value={alias.packSize} onChange={(e) => onChange({ ...alias, packSize: e.target.value })} style={{ width: 66, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }} />
       <select value={alias.packUnit || 'kg'} onChange={(e) => onChange({ ...alias, packUnit: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
         <option value="kg">kg</option>
@@ -2539,8 +2547,9 @@ function ItemForm({ initial, onSave, onCancel }) {
           </p>
           {aliases.length > 0 && (
             <div style={{ display: 'flex', gap: 6, marginBottom: 4, fontSize: 10, color: MUTED, fontWeight: 700 }}>
-              <div style={{ flex: 1.2 }}>CHANNEL</div>
-              <div style={{ flex: 1.4 }}>ITEM CODE / NAME</div>
+              <div style={{ flex: 1 }}>CHANNEL</div>
+              <div style={{ flex: 1 }}>ITEM CODE / NAME</div>
+              <div style={{ flex: 1 }}>EAN</div>
               <div style={{ width: 66 }}>PACK SIZE</div>
               <div style={{ width: 62 }}>UNIT</div>
               <div style={{ width: 19 }} />
@@ -3290,8 +3299,11 @@ const KNOWN_INDENT_HEADERS = new Set([
   'fsn', 'title', 'category', 'type', 'umo', 'uom', 'unit',
   'mrp', 'price', 't100t500fsn', 'eancode', 'shelflifedays', 'shelflife',
   'temperaturezone', 'itemcode', 'articlecode', 'productcode', 'sku', 'code',
-  'productdescription', 'description', 'article', 'product', 'item',
-  'indent', 'qty', 'quantity', 'orderedqty',
+  'productdescription', 'description', 'article', 'product', 'item', 'productname',
+  'indent', 'qty', 'quantity', 'orderedqty', 'finalindent',
+  // Zepto's indent format: one row per (article, dark store), plus a couple of
+  // internal helper columns that aren't store quantities.
+  'storename', 'storeid', 'subcategory', 'vendername', 'city', 'cc', 'bb', 'rr',
 ]);
 
 // When there's no single qty column (e.g. Flipkart lists one column per dark
@@ -3312,18 +3324,21 @@ function sumUnknownNumericColumns(rowObj, headers) {
 }
 
 function parseIndentRows(json, platform) {
-  return json
+  const parsed = json
     .map((r, idx) => {
       const headers = Object.keys(r);
-      const rawName = String(pickField(r, ['title', 'article', 'product', 'item', 'description']) || '').trim();
+      const rawName = String(pickField(r, ['productname', 'title', 'article', 'product', 'item', 'description']) || '').trim();
       // The channel's own SKU/FSN code — kept as a fallback matching key and
       // for tying together the PO/GRN chain, which still reference it.
       const rawCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
       // The EAN is the article's permanent retail barcode — the primary key for
       // matching an indent row to an item, since a channel's own FSN/SKU code can
-      // be reissued on a relisting even when the physical product hasn't changed.
+      // be reissued on a relisting (Flipkart) or is an internal UUID rather than
+      // a real article code (Zepto), even when the physical product hasn't changed.
       const rawEan = String(pickField(r, ['eancode', 'ean']) || '').trim();
-      let qty = Number(pickField(r, ['indent', 'qty', 'quantity', 'orderedqty']) || 0);
+      // "Final Indent" (Zepto) always wins over a plain "Indent" column when a
+      // sheet has both — checked before the generic 'indent' keyword.
+      let qty = Number(pickField(r, ['finalindent', 'indent', 'qty', 'quantity', 'orderedqty']) || 0);
       let storeQtys = null;
       if (!qty) {
         const st = sumUnknownNumericColumns(r, headers);
@@ -3331,9 +3346,36 @@ function parseIndentRows(json, platform) {
       }
       const unit = String(pickField(r, ['umo', 'uom', 'unit']) || '').trim();
       const rawCategory = String(pickField(r, ['type', 'category']) || '').trim();
-      return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawEan, qty, unit, rawCategory, storeQtys };
+      // Zepto lists one row per (article, dark store) rather than one row per
+      // article with a column per store — the store itself is a named column.
+      const rawStore = String(pickField(r, ['storename', 'store']) || '').trim();
+      return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawEan, qty, unit, rawCategory, storeQtys, rawStore };
     })
     .filter((r) => r.rawName && r.qty > 0);
+
+  // Fold "one row per (article, store)" back into "one row per article" with a
+  // per-store quantity map — matching the shape Flipkart's per-store-column
+  // format already produces — so the mapping table shows one line per article
+  // instead of one per store, and every store's demand still becomes its own
+  // order downstream.
+  const hasStoreRows = parsed.some((r) => r.rawStore && !r.storeQtys);
+  if (!hasStoreRows) return parsed;
+  const groups = {};
+  const order = [];
+  parsed.forEach((r) => {
+    if (!r.rawStore || r.storeQtys) { order.push(r); return; }
+    // Group by EAN when known (the stable identity); otherwise by name+code.
+    const groupKey = r.rawEan ? `ean:${r.rawEan.toLowerCase()}` : `name:${r.rawName.toLowerCase()}__${r.rawCode.toLowerCase()}`;
+    if (!groups[groupKey]) {
+      const merged = { ...r, storeQtys: {} };
+      groups[groupKey] = merged;
+      order.push(merged);
+    }
+    const g = groups[groupKey];
+    g.storeQtys[r.rawStore] = (g.storeQtys[r.rawStore] || 0) + r.qty;
+    g.qty = Object.values(g.storeQtys).reduce((s, v) => s + v, 0);
+  });
+  return order;
 }
 
 function ReleaseBatchRow({ batch: b, orders, onToggleReleaseBatch, onDeleteBatch }) {
@@ -3623,11 +3665,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           const rawNameStripped = stripQtyUom(r.rawName).toLowerCase();
           const rawEanLower = r.rawEan ? r.rawEan.toLowerCase() : '';
           // Flipkart reissues its own FSN/SKU "code" on a relisting even when the
-          // physical product hasn't changed, so — per instruction — Flipkart's code
-          // is never used to auto-match an indent row; only the EAN (the item's
-          // permanent retail barcode) and, failing that, the article name are used.
+          // physical product hasn't changed, and Zepto's "code" is an internal
+          // UUID, not a real article code — so for both, the code is never used
+          // to auto-match an indent row; only the EAN (the item's permanent
+          // retail barcode) and, failing that, the article name are used.
           // Blinkit is unaffected and still matches on its code as before.
-          const useCodeMatch = indentPlatform !== 'Flipkart';
+          const useCodeMatch = !EAN_ONLY_PLATFORMS.has(indentPlatform);
           const match = items.find(
             (it) =>
               (rawEanLower && (it.aliases || []).some((a) => a.channel === indentPlatform && a.ean && String(a.ean).toLowerCase() === rawEanLower)) ||
@@ -3698,9 +3741,10 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     const item = getMappedItem(r.mappedItemId);
     if (!item) return null;
     const byEan = r.rawEan && (item.aliases || []).find((a) => a.channel === pendingIndent?.platform && a.ean && a.ean.toLowerCase() === r.rawEan.toLowerCase());
-    // Flipkart's code isn't a reliable article identifier (see indent matching
-    // above), so it's never used to pick which pack-size alias a row belongs to.
-    const byCode = pendingIndent?.platform !== 'Flipkart' && (item.aliases || []).find((a) => a.channel === pendingIndent?.platform && a.code && r.rawCode && a.code.toLowerCase() === r.rawCode.toLowerCase());
+    // For EAN_ONLY_PLATFORMS, the code isn't a reliable article identifier (see
+    // indent matching above), so it's never used to pick which pack-size alias
+    // a row belongs to.
+    const byCode = !EAN_ONLY_PLATFORMS.has(pendingIndent?.platform) && (item.aliases || []).find((a) => a.channel === pendingIndent?.platform && a.code && r.rawCode && a.code.toLowerCase() === r.rawCode.toLowerCase());
     return byEan || byCode || (item.aliases || []).find((a) => a.channel === pendingIndent?.platform) || null;
   };
   const getPackSize = (r) => getRowAlias(r)?.packSize || '';
@@ -6740,6 +6784,10 @@ const LABEL_FIELD_DEFS = [
 
 function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
   const [layout, setLayout] = useState(() => ({ ...defaultLabelLayout(format), ...(format.layout || {}), ...(article.layoutOverride || {}) }));
+  // Custom fields added from THIS screen belong to this one article's alias
+  // only (saved inside its layoutOverride, never touching the shared format),
+  // unlike a format's own customFields which every article on that format sees.
+  const [ownCustomFields, setOwnCustomFields] = useState(() => article.layoutOverride?.ownCustomFields || []);
   const [selected, setSelected] = useState(null);
   const dragRef = useRef(null); // { key, startX, startY, origX, origY }
   const canvasRef = useRef(null);
@@ -6759,7 +6807,8 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
       return true;
     })
     .map((d) => d.key)
-    .concat((format.customFields || []).map((cf) => `custom_${cf.id}`));
+    .concat((format.customFields || []).map((cf) => `custom_${cf.id}`))
+    .concat(ownCustomFields.map((cf) => `own_${cf.id}`));
 
   const contentFor = (key) => {
     if (key === 'itemName') return article.itemName;
@@ -6770,10 +6819,31 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
     if (key === 'companyName') return companyDetails.name || '(company name)';
     if (key === 'companyAddress') return companyDetails.address || '(address)';
     if (key === 'fssai') return companyDetails.fssai || '(FSSAI number)';
+    if (key.startsWith('own_')) {
+      const cf = ownCustomFields.find((c) => `own_${c.id}` === key);
+      if (!cf) return '';
+      return cf.label ? `${cf.label}: ${cf.value}` : (cf.value || '(value)');
+    }
     const cf = (format.customFields || []).find((c) => `custom_${c.id}` === key);
     return cf ? cf.value : '';
   };
-  const defForKey = (key) => LABEL_FIELD_DEFS.find((d) => d.key === key) || { kind: 'text', hasPrefix: true };
+  // Own fields carry their label as part of the content itself (see contentFor)
+  // instead of the generic prefix box, so the Custom Fields list below is the
+  // one place their label/value is edited.
+  const defForKey = (key) => (key.startsWith('own_') ? { kind: 'text', hasPrefix: false } : LABEL_FIELD_DEFS.find((d) => d.key === key) || { kind: 'text', hasPrefix: true });
+
+  const addOwnField = () => {
+    const id = `O${Date.now().toString(36).slice(-5)}${Math.floor(Math.random() * 90 + 10)}`;
+    setOwnCustomFields((cfs) => [...cfs, { id, label: '', value: '' }]);
+    setLayout((l) => ({ ...l, [`own_${id}`]: { x: 25, y: 46, size: 7 } }));
+    setSelected(`own_${id}`);
+  };
+  const updateOwnField = (id, patch) => setOwnCustomFields((cfs) => cfs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const removeOwnField = (id) => {
+    setOwnCustomFields((cfs) => cfs.filter((c) => c.id !== id));
+    setLayout((l) => { const n = { ...l }; delete n[`own_${id}`]; return n; });
+    setSelected((s) => (s === `own_${id}` ? null : s));
+  };
 
   const startDrag = (e, key) => {
     e.preventDefault();
@@ -6793,7 +6863,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
   const adjustSize = (key, delta) => setLayout((l) => ({ ...l, [key]: { ...l[key], size: Math.max(4, Math.round(((l[key]?.size || 10) + delta) * 10) / 10) } }));
   const setPrefix = (key, prefix) => setLayout((l) => ({ ...l, [key]: { ...l[key], prefix } }));
 
-  const save = () => { onSave(layout); onClose(); };
+  const save = () => { onSave(layout, ownCustomFields); onClose(); };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,16,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
@@ -6839,7 +6909,9 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
               <p style={{ fontSize: 12, color: MUTED }}>Click a field on the label to edit it.</p>
             ) : (
               <div>
-                <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>{selected}</p>
+                <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>
+                  {selected.startsWith('own_') ? (ownCustomFields.find((c) => `own_${c.id}` === selected)?.label || 'Custom field') : selected}
+                </p>
                 <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{defForKey(selected).kind === 'graphic' ? 'SIZE (mm)' : 'FONT SIZE (px)'}</p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <button onClick={() => adjustSize(selected, -1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>−</button>
@@ -6856,6 +6928,23 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
             )}
           </div>
         </div>
+
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${LINE}` }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CUSTOM FIELDS — THIS ARTICLE ONLY</p>
+          <p style={{ margin: '0 0 10px', fontSize: 11.5, color: MUTED }}>A field added here prints only on {article.itemName || 'this article'}'s label. Other articles on the {format.name} format are never affected.</p>
+          {ownCustomFields.map((cf) => (
+            <div key={cf.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <input placeholder="Label (e.g. Batch No.)" value={cf.label} onChange={(e) => updateOwnField(cf.id, { label: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+              <input placeholder="Value" value={cf.value} onChange={(e) => updateOwnField(cf.id, { value: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+              <button onClick={() => setSelected(`own_${cf.id}`)} title="Position this field on the label" style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 6, color: MUTED, cursor: 'pointer', flexShrink: 0, padding: '0 10px', fontSize: 11, fontWeight: 700 }}>Position</button>
+              <button onClick={() => removeOwnField(cf.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', flexShrink: 0 }}><Trash2 size={15} /></button>
+            </div>
+          ))}
+          <button onClick={addOwnField} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: `1px dashed ${LINE}`, borderRadius: RADIUS.md, padding: '8px 12px', fontSize: 12, fontWeight: 700, color: LEAF, cursor: 'pointer' }}>
+            <Plus size={13} /> Add custom field
+          </button>
+        </div>
+
         <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
           <button onClick={save} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             <CheckCircle2 size={15} /> Save layout
@@ -7033,6 +7122,14 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         if (!entry) return;
         html += `<div style="position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap; font-size:${entry.size}px; font-weight:600; font-family:Arial,sans-serif; color:#000;">${entry.prefix ? `${entry.prefix} ` : ''}${cf.value}</div>`;
       });
+      // Own custom fields (added from the layout editor for this article alone)
+      // live in the alias's own layoutOverride, never on the shared format.
+      (a.layoutOverride?.ownCustomFields || []).forEach((cf) => {
+        const entry = layout[`own_${cf.id}`];
+        if (!entry) return;
+        const content = cf.label ? `${cf.label}: ${cf.value}` : (cf.value || '');
+        html += `<div style="position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap; font-size:${entry.size}px; font-weight:600; font-family:Arial,sans-serif; color:#000;">${content}</div>`;
+      });
       html += '</div>';
       return html;
     };
@@ -7064,6 +7161,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
         if (companyDetails.fssai) oneLabel += `<div class="lbl-line lbl-fssai">FSSAI: ${companyDetails.fssai}</div>`;
       }
       (format?.customFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label}: ${cf.value}</div>`; });
+      (a.layoutOverride?.ownCustomFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label ? `${cf.label}: ` : ''}${cf.value}</div>`; });
       if (sf.printBarcode !== false) {
         oneLabel += barcodeSVGMarkup(barcodeValueFor(a), barcodeW, barcodeH, sf.showBarcodeNumber !== false);
       } else if (sf.showBarcodeNumber !== false && barcodeValueFor(a)) {
@@ -7129,9 +7227,9 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
 
   const editingArticle = editingArticleKey ? articles.find((a) => a.key === editingArticleKey) : null;
   const editingFormat = editingArticle ? barcodeFormats.find((f) => f.id === editingArticle.barcodeFormatId) : null;
-  const saveArticleLayout = (layout) => {
+  const saveArticleLayout = (layout, ownCustomFields) => {
     if (!editingArticle.itemId) return;
-    onUpdateAlias(editingArticle.itemId, platform, { layoutOverride: layout }, editingArticle.packSize, editingArticle.packUnit, editingArticle.rawEan || editingArticle.rawCode);
+    onUpdateAlias(editingArticle.itemId, platform, { layoutOverride: { ...layout, ownCustomFields: ownCustomFields || [] } }, editingArticle.packSize, editingArticle.packUnit, editingArticle.rawEan || editingArticle.rawCode);
   };
 
   return (
