@@ -4188,78 +4188,236 @@ function openHtmlInPrintWindow(html) {
   w.onload = () => { w.focus(); w.print(); };
 }
 
-// Builds and opens the printable tax invoice for a PO-generated invoice
-// record (see parseFlipkartPoHeader / parseZeptoPoText). The channel's own PO
-// terms require its number on the invoice, so it's always shown, right next
-// to the invoice number the business assigned by hand.
-function printInvoice(inv) {
-  const dateStr = (d) => { if (!d) return '-'; try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); } catch (e) { return d; } };
-  const rows = inv.rows || [];
+const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const money2 = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Printed invoices list articles A→Z by name, regardless of the order the PO
+// happened to list them in — a copy sorted alphabetically instead of a copy
+// (localeCompare so it sorts the way a person reading the names would).
+const sortRowsByName = (rows) => [...(rows || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+
+// Zepto's buyer block (as captured off the PO/invoice) reads as one run of
+// text: "<legal name> <DC-CODE style name> (<code>) <street address>" — e.g.
+// "Hridya 1 Trade Enterprise Private Limited JBP-Janki Nagar (JBP001S) J/53,
+// ...". Their own invoice shows the name and the delivery-centre name+code
+// together on the "To," line, and the centre name alone (no code) in its own
+// "Delivery Center" row — both are pulled back out of that one string here
+// rather than asked for separately, since the source data only has the one.
+function splitZeptoBuyerBlock(block) {
+  const m = String(block || '').match(/^(.*?)\s*([A-Za-z]{2,5}-[^()]+?)\s*\(([A-Za-z0-9]+)\)\s*(.*)$/);
+  if (!m) return { buyerName: block || '', deliveryCenter: '', deliveryCenterFull: '', street: '' };
+  return { buyerName: m[1].trim(), deliveryCenter: m[2].trim(), deliveryCenterFull: `${m[2].trim()} (${m[3].trim()})`, street: m[4].trim() };
+}
+
+// Matches the plain bordered "INVOICE" layout the business's Zepto-facing
+// vendor (e.g. "Axis solutions") issues — see the sample the business shared.
+function zeptoInvoiceHtml(inv) {
+  const rows = sortRowsByName(inv.rows);
+  const { buyerName, deliveryCenter, deliveryCenterFull } = splitZeptoBuyerBlock(inv.buyerAddress);
+  const rowsHtml = rows.map((r, i) => `
+    <tr>
+      <td style="text-align:center;">${i + 1}</td>
+      <td style="text-align:center;">${esc(r.code)}</td>
+      <td>${esc(r.name)}</td>
+      <td style="text-align:center;">${r.qty}</td>
+      <td style="text-align:center;">${Number(r.price || 0).toFixed(2)}</td>
+      <td style="text-align:center;">${Number(r.total || 0).toFixed(2)}</td>
+    </tr>
+  `).join('');
+  return `<!DOCTYPE html>
+    <html>
+      <head>
+        <title>Invoice ${esc(inv.invoiceNumber)}</title>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: Georgia, 'Times New Roman', serif; padding: 20px; color: #000; }
+          table { width: 100%; border-collapse: collapse; }
+          td, th { border: 1px solid #000; padding: 4px 8px; font-size: 12.5px; }
+          .title { text-align: center; font-weight: 700; font-size: 15px; padding: 6px; }
+          .sub { text-align: center; font-weight: 700; padding: 2px; font-size: 12px; }
+          .label { font-weight: 700; width: 90px; }
+          .center { text-align: center; font-weight: 700; }
+          th { text-align: center; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <table>
+          <tr><td colspan="6" class="title">INVOICE</td></tr>
+          <tr><td colspan="6" class="sub">${esc(inv.vendorName || '')}</td></tr>
+          <tr><td colspan="6" style="text-align:center; font-size:11px;">${[inv.vendorEmail ? 'Email: ' + inv.vendorEmail : '', inv.vendorPhone ? 'Mob. No.: ' + inv.vendorPhone : ''].filter(Boolean).join('&nbsp;&nbsp;')}</td></tr>
+          <tr>
+            <td class="label" colspan="2">Invoice No.:</td>
+            <td colspan="2" style="text-align:center; font-weight:700;">${esc(inv.invoiceNumber)}</td>
+            <td class="label">P.O. No</td>
+            <td style="font-weight:700;">${esc(inv.poNumber)}</td>
+          </tr>
+          <tr>
+            <td class="label" colspan="2">Invoice Date:</td>
+            <td colspan="2" style="text-align:center; font-weight:700;">${esc(inv.invoiceDate)}</td>
+            <td class="label">P.O Date</td>
+            <td style="font-weight:700;">${esc(inv.poDate)}</td>
+          </tr>
+          ${deliveryCenter ? `<tr><td colspan="4"></td><td class="label">Delivery Center</td><td style="font-weight:700;">${esc(deliveryCenter)}</td></tr>` : ''}
+          <tr><td colspan="6" class="center">Detail of Buyer</td></tr>
+          <tr><td class="label">To,</td><td colspan="5" style="font-weight:700;">${esc(buyerName)} ${esc(deliveryCenterFull)}</td></tr>
+          <tr>
+            <th>Sr.</th><th>Material Code</th><th>Item Description</th><th>Quantity</th><th>Unit Rate</th><th>Total(INR)</th>
+          </tr>
+          ${rowsHtml}
+          <tr><td></td><td></td><td></td><td></td><td class="center">Total</td><td class="center">${money2(inv.amount)}</td></tr>
+        </table>
+      </body>
+    </html>`;
+}
+
+// Matches Flipkart's own "TAX INVOICE" layout (Vendor/Ship-To/Bill-To panels,
+// then a line-item table with EAN/HSN/FSN and GST columns) — see the sample
+// the business shared (RMP10200132).
+function flipkartInvoiceHtml(inv) {
+  const rows = sortRowsByName(inv.rows);
+  const qtyTotal = rows.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+  const rowsHtml = rows.map((r, i) => `
+    <tr>
+      <td style="text-align:center;">${i + 1}</td>
+      <td>${esc(r.name)}</td>
+      <td>${esc(r.ean)}</td>
+      <td>${esc(r.hsn)}</td>
+      <td>${esc(r.code)}</td>
+      <td style="text-align:center;">${esc(r.uom) || 'pcs'}</td>
+      <td style="text-align:center;">${r.qty}</td>
+      <td style="text-align:center;">${r.qty}</td>
+      <td style="text-align:center;">0.00 %</td>
+      <td style="text-align:center;">0.00 %</td>
+      <td style="text-align:right;">${Number(r.price || 0).toFixed(2)} (INR)</td>
+      <td style="text-align:right;">${Number(r.total || 0).toFixed(2)} (INR)</td>
+      <td style="text-align:right;">${Number(r.total || 0).toFixed(2)} (INR)</td>
+    </tr>
+  `).join('');
+  const partyBlock = (title, name, address, gstin, extra) => `
+    <td style="width:33.33%; vertical-align:top;">
+      <div class="panel-h">${title}</div>
+      <div class="panel-b">
+        ${name ? `<div><b>${esc(name)}</b></div>` : ''}
+        ${address ? `<div>${esc(address)}</div>` : ''}
+        ${extra || ''}
+        ${gstin ? `<div>GSTIN: ${esc(gstin)}</div>` : ''}
+      </div>
+    </td>`;
+  return `<!DOCTYPE html>
+    <html>
+      <head>
+        <title>Invoice ${esc(inv.invoiceNumber)}</title>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: Arial, sans-serif; padding: 16px; color: #000; font-size: 11px; }
+          table.frame { width: 100%; border-collapse: collapse; }
+          table.frame > tbody > tr > td { border: 1px solid #999; padding: 4px 8px; vertical-align: top; }
+          .banner { background: #1F3864; color: #fff; text-align: center; font-weight: 700; font-size: 15px; padding: 8px; }
+          .meta-label { font-weight: 700; width: 100px; background: #F2F2F2; }
+          .panel-h { background: #1F3864; color: #fff; font-weight: 700; padding: 4px 6px; margin: -1px -1px 4px; }
+          .panel-b { line-height: 1.4; }
+          table.items { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          table.items th, table.items td { border: 1px solid #999; padding: 4px 6px; font-size: 10.5px; }
+          table.items th { background: #F2F2F2; text-align: center; }
+          .total-row td { font-weight: 700; background: #F2F2F2; text-align: center; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <table class="frame">
+          <tr><td colspan="2" class="banner">TAX INVOICE</td></tr>
+          <tr><td class="meta-label">Invoice No</td><td>${esc(inv.invoiceNumber)}</td></tr>
+          <tr><td class="meta-label">Invoice Date</td><td>${esc(inv.invoiceDate)}</td></tr>
+          <tr><td class="meta-label">PO No</td><td>${esc(inv.poNumber)}</td></tr>
+          <tr><td class="meta-label">PO Date</td><td>${esc(inv.poDate)}</td></tr>
+        </table>
+        <table class="frame" style="margin-top:-1px;">
+          <tr>
+            ${partyBlock('VENDOR DETAILS', inv.vendorName, inv.vendorAddress, inv.vendorGstin, `${inv.vendorEmail ? `<div>Email: ${esc(inv.vendorEmail)}</div>` : ''}${inv.vendorPhone ? `<div>Phone: ${esc(inv.vendorPhone)}</div>` : ''}`)}
+            ${partyBlock('SHIP TO', `Company Name : ${inv.buyerName || ''}`, inv.buyerAddress, inv.buyerGstin)}
+            ${partyBlock('BILL TO', `Company Name : ${inv.buyerName || ''}`, inv.buyerAddress, inv.buyerGstin)}
+          </tr>
+        </table>
+        <table class="items">
+          <thead>
+            <tr>
+              <th>S.No</th><th>Description</th><th>EAN</th><th>HSN</th><th>FSN</th><th>UOM</th><th>PO Qty</th><th>Dispatch Qty</th><th>SGST %</th><th>CGST %</th><th>Unit Price</th><th>Taxable</th><th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+            <tr class="total-row">
+              <td colspan="6">TOTAL</td><td>${qtyTotal}</td><td>${qtyTotal}</td><td colspan="2"></td><td>TOTAL</td><td>${money2(inv.amount)} (INR)</td><td>${money2(inv.amount)} (INR)</td>
+            </tr>
+          </tbody>
+        </table>
+      </body>
+    </html>`;
+}
+
+// Generic fallback — used for a manual (non-PO) invoice, or any channel
+// without a matching template, where there's no channel-specific layout to
+// copy and no itemised rows to lay out in one anyway.
+function genericInvoiceHtml(inv) {
+  const rows = sortRowsByName(inv.rows);
   const rowsHtml = rows.map((r, i) => `
     <tr>
       <td>${i + 1}</td>
-      <td>${r.name || '-'}</td>
+      <td>${esc(r.name) || '-'}</td>
       <td style="text-align:right;">${r.qty}</td>
       <td style="text-align:right;">${Number(r.price || 0).toFixed(2)}</td>
       <td style="text-align:right;">${Number(r.total || 0).toFixed(2)}</td>
     </tr>
   `).join('');
-  const html = `<!DOCTYPE html>
+  return `<!DOCTYPE html>
     <html>
       <head>
-        <title>Invoice ${inv.invoiceNumber || ''}</title>
+        <title>Invoice ${esc(inv.invoiceNumber)}</title>
         <meta charset="utf-8" />
         <style>
           body { font-family: -apple-system, Arial, sans-serif; padding: 28px; color: #20241E; }
           h1 { font-size: 20px; margin: 0 0 2px; }
           p.sub { color: #6b7a63; font-size: 12px; margin: 0 0 20px; }
-          .row { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 18px; flex-wrap: wrap; }
-          .block { flex: 1; min-width: 220px; }
-          .block h3 { font-size: 11px; text-transform: uppercase; color: #6b7a63; margin: 0 0 4px; }
-          .block p { font-size: 13px; margin: 0 0 2px; white-space: pre-line; }
           .meta { border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; font-size: 12px; margin-bottom: 18px; }
           .meta b { color: #20241E; }
           table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
           th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #ddd; font-size: 12.5px; }
           th { background: #F6F3EA; font-size: 11px; text-transform: uppercase; color: #6b7a63; }
           .total-row td { border-top: 2px solid #20241E; border-bottom: none; font-weight: 800; font-size: 14px; }
-          .note { font-size: 11px; color: #6b7a63; margin-top: 18px; }
           @media print { body { padding: 0; } }
         </style>
       </head>
       <body>
         <h1>Tax Invoice</h1>
-        <p class="sub">${inv.platform || ''}</p>
-        <div class="row">
-          <div class="block">
-            <h3>From</h3>
-            <p><b>${inv.vendorName || '-'}</b></p>
-            <p>${inv.vendorAddress || ''}</p>
-            <p>${inv.vendorGstin ? 'GSTIN: ' + inv.vendorGstin : ''}</p>
-          </div>
-          <div class="block">
-            <h3>Bill to</h3>
-            <p><b>${inv.buyerName || ''}</b></p>
-            <p>${inv.buyerAddress || ''}</p>
-            <p>${inv.buyerGstin ? 'GSTIN: ' + inv.buyerGstin : ''}</p>
-          </div>
-        </div>
+        <p class="sub">${esc(inv.platform || '')}</p>
         <div class="meta">
-          <span><b>Invoice #:</b> ${inv.invoiceNumber || '-'}</span> &nbsp;&nbsp;
-          <span><b>Invoice date:</b> ${dateStr(inv.invoiceDate)}</span> &nbsp;&nbsp;
-          <span><b>PO #:</b> ${inv.poNumber || '-'}</span> &nbsp;&nbsp;
-          <span><b>PO date:</b> ${inv.poDate || '-'}</span>
+          <span><b>Invoice #:</b> ${esc(inv.invoiceNumber) || '-'}</span> &nbsp;&nbsp;
+          <span><b>Invoice date:</b> ${esc(inv.invoiceDate) || '-'}</span> &nbsp;&nbsp;
+          <span><b>PO #:</b> ${esc(inv.poNumber) || '-'}</span>
         </div>
         <table>
           <thead><tr><th>Sr</th><th>Article</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Rate (₹)</th><th style="text-align:right;">Amount (₹)</th></tr></thead>
           <tbody>
             ${rowsHtml}
-            <tr class="total-row"><td colspan="4" style="text-align:right;">Grand Total</td><td style="text-align:right;">₹${Number(inv.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+            <tr class="total-row"><td colspan="4" style="text-align:right;">Grand Total</td><td style="text-align:right;">₹${money2(inv.amount)}</td></tr>
           </tbody>
         </table>
-        <p class="note">PO number is quoted above as required. Generated from the uploaded purchase order — please verify before sending.</p>
       </body>
     </html>`;
+}
+
+// Builds and opens the printable tax invoice for a PO-generated invoice
+// record (see parseFlipkartPoHeader / parseZeptoPoText). The channel's own PO
+// terms require its number on the invoice, so it's always shown. Each
+// channel gets the layout its own invoice actually uses — Zepto's plain
+// bordered "INVOICE" table or Flipkart's "TAX INVOICE" panels — rather than
+// one generic template, since that's what the business asked to match.
+function printInvoice(inv) {
+  const hasRows = (inv.rows || []).length > 0;
+  let html;
+  if (hasRows && inv.platform === 'Zepto') html = zeptoInvoiceHtml(inv);
+  else if (hasRows && inv.platform === 'Flipkart') html = flipkartInvoiceHtml(inv);
+  else html = genericInvoiceHtml(inv);
   openHtmlInPrintWindow(html);
 }
 
@@ -5637,6 +5795,13 @@ const PO_NAME_KEYS = ['productname', 'productdetails', 'productdescription', 'it
 const PO_QTY_KEYS = ['qty', 'quantity', 'orderedqty', 'poquantity'];
 const PO_PRICE_KEYS = ['priceperunit', 'perunitprice', 'unitprice', 'landingrate', 'rate', 'price'];
 const PO_TOTAL_KEYS = ['totalamount', 'linetotal', 'total', 'amount', 'value'];
+// Only needed for printing a tax invoice that matches the channel's own
+// layout (EAN/HSN/UOM columns) — the margin-comparison feature that also
+// calls parsePoSheetRows doesn't use these, so they're just extra, optional
+// fields tacked onto each row rather than a separate parser to maintain.
+const PO_EAN_KEYS = ['ean'];
+const PO_HSN_KEYS = ['hsnsaccode', 'hsncode', 'hsn'];
+const PO_UOM_KEYS = ['uom'];
 
 function parsePoSheetRows(rows) {
   let headerIdx = -1;
@@ -5658,16 +5823,20 @@ function parsePoSheetRows(rows) {
       // so the two never collide onto the same column.
       const nameIdx = findColumnIndex(merged.map((v, idx) => (idx === idIdx ? '' : v)), PO_NAME_KEYS);
       const totalIdx = findColumnIndex(merged, PO_TOTAL_KEYS);
+      const eanIdx = findColumnIndex(merged, PO_EAN_KEYS);
+      const hsnIdx = findColumnIndex(merged, PO_HSN_KEYS);
+      const uomIdx = findColumnIndex(merged, PO_UOM_KEYS);
       if (qtyIdx !== -1 && (priceIdx !== -1 || totalIdx !== -1) && (idIdx !== -1 || nameIdx !== -1)) {
         headerIdx = i;
         headerSpan = span;
-        cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx };
+        cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx, ean: eanIdx, hsn: hsnIdx, uom: uomIdx };
         break;
       }
     }
   }
   if (headerIdx === -1) return [];
   const num = (v) => Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, '')) || 0;
+  const cell = (cells, idx) => (idx === -1 || idx == null ? '' : String(cells[idx] == null ? '' : cells[idx]).trim());
   const out = [];
   for (let i = headerIdx + headerSpan; i < rows.length; i += 1) {
     const cells = rows[i] || [];
@@ -5684,7 +5853,7 @@ function parsePoSheetRows(rows) {
     let price = cols.price === -1 ? 0 : num(cells[cols.price]);
     const total = cols.total === -1 ? 0 : num(cells[cols.total]);
     if (!price && total && qty) price = Math.round((total / qty) * 100) / 100;
-    if (qty > 0 && price > 0) out.push({ code, name, qty, price, total: total || Math.round(qty * price * 100) / 100 });
+    if (qty > 0 && price > 0) out.push({ code, name, qty, price, total: total || Math.round(qty * price * 100) / 100, ean: cell(cells, cols.ean), hsn: cell(cells, cols.hsn), uom: cell(cells, cols.uom) });
   }
   return out;
 }
@@ -5777,6 +5946,8 @@ function parseFlipkartPoHeader(rows) {
     vendorName: poLabelValue(rows, 'SUPPLIER NAME'),
     vendorAddress: poLabelValue(rows, 'Billed From Address'),
     vendorGstin: poLabelValue(rows, 'Biil From GSTIN'), // typo is in Flipkart's own template
+    vendorPhone: poLabelValue(rows, 'SUPPLIER CONTACT'),
+    vendorEmail: poLabelValue(rows, 'EMAIL Id'),
     buyerName: poLabelValue(rows, 'RETAILER NAME'),
     buyerAddress: poLabelValue(rows, 'Billed To Address'),
     buyerGstin: poLabelValue(rows, 'Biil To GSTIN'),
@@ -8163,10 +8334,12 @@ function GenerateInvoiceFromPo({ salesInvoices, onSaveInvoice, onClose }) {
       vendorName: parsed.header.vendorName || '',
       vendorAddress: parsed.header.vendorAddress || '',
       vendorGstin: parsed.header.vendorGstin || '',
+      vendorPhone: parsed.header.vendorPhone || '',
+      vendorEmail: parsed.header.vendorEmail || '',
       buyerName: parsed.header.buyerName || '',
       buyerAddress: parsed.header.buyerAddress || '',
       buyerGstin: parsed.header.buyerGstin || '',
-      rows: parsed.rows.map((r) => ({ name: r.name, code: r.code, ean: r.ean || '', qty: r.qty, price: r.price, total: r.total })),
+      rows: parsed.rows.map((r) => ({ name: r.name, code: r.code, ean: r.ean || '', hsn: r.hsn || '', uom: r.uom || '', qty: r.qty, price: r.price, total: r.total })),
       batchIds: [],
     };
     onSaveInvoice(inv);
