@@ -4180,6 +4180,89 @@ function downloadPurchasePdf(rows) {
   };
 }
 
+function openHtmlInPrintWindow(html) {
+  const w = window.open('', '_blank');
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+  w.onload = () => { w.focus(); w.print(); };
+}
+
+// Builds and opens the printable tax invoice for a PO-generated invoice
+// record (see parseFlipkartPoHeader / parseZeptoPoText). The channel's own PO
+// terms require its number on the invoice, so it's always shown, right next
+// to the invoice number the business assigned by hand.
+function printInvoice(inv) {
+  const dateStr = (d) => { if (!d) return '-'; try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); } catch (e) { return d; } };
+  const rows = inv.rows || [];
+  const rowsHtml = rows.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${r.name || '-'}</td>
+      <td style="text-align:right;">${r.qty}</td>
+      <td style="text-align:right;">${Number(r.price || 0).toFixed(2)}</td>
+      <td style="text-align:right;">${Number(r.total || 0).toFixed(2)}</td>
+    </tr>
+  `).join('');
+  const html = `<!DOCTYPE html>
+    <html>
+      <head>
+        <title>Invoice ${inv.invoiceNumber || ''}</title>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: -apple-system, Arial, sans-serif; padding: 28px; color: #20241E; }
+          h1 { font-size: 20px; margin: 0 0 2px; }
+          p.sub { color: #6b7a63; font-size: 12px; margin: 0 0 20px; }
+          .row { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 18px; flex-wrap: wrap; }
+          .block { flex: 1; min-width: 220px; }
+          .block h3 { font-size: 11px; text-transform: uppercase; color: #6b7a63; margin: 0 0 4px; }
+          .block p { font-size: 13px; margin: 0 0 2px; white-space: pre-line; }
+          .meta { border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; font-size: 12px; margin-bottom: 18px; }
+          .meta b { color: #20241E; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+          th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #ddd; font-size: 12.5px; }
+          th { background: #F6F3EA; font-size: 11px; text-transform: uppercase; color: #6b7a63; }
+          .total-row td { border-top: 2px solid #20241E; border-bottom: none; font-weight: 800; font-size: 14px; }
+          .note { font-size: 11px; color: #6b7a63; margin-top: 18px; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <h1>Tax Invoice</h1>
+        <p class="sub">${inv.platform || ''}</p>
+        <div class="row">
+          <div class="block">
+            <h3>From</h3>
+            <p><b>${inv.vendorName || '-'}</b></p>
+            <p>${inv.vendorAddress || ''}</p>
+            <p>${inv.vendorGstin ? 'GSTIN: ' + inv.vendorGstin : ''}</p>
+          </div>
+          <div class="block">
+            <h3>Bill to</h3>
+            <p><b>${inv.buyerName || ''}</b></p>
+            <p>${inv.buyerAddress || ''}</p>
+            <p>${inv.buyerGstin ? 'GSTIN: ' + inv.buyerGstin : ''}</p>
+          </div>
+        </div>
+        <div class="meta">
+          <span><b>Invoice #:</b> ${inv.invoiceNumber || '-'}</span> &nbsp;&nbsp;
+          <span><b>Invoice date:</b> ${dateStr(inv.invoiceDate)}</span> &nbsp;&nbsp;
+          <span><b>PO #:</b> ${inv.poNumber || '-'}</span> &nbsp;&nbsp;
+          <span><b>PO date:</b> ${inv.poDate || '-'}</span>
+        </div>
+        <table>
+          <thead><tr><th>Sr</th><th>Article</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Rate (₹)</th><th style="text-align:right;">Amount (₹)</th></tr></thead>
+          <tbody>
+            ${rowsHtml}
+            <tr class="total-row"><td colspan="4" style="text-align:right;">Grand Total</td><td style="text-align:right;">₹${Number(inv.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+          </tbody>
+        </table>
+        <p class="note">PO number is quoted above as required. Generated from the uploaded purchase order — please verify before sending.</p>
+      </body>
+    </html>`;
+  openHtmlInPrintWindow(html);
+}
+
 function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, indentBatches, onAdd, onAddLedgerEntry, onSavePlacedOrder, onDeleteOldPurchases, onResetPurchaseNeeds, onRestoreExcluded }) {
   const [categoryFilter, setCategoryFilter] = usePersistedState('fnv_purchase_category', 'ALL');
   const [vendorFilterId, setVendorFilterId] = usePersistedState('fnv_purchase_vendor', '');
@@ -5646,6 +5729,105 @@ function parseGrnPdfText(text) {
     if (qty > 0) rows.push({ code: code.trim(), name: desc.trim(), qty, price });
   }
   return rows;
+}
+
+// ── Generate-invoice-from-PO ──────────────────────────────────────────────
+// A channel's PO already carries everything a tax invoice back to them needs
+// (the PO number they require us to quote, the agreed price per article, the
+// buyer's own billing details) — so uploading the PO the channel already sent
+// is enough to build the invoice, rather than re-typing all of that by hand.
+// This is deliberately separate from the batch-linked PO parsing above (which
+// only wants article rows, for a margin comparison) — this one also pulls the
+// header block (vendor/buyer/GSTIN/PO date) that a real invoice document
+// needs to show.
+
+// Scans a sheet's rows (array-of-arrays, same shape parsePoSheetRows takes)
+// for a cell that exactly matches a known label and returns the next
+// non-empty cell to its right — robust to the exact column position shifting
+// a little between exports, since it goes by the label text, not an index.
+function poLabelValue(rows, label, maxRow = 20) {
+  const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+  const target = norm(label);
+  for (let r = 0; r < Math.min(rows.length, maxRow); r += 1) {
+    const cells = rows[r] || [];
+    for (let c = 0; c < cells.length; c += 1) {
+      if (norm(cells[c]) !== target) continue;
+      for (let c2 = c + 1; c2 < cells.length; c2 += 1) {
+        const v = cells[c2];
+        if (v !== null && v !== undefined && String(v).trim() !== '') return String(v).trim();
+      }
+    }
+  }
+  return '';
+}
+
+// Flipkart's own PO export (the "SUPPLIER DETAILS / RETAILER DETAILS" sheet) —
+// "Supplier" in that sheet is us (the vendor issuing the invoice), "Retailer"
+// is Flipkart's billing entity for that city (the one to bill).
+function parseFlipkartPoHeader(rows) {
+  let poNumber = '';
+  for (let r = 0; r < Math.min(rows.length, 10); r += 1) {
+    const cell = (rows[r] || [])[0];
+    const m = cell && String(cell).match(/PURCHASE ORDER NO\s*-\s*(\S+)/i);
+    if (m) { poNumber = m[1]; break; }
+  }
+  return {
+    poNumber,
+    poDate: poLabelValue(rows, 'ORDER DATE'),
+    vendorName: poLabelValue(rows, 'SUPPLIER NAME'),
+    vendorAddress: poLabelValue(rows, 'Billed From Address'),
+    vendorGstin: poLabelValue(rows, 'Biil From GSTIN'), // typo is in Flipkart's own template
+    buyerName: poLabelValue(rows, 'RETAILER NAME'),
+    buyerAddress: poLabelValue(rows, 'Billed To Address'),
+    buyerGstin: poLabelValue(rows, 'Biil To GSTIN'),
+  };
+}
+
+// Zepto's PO PDF flattens (via pdf.js text extraction) to one continuous
+// stream of text per page. Each article line is anchored on its SKU code — a
+// UUID that sometimes has a stray space where the PDF wraps it onto a second
+// line inside the cell — which is the one token on the line guaranteed not to
+// look like anything else, so everything between the item description and the
+// following HSN code (a clean 6-8 digit run) is swept up and cleaned after.
+const ZEPTO_PO_ROW_RE = /(\d{1,3}) (\d{4,9}) (.+?) \d{6,8} (\d{4,14}) (\d{1,4}) ([\d.]+) ([\d.]+) ([\d.]+) \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ [\d.]+ ([\d.]+)/g;
+function cleanZeptoDesc(raw) {
+  return raw.replace(/[0-9a-f]{6,}(?:[\s-]+[0-9a-f]{3,})+/gi, '').replace(/\s+/g, ' ').trim();
+}
+function parseZeptoPoText(text) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const grab = (re) => { const m = flat.match(re); return m ? m[1].trim() : ''; };
+  const rows = [];
+  let m;
+  ZEPTO_PO_ROW_RE.lastIndex = 0;
+  while ((m = ZEPTO_PO_ROW_RE.exec(flat)) !== null) {
+    const [, , code, descRaw, ean, qty, , rate, taxable, total] = m;
+    const q = Number(qty) || 0;
+    if (q <= 0) continue;
+    rows.push({ code: code.trim(), name: cleanZeptoDesc(descRaw), ean: ean.trim(), qty: q, price: Number(rate) || 0, total: Number(total) || Number(taxable) || 0 });
+  }
+  const buyerM = flat.match(/Billing Address\s+Shipping Address\s+Address:\s*(.+?)\s*GSTIN:\s*(\S+)/i);
+  return {
+    rows,
+    header: {
+      poNumber: grab(/PO\s*No\s*:?\s*([A-Za-z0-9-]+)/i),
+      poDate: grab(/PO\s*Date\s*:?\s*([\d-]+)/i),
+      vendorName: grab(/Vendor Details\s+PO Details\s+Name:\s*(.+?)\s*Address:/i),
+      vendorAddress: grab(/Name:\s*.+?\s*Address:\s*(.+?)\s*Name:/i),
+      vendorGstin: grab(/GSTIN:\s*(\S+)/i), // first GSTIN in the doc is always ours (vendor)
+      buyerName: '', // Zepto's PO doesn't label the buyer's legal name separately from its address block
+      buyerAddress: buyerM ? buyerM[1] : '',
+      buyerGstin: buyerM ? buyerM[2] : '',
+    },
+  };
+}
+
+// Last 5 invoice numbers across every channel — GST invoice numbering has to
+// stay one continuous sequence per GSTIN regardless of which channel it was
+// billed to, so this is deliberately not filtered to one platform.
+function lastInvoiceNumbers(salesInvoices, n = 5) {
+  return [...salesInvoices]
+    .sort((a, b) => String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')) || String(b.id || '').localeCompare(String(a.id || '')))
+    .slice(0, n);
 }
 
 // Bank statement columns, matched generically so this survives the small header
@@ -7515,7 +7697,7 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
   const views = [
     { key: 'overview', label: 'Overview' },
     { key: 'batches', label: 'Indents & P&L' },
-    { key: 'invoices', label: 'Invoices (Flipkart)' },
+    { key: 'invoices', label: 'Invoices' },
     { key: 'payments', label: 'Payments' },
   ];
   return (
@@ -7562,11 +7744,15 @@ function SalesOverviewTab({ batchFinancials, grnReports, salesInvoices, salesPay
   const cards = PLATFORMS.map((platform) => {
     const bfs = batchFinancials.filter((bf) => bf.batch.platform === platform);
     const grn = Math.round(bfs.reduce((s, bf) => s + bf.grnValue, 0) * 100) / 100;
-    const owed = platform === 'Flipkart'
-      ? Math.round(salesInvoices.filter((i) => i.platform === platform).reduce((s, i) => s + (Number(i.amount) || 0), 0) * 100) / 100
+    const platformInvoices = salesInvoices.filter((i) => i.platform === platform);
+    // Once real invoices exist for a channel, they're a more accurate "owed"
+    // than the GRN estimate — this used to be Flipkart-only because that was
+    // the only channel with an invoicing flow; now any channel can have one.
+    const owed = platformInvoices.length > 0
+      ? Math.round(platformInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0) * 100) / 100
       : grn;
     const received = Math.round(salesPayments.filter((p) => p.platform === platform).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
-    return { platform, grn, owed, received, outstanding: Math.round((owed - received) * 100) / 100 };
+    return { platform, grn, owed, received, outstanding: Math.round((owed - received) * 100) / 100, hasInvoices: platformInvoices.length > 0 };
   });
 
   return (
@@ -7622,7 +7808,7 @@ function SalesOverviewTab({ batchFinancials, grnReports, salesInvoices, salesPay
             <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 15, color: INK }}>{c.platform}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>Accepted (GRN)</span><span style={{ fontSize: 13, fontWeight: 700 }}>{money(c.grn)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>{c.platform === 'Flipkart' ? 'Invoiced' : 'Owed (from GRN)'}</span><span style={{ fontSize: 13, fontWeight: 700 }}>{money(c.owed)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>{c.hasInvoices ? 'Invoiced' : 'Owed (from GRN)'}</span><span style={{ fontSize: 13, fontWeight: 700 }}>{money(c.owed)}</span></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>Received</span><span style={{ fontSize: 13, fontWeight: 700, color: LEAF }}>{money(c.received)}</span></div>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid ' + LINE, paddingTop: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700 }}>Outstanding</span>
@@ -7900,78 +8086,245 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
   );
 }
 
-function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSaveInvoice, onDeleteInvoice }) {
-  const [creating, setCreating] = useState(false);
+// Shows the invoice numbers most recently used, across every channel, so
+// whoever is typing the next one by hand can see what came before it and
+// keep the GST sequence continuous.
+function LastInvoiceNumbers({ salesInvoices }) {
+  const last5 = lastInvoiceNumbers(salesInvoices, 5);
+  if (last5.length === 0) return null;
+  return (
+    <div style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: '8px 10px', marginBottom: 12, background: '#F6F3EA' }}>
+      <p style={{ margin: '0 0 4px', fontSize: 10.5, fontWeight: 700, color: MUTED, textTransform: 'uppercase' }}>Last 5 invoice numbers used</p>
+      {last5.map((inv) => (
+        <p key={inv.id} style={{ margin: '2px 0', fontSize: 12, color: INK }}>
+          <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{inv.invoiceNumber}</span>
+          <span style={{ color: MUTED }}> — {inv.platform}, {inv.invoiceDate}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function GenerateInvoiceFromPo({ salesInvoices, onSaveInvoice, onClose }) {
+  const poRef = useRef(null);
+  const [poError, setPoError] = useState('');
+  const [parsed, setParsed] = useState(null); // { platform, fileName, rows, header }
+  const [poNumber, setPoNumber] = useState('');
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(todayLocalDate());
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPoError(''); setParsed(null);
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      // This app only ever sees a PDF purchase order from Zepto — Flipkart's
+      // export is always the .xlsx handled below.
+      extractPdfText(file).then((text) => {
+        const { rows, header } = parseZeptoPoText(text);
+        if (!rows.length) { setPoError('Could not find any priced article rows in this PDF.'); return; }
+        setParsed({ platform: 'Zepto', fileName: file.name, rows, header });
+        setPoNumber(header.poNumber || '');
+      }).catch(() => setPoError('Could not read this PDF.'));
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        const rows2d = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        const rows = parsePoSheetRows(rows2d);
+        const header = parseFlipkartPoHeader(rows2d);
+        if (!rows.length) { setPoError('Could not find any priced article rows in this file.'); return; }
+        setParsed({ platform: 'Flipkart', fileName: file.name, rows, header });
+        setPoNumber(header.poNumber || '');
+      } catch (err) { setPoError('Could not read this file — use .xlsx, .xls, .csv or .pdf.'); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const amount = parsed ? Math.round(parsed.rows.reduce((s, r) => s + (Number(r.total) || Number(r.price) * Number(r.qty) || 0), 0) * 100) / 100 : 0;
+  const canGenerate = !!parsed && poNumber.trim() && invoiceNumber.trim();
+
+  const generate = () => {
+    if (!canGenerate) return;
+    const inv = {
+      id: `INV-${Date.now().toString(36).toUpperCase()}`,
+      platform: parsed.platform,
+      invoiceNumber: invoiceNumber.trim(),
+      invoiceDate,
+      amount,
+      poNumber: poNumber.trim(),
+      poDate: parsed.header.poDate || '',
+      poFileName: parsed.fileName,
+      vendorName: parsed.header.vendorName || '',
+      vendorAddress: parsed.header.vendorAddress || '',
+      vendorGstin: parsed.header.vendorGstin || '',
+      buyerName: parsed.header.buyerName || '',
+      buyerAddress: parsed.header.buyerAddress || '',
+      buyerGstin: parsed.header.buyerGstin || '',
+      rows: parsed.rows.map((r) => ({ name: r.name, code: r.code, ean: r.ean || '', qty: r.qty, price: r.price, total: r.total })),
+      batchIds: [],
+    };
+    onSaveInvoice(inv);
+    printInvoice(inv);
+    onClose();
+  };
+
+  return (
+    <Panel style={{ maxWidth: 560, marginBottom: 16 }}>
+      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Generate invoice from PO</p>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Upload the Flipkart (.xlsx) or Zepto (.pdf) purchase order — the articles, PO number and amount are read straight from it.</p>
+
+      <button onClick={() => poRef.current && poRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>
+        <Upload size={13} /> {parsed ? 'Upload a different PO' : 'Upload PO'}
+      </button>
+      <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleFile} style={{ display: 'none' }} />
+      {poError && <p style={{ margin: '0 0 10px', fontSize: 11, color: TOMATO }}>{poError}</p>}
+
+      {parsed && (
+        <>
+          <div style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: '8px 10px', marginBottom: 12 }}>
+            <p style={{ margin: 0, fontSize: 12, color: INK }}><b>{parsed.platform}</b> · {parsed.fileName}</p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>{parsed.rows.length} article(s) · amount ₹{amount.toLocaleString('en-IN')}</p>
+          </div>
+
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PO NUMBER (will be printed on the invoice)</p>
+          <input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} style={inputStyle} />
+          {!poNumber.trim() && <p style={{ margin: '-8px 0 10px', fontSize: 11, color: AMBER }}>Could not auto-read a PO number from this file — please type it in.</p>}
+
+          <LastInvoiceNumbers salesInvoices={salesInvoices} />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE NUMBER</p>
+          <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} style={inputStyle} placeholder="Type the next number in your series" />
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE DATE</p>
+          <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} style={inputStyle} />
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={generate} disabled={!canGenerate} style={{ background: canGenerate ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: canGenerate ? 'pointer' : 'default' }}>Generate &amp; print invoice</button>
+            <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </>
+      )}
+      {!parsed && (
+        <div style={{ marginTop: 4 }}>
+          <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function ManualInvoiceForm({ batchFinancials, salesInvoices, onSaveInvoice, onClose }) {
+  const [platform, setPlatform] = useState(PLATFORMS[0]);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(todayLocalDate());
   const [amount, setAmount] = useState('');
   const [selectedBatchIds, setSelectedBatchIds] = useState([]);
 
-  const flipkartBatches = batchFinancials.filter((bf) => bf.batch.platform === 'Flipkart');
-  const uninvoicedBatches = flipkartBatches.filter((bf) => !bf.invoice);
+  const platformBatches = batchFinancials.filter((bf) => bf.batch.platform === platform);
+  const uninvoicedBatches = platformBatches.filter((bf) => !bf.invoice);
 
   const toggleBatch = (id) => setSelectedBatchIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const save = () => {
     if (!invoiceNumber.trim() || !amount || selectedBatchIds.length === 0) return;
-    onSaveInvoice({ id: `INV-${Date.now().toString(36).toUpperCase()}`, platform: 'Flipkart', invoiceNumber: invoiceNumber.trim(), invoiceDate, amount: Number(amount), batchIds: selectedBatchIds });
-    setCreating(false); setInvoiceNumber(''); setAmount(''); setSelectedBatchIds([]);
+    onSaveInvoice({ id: `INV-${Date.now().toString(36).toUpperCase()}`, platform, invoiceNumber: invoiceNumber.trim(), invoiceDate, amount: Number(amount), batchIds: selectedBatchIds });
+    onClose();
   };
 
+  return (
+    <Panel style={{ maxWidth: 520, marginBottom: 16 }}>
+      <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>New invoice (manual)</p>
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CHANNEL</p>
+      <select value={platform} onChange={(e) => { setPlatform(e.target.value); setSelectedBatchIds([]); }} style={inputStyle}>
+        {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+      <LastInvoiceNumbers salesInvoices={salesInvoices} />
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE NUMBER</p>
+      <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} style={inputStyle} />
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE DATE</p>
+      <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} style={inputStyle} />
+      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
+      <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
+      <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>BATCHES COVERED BY THIS INVOICE</p>
+      <div style={{ maxHeight: 160, overflowY: 'auto', border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: 8, marginBottom: 16 }}>
+        {uninvoicedBatches.length === 0 && <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>No un-invoiced {platform} batches with GRN data yet.</p>}
+        {uninvoicedBatches.map((bf) => (
+          <label key={bf.batch.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={selectedBatchIds.includes(bf.batch.id)} onChange={() => toggleBatch(bf.batch.id)} />
+            {bf.batch.id} — GRN ₹{bf.grnValue.toLocaleString('en-IN')}
+          </label>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save invoice</button>
+        <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </Panel>
+  );
+}
+
+function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSaveInvoice, onDeleteInvoice }) {
+  const [mode, setMode] = useState('closed'); // 'closed' | 'po' | 'manual'
+  const [platformFilter, setPlatformFilter] = usePersistedState('fnv_invoices_platform', 'All');
+
   const receivedFor = (invoiceId) => Math.round(salesPayments.filter((p) => p.linkedInvoiceId === invoiceId).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
+  const filteredInvoices = salesInvoices.filter((inv) => platformFilter === 'All' || inv.platform === platformFilter);
 
   return (
     <div>
-      {!creating ? (
-        <button onClick={() => setCreating(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>
-          <Plus size={14} /> New invoice
-        </button>
-      ) : (
-        <Panel style={{ maxWidth: 520, marginBottom: 16 }}>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>New Flipkart invoice</p>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE NUMBER</p>
-          <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE DATE</p>
-          <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
-          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>BATCHES COVERED BY THIS INVOICE</p>
-          <div style={{ maxHeight: 160, overflowY: 'auto', border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: 8, marginBottom: 16 }}>
-            {uninvoicedBatches.length === 0 && <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>No un-invoiced Flipkart batches with GRN data yet.</p>}
-            {uninvoicedBatches.map((bf) => (
-              <label key={bf.batch.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 6, cursor: 'pointer' }}>
-                <input type="checkbox" checked={selectedBatchIds.includes(bf.batch.id)} onChange={() => toggleBatch(bf.batch.id)} />
-                {bf.batch.id} — GRN ₹{bf.grnValue.toLocaleString('en-IN')}
-              </label>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save invoice</button>
-            <button onClick={() => setCreating(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-          </div>
-        </Panel>
+      {mode === 'closed' && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <button onClick={() => setMode('po')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            <Upload size={14} /> Generate invoice from PO
+          </button>
+          <button onClick={() => setMode('manual')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            <Plus size={14} /> Manual invoice
+          </button>
+        </div>
       )}
+      {mode === 'po' && <GenerateInvoiceFromPo salesInvoices={salesInvoices} onSaveInvoice={onSaveInvoice} onClose={() => setMode('closed')} />}
+      {mode === 'manual' && <ManualInvoiceForm batchFinancials={batchFinancials} salesInvoices={salesInvoices} onSaveInvoice={onSaveInvoice} onClose={() => setMode('closed')} />}
+
       <Panel>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Invoices</p>
+          <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ ...inputStyle, width: 'auto', marginBottom: 0 }}>
+            <option value="All">All channels</option>
+            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Invoice #</Th><Th>Date</Th><Th>Amount</Th><Th>Batches</Th><Th>Received</Th><Th>Outstanding</Th><Th /></tr></thead>
+            <thead><tr><Th>Invoice #</Th><Th>Channel</Th><Th>Date</Th><Th>PO #</Th><Th>Amount</Th><Th>Received</Th><Th>Outstanding</Th><Th /></tr></thead>
             <tbody>
-              {salesInvoices.filter((inv) => inv.platform === 'Flipkart').map((inv) => {
+              {filteredInvoices.map((inv) => {
                 const received = receivedFor(inv.id);
                 const outstanding = Math.round((Number(inv.amount) - received) * 100) / 100;
                 return (
                   <tr key={inv.id}>
                     <Td>{inv.invoiceNumber}</Td>
+                    <Td>{inv.platform}</Td>
                     <Td>{inv.invoiceDate}</Td>
+                    <Td style={{ fontSize: 11, fontFamily: 'monospace' }}>{inv.poNumber || <span style={{ color: MUTED, fontFamily: 'inherit' }}>—</span>}</Td>
                     <Td>₹{Number(inv.amount).toLocaleString('en-IN')}</Td>
-                    <Td style={{ fontSize: 11, color: MUTED }}>{(inv.batchIds || []).join(', ')}</Td>
                     <Td style={{ color: LEAF }}>₹{received.toLocaleString('en-IN')}</Td>
                     <Td style={{ color: outstanding > 0 ? TOMATO : LEAF, fontWeight: 700 }}>₹{outstanding.toLocaleString('en-IN')}</Td>
-                    <Td><ConfirmDeleteButton onConfirm={() => onDeleteInvoice(inv.id)} title={`Delete invoice ${inv.invoiceNumber}`} /></Td>
+                    <Td>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        {(inv.rows || []).length > 0 && (
+                          <button onClick={() => printInvoice(inv)} title="Print invoice" style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', padding: 0, display: 'flex' }}><Download size={14} /></button>
+                        )}
+                        <ConfirmDeleteButton onConfirm={() => onDeleteInvoice(inv.id)} title={`Delete invoice ${inv.invoiceNumber}`} />
+                      </div>
+                    </Td>
                   </tr>
                 );
               })}
-              {salesInvoices.filter((inv) => inv.platform === 'Flipkart').length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No invoices yet.</Td></tr>}
+              {filteredInvoices.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No invoices yet.</Td></tr>}
             </tbody>
           </table>
         </div>
@@ -8029,10 +8382,13 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
     e.target.value = '';
   };
 
-  // Outstanding receivables: Flipkart owed = invoiced total; Blinkit owed = GRN total (no invoice step)
+  // Outstanding receivables: a channel with real invoices is owed the invoiced
+  // total; one with none yet (no invoicing flow used for it so far) falls
+  // back to the GRN total as an estimate.
   const outstandingByPlatform = PLATFORMS.map((p) => {
-    const owed = p === 'Flipkart'
-      ? salesInvoices.filter((inv) => inv.platform === p).reduce((s, inv) => s + (Number(inv.amount) || 0), 0)
+    const invoicesForP = salesInvoices.filter((inv) => inv.platform === p);
+    const owed = invoicesForP.length > 0
+      ? invoicesForP.reduce((s, inv) => s + (Number(inv.amount) || 0), 0)
       : batchFinancials.filter((bf) => bf.batch.platform === p).reduce((s, bf) => s + bf.grnValue, 0);
     const received = salesPayments.filter((pay) => pay.platform === p).reduce((s, pay) => s + (Number(pay.amount) || 0), 0);
     return { platform: p, outstanding: Math.round((owed - received) * 100) / 100 };
@@ -8062,7 +8418,7 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
         <Panel style={{ maxWidth: 480, marginBottom: 16 }}>
           <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Log a payment received</p>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
-          <select value={platform} onChange={(e) => { setPlatform(e.target.value); setLinkedId(''); setLinkType(e.target.value === 'Flipkart' ? 'invoice' : 'batch'); }} style={inputStyle}>
+          <select value={platform} onChange={(e) => { setPlatform(e.target.value); setLinkedId(''); setLinkType(salesInvoices.some((inv) => inv.platform === e.target.value) ? 'invoice' : 'batch'); }} style={inputStyle}>
             {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
@@ -8071,7 +8427,7 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
           <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>BANK REFERENCE (optional)</p>
           <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="UTR / transaction ID" style={inputStyle} />
-          {platform === 'Flipkart' ? (
+          {platformInvoices.length > 0 ? (
             <>
               <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AGAINST WHICH INVOICE</p>
               <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
