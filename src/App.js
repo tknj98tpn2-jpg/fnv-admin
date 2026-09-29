@@ -4194,6 +4194,20 @@ const money2 = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDi
 // happened to list them in — a copy sorted alphabetically instead of a copy
 // (localeCompare so it sorts the way a person reading the names would).
 const sortRowsByName = (rows) => [...(rows || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+// Both channels' own invoices, and the date <input>, each use a different
+// date shape (ISO yyyy-mm-dd, or Flipkart's own dd/mm/yyyy) — this always
+// prints dd/mm/yy on the invoice, whichever shape it came in as.
+function formatDateDMY(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3].slice(2)}`;
+  const d = new Date(s);
+  if (!isNaN(d)) return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
+  return s;
+}
 
 // Zepto's buyer block (as captured off the PO/invoice) reads as one run of
 // text: "<legal name> <DC-CODE style name> (<code>) <street address>" — e.g.
@@ -4244,20 +4258,21 @@ function zeptoInvoiceHtml(inv) {
         <table>
           <tr><td colspan="6" class="title">INVOICE</td></tr>
           <tr><td colspan="6" class="sub">${esc(inv.vendorName || '')}</td></tr>
-          <tr><td colspan="6" style="text-align:center; font-size:11px;">${[inv.vendorEmail ? 'Email: ' + inv.vendorEmail : '', inv.vendorPhone ? 'Mob. No.: ' + inv.vendorPhone : ''].filter(Boolean).join('&nbsp;&nbsp;')}</td></tr>
+          <tr><td colspan="6" style="text-align:center; font-size:11px;">Address: Plot No. 48, Cooperative Society, Deendayal, Jabalpur (482002)</td></tr>
+          <tr><td colspan="6" style="text-align:center; font-size:11px;">Email - Nilgiri790@gmail.com&nbsp;&nbsp;&nbsp;9981324558, 8269584143</td></tr>
           <tr>
             <td class="label" colspan="2">Invoice No.:</td>
-            <td colspan="2" style="text-align:center; font-weight:700;">${esc(inv.invoiceNumber)}</td>
+            <td colspan="2" style="text-align:center;">${esc(inv.invoiceNumber)}</td>
             <td class="label">P.O. No</td>
-            <td style="font-weight:700;">${esc(inv.poNumber)}</td>
+            <td>${esc(inv.poNumber)}</td>
           </tr>
           <tr>
             <td class="label" colspan="2">Invoice Date:</td>
-            <td colspan="2" style="text-align:center; font-weight:700;">${esc(inv.invoiceDate)}</td>
+            <td colspan="2" style="text-align:center;">${formatDateDMY(inv.invoiceDate)}</td>
             <td class="label">P.O Date</td>
-            <td style="font-weight:700;">${esc(inv.poDate)}</td>
+            <td>${formatDateDMY(inv.poDate)}</td>
           </tr>
-          ${deliveryCenter ? `<tr><td colspan="4"></td><td class="label">Delivery Center</td><td style="font-weight:700;">${esc(deliveryCenter)}</td></tr>` : ''}
+          ${deliveryCenter ? `<tr><td colspan="4"></td><td class="label">Delivery Center</td><td>${esc(deliveryCenter)}</td></tr>` : ''}
           <tr><td colspan="6" class="center">Detail of Buyer</td></tr>
           <tr><td class="label">To,</td><td colspan="5" style="font-weight:700;">${esc(buyerName)} ${esc(deliveryCenterFull)}</td></tr>
           <tr>
@@ -4327,9 +4342,9 @@ function flipkartInvoiceHtml(inv) {
         <table class="frame">
           <tr><td colspan="2" class="banner">TAX INVOICE</td></tr>
           <tr><td class="meta-label">Invoice No</td><td>${esc(inv.invoiceNumber)}</td></tr>
-          <tr><td class="meta-label">Invoice Date</td><td>${esc(inv.invoiceDate)}</td></tr>
+          <tr><td class="meta-label">Invoice Date</td><td>${formatDateDMY(inv.invoiceDate)}</td></tr>
           <tr><td class="meta-label">PO No</td><td>${esc(inv.poNumber)}</td></tr>
-          <tr><td class="meta-label">PO Date</td><td>${esc(inv.poDate)}</td></tr>
+          <tr><td class="meta-label">PO Date</td><td>${formatDateDMY(inv.poDate)}</td></tr>
         </table>
         <table class="frame" style="margin-top:-1px;">
           <tr>
@@ -4392,7 +4407,7 @@ function genericInvoiceHtml(inv) {
         <p class="sub">${esc(inv.platform || '')}</p>
         <div class="meta">
           <span><b>Invoice #:</b> ${esc(inv.invoiceNumber) || '-'}</span> &nbsp;&nbsp;
-          <span><b>Invoice date:</b> ${esc(inv.invoiceDate) || '-'}</span> &nbsp;&nbsp;
+          <span><b>Invoice date:</b> ${formatDateDMY(inv.invoiceDate) || '-'}</span> &nbsp;&nbsp;
           <span><b>PO #:</b> ${esc(inv.poNumber) || '-'}</span>
         </div>
         <table>
