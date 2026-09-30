@@ -38,6 +38,7 @@ import {
   Barcode,
   Wallet,
   UserCheck,
+  Award,
 } from 'lucide-react';
 
 // ── Firebase ──────────────────────────────────────────────
@@ -471,6 +472,7 @@ const PERMISSION_SECTIONS = [
   { key: 'orders', label: 'Orders' },
   { key: 'advanceindent', label: 'Advance Indent (mobile app)' },
   { key: 'purchase', label: 'Purchases' },
+  { key: 'grading', label: 'Grading' },
   { key: 'stockcount', label: 'Stock Count' },
   { key: 'pricing', label: 'Pricing' },
   { key: 'sales', label: 'Sales' },
@@ -487,17 +489,17 @@ const SEED_ROLES = [
   {
     id: 'ROLE-ADMIN',
     name: 'Admin',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: true, purchase: true, stockcount: true, pricing: true, profitloss: true, sales: true, staff: true, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: true, purchase: true, grading: true, stockcount: true, pricing: true, profitloss: true, sales: true, staff: true, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
   },
   {
     id: 'ROLE-WAREHOUSE',
     name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, advanceindent: false, purchase: false, stockcount: true, pricing: false, profitloss: false, sales: false, staff: false, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
+    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, advanceindent: false, purchase: false, grading: true, stockcount: true, pricing: false, profitloss: false, sales: false, staff: false, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
   },
   {
     id: 'ROLE-PURCHASE',
     name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: false, purchase: true, stockcount: true, pricing: true, profitloss: true, sales: true, staff: false, attendance: false, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
+    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: false, purchase: true, grading: true, stockcount: true, pricing: true, profitloss: true, sales: true, staff: false, attendance: false, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
   },
 ];
 
@@ -512,6 +514,7 @@ const NAV = [
   { key: 'cutprocess', label: 'Cut & Process', icon: Scissors },
   { key: 'orders', label: 'Orders', icon: ClipboardList },
   { key: 'purchase', label: 'Purchases', icon: ShoppingBag },
+  { key: 'grading', label: 'Grading', icon: Award },
   { key: 'stockcount', label: 'Stock Count', icon: Layers },
   { key: 'pricing', label: 'Pricing', icon: IndianRupee },
   { key: 'sales', label: 'Sales', icon: Wallet },
@@ -625,6 +628,7 @@ export default function AdminPanel() {
   const [stockCounts,   setStockCounts]   = useState([]); // nightly closing-stock entries, one per item per date
   const [pricingConfig, setPricingConfig] = useState([]); // editable per-article pricing inputs (grading %, margins, etc.)
   const [grnReports,    setGrnReports]    = useState([]); // uploaded GRN (goods received note) files per channel
+  const [gradingRecords, setGradingRecords] = useState([]); // per-item quality grading entries (Grade A / Grade B / Dump split)
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
   const [dbReady,       setDbReady]       = useState(false);
   const [selectedCity,  setSelectedCity]  = usePersistedState('fnv_selected_city', CITIES[0]);
@@ -649,8 +653,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','barcodeFormats','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, barcodeFormats: setBarcodeFormats, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','barcodeFormats','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -869,6 +873,10 @@ export default function AdminPanel() {
     const id = `GRN-${channel.slice(0, 3).toUpperCase()}-${date}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: todayLocalDate(), rows, batchId: batchId || null });
   };
+  const deleteGrnReport = (id) => fbDelete('grnReports', id);
+
+  const saveGradingRecord = (record) => fbSetDoc('gradingRecords', record.id, { ...record, city: effectiveCity });
+  const deleteGradingRecord = (id) => fbDelete('gradingRecords', id);
 
   // ── Sales tracking: Flipkart is invoiced then paid; Blinkit settles straight off
   // GRN with no separate invoice step. Both funnels end at the same Payments log,
@@ -1088,6 +1096,7 @@ export default function AdminPanel() {
     const batch = indentBatches.find((b) => b.id === g.batchId);
     return batch ? (batch.city || CITIES[0]) === effectiveCity : CITIES[0] === effectiveCity;
   });
+  const cityGradingRecords = gradingRecords.filter((g) => (g.city || CITIES[0]) === effectiveCity);
   const citySalesInvoices = salesInvoices.filter((inv) => (inv.city || CITIES[0]) === effectiveCity);
   const citySalesPayments = salesPayments.filter((p) => (p.city || CITIES[0]) === effectiveCity);
   const cityOperationalOrders = cityOrders.filter((o) => !o.isAdvance);
@@ -1278,8 +1287,17 @@ export default function AdminPanel() {
               onSavePayment={saveSalesPayment}
               onDeletePayment={deleteSalesPayment}
               onUploadGrn={uploadGrnReport}
+              onDeleteGrn={deleteGrnReport}
               onUpdateIndentBatch={updateIndentBatch}
               recipes={recipes}
+            />
+          )}
+          {tab === 'grading' && (
+            <GradingPanel
+              items={cityItems}
+              records={cityGradingRecords}
+              onSave={saveGradingRecord}
+              onDelete={deleteGradingRecord}
             />
           )}
           {tab === 'staff' && (
@@ -7820,7 +7838,7 @@ function grnValueForBatch(batchId, grnReports, items, articlesByKey, configByKey
   return { value: Math.round(value * 100) / 100, pricedRows, unpricedRows };
 }
 
-function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onUpdateIndentBatch, recipes }) {
+function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onDeleteGrn, onUpdateIndentBatch, recipes }) {
   const [view, setView] = useState('overview');
   const [openBatchId, setOpenBatchId] = useState(null);
   const configByKey = useMemo(() => { const m = {}; pricingConfig.forEach((x) => { m[x.id] = x; }); return m; }, [pricingConfig]);
@@ -7875,6 +7893,7 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
         reports={grnReports.filter((g) => g.batchId === openBatch.batch.id)}
         onBack={() => setOpenBatchId(null)}
         onUploadGrn={onUploadGrn}
+        onDeleteGrn={onDeleteGrn}
         onUpdateIndentBatch={onUpdateIndentBatch}
       />
     );
@@ -8087,7 +8106,25 @@ function PoReportRow({ report, onRemove }) {
   );
 }
 
-function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateIndentBatch }) {
+function GrnReportRow({ report, onRemove }) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
+      <p style={{ margin: 0, fontSize: 11, color: MUTED }}>{report.fileName} - {(report.rows || []).length} rows</p>
+      {!confirming ? (
+        <button onClick={() => setConfirming(true)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0, padding: 0 }}>Remove</button>
+      ) : (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: TOMATO, fontWeight: 700 }}>Remove?</span>
+          <button onClick={onRemove} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
+          <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>No</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateIndentBatch, onDeleteGrn }) {
   const poRef = useRef(null);
   const grnRef = useRef(null);
   const [poError, setPoError] = useState('');
@@ -8213,7 +8250,9 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
         {reports.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + LINE }}>
             <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>GRN REPORTS ({reports.length})</p>
-            {reports.map((g) => <p key={g.id} style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{g.fileName} - {(g.rows || []).length} rows</p>)}
+            {reports.map((g) => (
+              <GrnReportRow key={g.id} report={g} onRemove={() => onDeleteGrn(g.id)} />
+            ))}
             {bf.grnUnpricedRows > 0 && <p style={{ margin: '6px 0 0', fontSize: 11, color: AMBER }}>{bf.grnUnpricedRows} GRN row(s) could not be matched to an item, so they are not valued.</p>}
           </div>
         )}
@@ -8268,6 +8307,299 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
           </table>
         </div>
       </Panel>
+    </div>
+  );
+}
+
+// ── Grading ───────────────────────────────────────────────
+// One row while an item is still being entered (not yet saved). Qty, Grade A
+// and Grade B are free-typed; Dump is always the leftover and is never typed
+// directly — it just shows whatever is left once Qty, Grade A and Grade B are
+// accounted for.
+function GradingEntryRow({ row, onChange, onRemove }) {
+  const qtyNum = Number(row.qty) || 0;
+  const aNum = Number(row.gradeA) || 0;
+  const bNum = Number(row.gradeB) || 0;
+  const dump = Math.max(Math.round((qtyNum - aNum - bNum) * 100) / 100, 0);
+
+  // Typing the total qty resets Grade A to match it in full (nothing graded down yet).
+  const setQty = (v) => onChange({ ...row, qty: v, gradeA: v, gradeB: 0 });
+  // Editing Grade A pushes whatever is left over into Grade B automatically.
+  const setGradeA = (v) => {
+    const aVal = Number(v) || 0;
+    const remB = Math.max(Math.round((qtyNum - aVal) * 100) / 100, 0);
+    onChange({ ...row, gradeA: v, gradeB: remB });
+  };
+  // Editing Grade B just updates it — Dump (below) recomputes from the remainder.
+  const setGradeB = (v) => onChange({ ...row, gradeB: v });
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr 1fr auto', gap: 8, alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${LINE}` }}>
+      <div>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{row.itemName}</p>
+        <p style={{ margin: 0, fontSize: 10, color: MUTED }}>{row.category}</p>
+      </div>
+      <input type="number" placeholder={row.uom} value={row.qty} onChange={(e) => setQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+      <input type="number" placeholder="0" value={row.gradeA} onChange={(e) => setGradeA(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+      <input type="number" placeholder="0" value={row.gradeB} onChange={(e) => setGradeB(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+      <div style={{ ...inputStyle, marginBottom: 0, background: BG, color: MUTED, fontWeight: 700, display: 'flex', alignItems: 'center' }}>{dump} {row.uom}</div>
+      <button onClick={onRemove} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }} aria-label="Remove row"><Trash2 size={15} /></button>
+    </div>
+  );
+}
+
+// A saved grading record — read-only, with the same confirm-before-remove
+// pattern used for PO/GRN reports elsewhere in Sales.
+function GradingRecordRow({ record, onRemove }) {
+  const [confirming, setConfirming] = useState(false);
+  const pct = (n) => (record.qty > 0 ? Math.round((n / record.qty) * 1000) / 10 : 0);
+  return (
+    <tr>
+      <Td style={{ fontWeight: 700 }}>{record.itemName}</Td>
+      <Td>{record.qty} {record.uom}</Td>
+      <Td>{record.gradeA} {record.uom} <span style={{ color: MUTED, fontSize: 10 }}>({pct(record.gradeA)}%)</span></Td>
+      <Td>{record.gradeB} {record.uom} <span style={{ color: MUTED, fontSize: 10 }}>({pct(record.gradeB)}%)</span></Td>
+      <Td>{record.dump} {record.uom} <span style={{ color: MUTED, fontSize: 10 }}>({pct(record.dump)}%)</span></Td>
+      <Td>
+        {confirming ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 10, color: TOMATO, fontWeight: 700 }}>Remove?</span>
+            <button onClick={onRemove} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
+            <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>No</button>
+          </span>
+        ) : (
+          <button onClick={() => setConfirming(true)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }} aria-label={`Remove ${record.itemName} grading`}>
+            <Trash2 size={14} />
+          </button>
+        )}
+      </Td>
+    </tr>
+  );
+}
+
+function GradingPanel({ items, records, onSave, onDelete }) {
+  const [view, setView] = useState('entry'); // 'entry' | 'reports'
+
+  // ---- Add Items / entry view ----
+  const [date, setDate] = useState(todayLocalDate());
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [rows, setRows] = useState([]);
+  const [saveMsg, setSaveMsg] = useState('');
+
+  const pickableItems = items.filter((it) => {
+    const q = search.trim().toLowerCase();
+    const notAdded = !rows.some((r) => r.itemId === it.id);
+    const matches = !q || it.name.toLowerCase().includes(q);
+    return notAdded && matches;
+  });
+
+  const addItem = (it) => {
+    setRows((prev) => [...prev, { key: `${it.id}-${Date.now()}`, itemId: it.id, itemName: it.name, category: it.category, uom: it.uom, qty: '', gradeA: '', gradeB: '' }]);
+    setSearch('');
+  };
+  const updateRow = (key, next) => setRows((prev) => prev.map((r) => (r.key === key ? next : r)));
+  const removeRow = (key) => setRows((prev) => prev.filter((r) => r.key !== key));
+
+  const saveAll = () => {
+    const valid = rows.filter((r) => Number(r.qty) > 0);
+    if (valid.length === 0) return;
+    valid.forEach((r) => {
+      const qtyNum = Number(r.qty) || 0;
+      const aNum = Number(r.gradeA) || 0;
+      const bNum = Number(r.gradeB) || 0;
+      const dump = Math.max(Math.round((qtyNum - aNum - bNum) * 100) / 100, 0);
+      const id = `GRAD-${r.itemId}-${date}-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+      onSave({ id, date, itemId: r.itemId, itemName: r.itemName, category: r.category, uom: r.uom, qty: qtyNum, gradeA: aNum, gradeB: bNum, dump, createdAt: todayLocalDate() });
+    });
+    setRows([]);
+    setSaveMsg(`${valid.length} item${valid.length === 1 ? '' : 's'} saved for ${date}.`);
+    setTimeout(() => setSaveMsg(''), 4000);
+  };
+
+  const dayRecords = records.filter((r) => r.date === date);
+
+  // ---- Reports view ----
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [dateFrom, setDateFrom] = useState(() => addDaysToDateStr(todayLocalDate(), -6));
+  const [dateTo, setDateTo] = useState(() => todayLocalDate());
+
+  const setQuickRange = (preset) => {
+    const today = todayLocalDate();
+    if (preset === '7d') {
+      setDateFrom(addDaysToDateStr(today, -6));
+      setDateTo(today);
+    } else if (preset === 'thisMonth') {
+      const d = new Date(`${today}T00:00:00`);
+      setDateFrom(formatLocalDate(new Date(d.getFullYear(), d.getMonth(), 1)));
+      setDateTo(today);
+    } else if (preset === 'lastMonth') {
+      const d = new Date(`${today}T00:00:00`);
+      setDateFrom(formatLocalDate(new Date(d.getFullYear(), d.getMonth() - 1, 1)));
+      setDateTo(formatLocalDate(new Date(d.getFullYear(), d.getMonth(), 0)));
+    }
+  };
+
+  const filteredRecords = records.filter((r) => {
+    const inCategory = categoryFilter === 'ALL' || r.category === categoryFilter;
+    const inRange = (!dateFrom || r.date >= dateFrom) && (!dateTo || r.date <= dateTo);
+    return inCategory && inRange;
+  });
+
+  const grouped = useMemo(() => {
+    const map = {};
+    filteredRecords.forEach((r) => {
+      if (!map[r.itemId]) map[r.itemId] = { itemId: r.itemId, itemName: r.itemName, category: r.category, uom: r.uom, count: 0, sumA: 0, sumB: 0, sumDump: 0, totalQty: 0 };
+      const qty = Number(r.qty) || 0;
+      const m = map[r.itemId];
+      m.count += 1;
+      m.totalQty += qty;
+      m.sumA += qty > 0 ? ((Number(r.gradeA) || 0) / qty) * 100 : 0;
+      m.sumB += qty > 0 ? ((Number(r.gradeB) || 0) / qty) * 100 : 0;
+      m.sumDump += qty > 0 ? ((Number(r.dump) || 0) / qty) * 100 : 0;
+    });
+    return Object.values(map)
+      .map((m) => ({ ...m, avgA: Math.round((m.sumA / m.count) * 10) / 10, avgB: Math.round((m.sumB / m.count) * 10) / 10, avgDump: Math.round((m.sumDump / m.count) * 10) / 10 }))
+      .sort((a, b) => a.itemName.localeCompare(b.itemName));
+  }, [filteredRecords]);
+
+  const categoryChips = ['ALL', ...CATEGORY_OPTIONS];
+  const toggleBtn = (active) => ({ padding: '8px 16px', borderRadius: 8, border: `1px solid ${active ? LEAF : LINE}`, background: active ? LEAF : '#fff', color: active ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' });
+  const quickBtn = { padding: '8px 12px', borderRadius: 8, border: `1px solid ${LINE}`, background: '#fff', color: INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setView('entry')} style={toggleBtn(view === 'entry')}>Add Grading</button>
+        <button onClick={() => setView('reports')} style={toggleBtn(view === 'reports')}>Reports</button>
+      </div>
+
+      {view === 'entry' && (
+        <div>
+          <Panel style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+              <div>
+                <p style={{ margin: '0 0 2px', fontWeight: 700, fontSize: 14, color: INK }}>Add Items</p>
+                <p style={{ margin: 0, fontSize: 11, color: MUTED }}>Select items to grade for this date.</p>
+              </div>
+              <div>
+                <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>DATE</p>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 160 }} />
+              </div>
+            </div>
+
+            {!pickerOpen ? (
+              <button onClick={() => setPickerOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                <Plus size={14} /> Add Item
+              </button>
+            ) : (
+              <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: BG, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
+                  <Search size={14} color={MUTED} />
+                  <input autoFocus placeholder="Search items..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12, width: '100%' }} />
+                  <button onClick={() => { setPickerOpen(false); setSearch(''); }} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer', display: 'flex' }}><X size={14} /></button>
+                </div>
+                <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                  {pickableItems.map((it) => (
+                    <button key={it.id} onClick={() => addItem(it)} style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', borderBottom: `1px solid ${LINE}`, padding: '8px 4px', cursor: 'pointer' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: INK }}>{it.name}</span>
+                      <span style={{ fontSize: 10, color: MUTED }}>{it.category}</span>
+                    </button>
+                  ))}
+                  {pickableItems.length === 0 && <p style={{ margin: '8px 0', fontSize: 12, color: MUTED, textAlign: 'center' }}>No items match.</p>}
+                </div>
+              </div>
+            )}
+
+            {rows.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr 1fr auto', gap: 8, padding: '0 0 6px', borderBottom: `1px solid ${LINE}` }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>ITEM</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>QTY</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>GRADE A</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>GRADE B</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>DUMP</span>
+                  <span />
+                </div>
+                {rows.map((r) => (
+                  <GradingEntryRow key={r.key} row={r} onChange={(next) => updateRow(r.key, next)} onRemove={() => removeRow(r.key)} />
+                ))}
+                <button onClick={saveAll} style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                  Save Grading
+                </button>
+              </div>
+            )}
+            {saveMsg && <p style={{ margin: '10px 0 0', fontSize: 12, color: LEAF, fontWeight: 700 }}>{saveMsg}</p>}
+          </Panel>
+
+          {dayRecords.length > 0 && (
+            <Panel>
+              <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Graded on {date} ({dayRecords.length})</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead><tr><Th>Item</Th><Th>Qty</Th><Th>Grade A</Th><Th>Grade B</Th><Th>Dump</Th><Th /></tr></thead>
+                  <tbody>
+                    {dayRecords.map((r) => (
+                      <GradingRecordRow key={r.id} record={r} onRemove={() => onDelete(r.id)} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          )}
+        </div>
+      )}
+
+      {view === 'reports' && (
+        <div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+            {categoryChips.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCategoryFilter(c)}
+                style={{ padding: '6px 12px', borderRadius: 999, border: `1px solid ${categoryFilter === c ? LEAF : LINE}`, background: categoryFilter === c ? LEAF : '#fff', color: categoryFilter === c ? '#fff' : INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+              >
+                {c === 'ALL' ? 'All' : c}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
+            <div>
+              <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FROM</p>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 150 }} />
+            </div>
+            <div>
+              <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TO</p>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 150 }} />
+            </div>
+            <button onClick={() => setQuickRange('7d')} style={quickBtn}>Last 7 Days</button>
+            <button onClick={() => setQuickRange('thisMonth')} style={quickBtn}>This Month</button>
+            <button onClick={() => setQuickRange('lastMonth')} style={quickBtn}>Last Month</button>
+          </div>
+
+          <Panel>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><Th>Item</Th><Th>Category</Th><Th>Entries</Th><Th>Total Qty</Th><Th>Avg Grade A %</Th><Th>Avg Grade B %</Th><Th>Avg Dump %</Th></tr></thead>
+                <tbody>
+                  {grouped.map((g) => (
+                    <tr key={g.itemId}>
+                      <Td style={{ fontWeight: 700 }}>{g.itemName}</Td>
+                      <Td>{g.category}</Td>
+                      <Td>{g.count}</Td>
+                      <Td>{Math.round(g.totalQty * 100) / 100} {g.uom}</Td>
+                      <Td style={{ color: LEAF, fontWeight: 700 }}>{g.avgA}%</Td>
+                      <Td style={{ color: AMBER, fontWeight: 700 }}>{g.avgB}%</Td>
+                      <Td style={{ color: TOMATO, fontWeight: 700 }}>{g.avgDump}%</Td>
+                    </tr>
+                  ))}
+                  {grouped.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No grading records in this range.</Td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+      )}
     </div>
   );
 }
