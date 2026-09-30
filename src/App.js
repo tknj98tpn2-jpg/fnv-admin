@@ -629,6 +629,7 @@ export default function AdminPanel() {
   const [pricingConfig, setPricingConfig] = useState([]); // editable per-article pricing inputs (grading %, margins, etc.)
   const [grnReports,    setGrnReports]    = useState([]); // uploaded GRN (goods received note) files per channel
   const [gradingRecords, setGradingRecords] = useState([]); // per-item quality grading entries (Grade A / Grade B / Dump split)
+  const [barcodePrints, setBarcodePrints] = useState([]); // running "how many labels printed" total per article/date/platform, for the Printed badge
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
   const [dbReady,       setDbReady]       = useState(false);
   const [selectedCity,  setSelectedCity]  = usePersistedState('fnv_selected_city', CITIES[0]);
@@ -653,8 +654,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','barcodeFormats','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','barcodeFormats','barcodePrints','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, barcodePrints: setBarcodePrints, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -762,6 +763,17 @@ export default function AdminPanel() {
   // mapChannelField above, since that's already a per-channel-alias patch.
   const saveBarcodeFormat = (format) => fbSetDoc('barcodeFormats', format.id, { ...format, city: effectiveCity });
   const deleteBarcodeFormat = (id) => fbDelete('barcodeFormats', id);
+  // Running "how many labels printed so far" per article/date/platform, so the
+  // Printed badge keeps adding up across several print runs the same day
+  // (e.g. printing 30 now, then another 30 later) instead of resetting each time.
+  const recordBarcodePrints = (entries) => {
+    entries.forEach((e) => {
+      const existing = barcodePrints.find((p) => p.key === e.key);
+      const id = existing ? existing.id : `BCP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      const printedQty = (existing?.printedQty || 0) + e.qty;
+      fbSetDoc('barcodePrints', id, { id, key: e.key, date: e.date, platform: e.platform, itemName: e.itemName, printedQty, city: effectiveCity });
+    });
+  };
   const updateCompanyDetails = (details) => fbSetDoc('settings', 'companyDetails', { ...companyDetailsByCity, [effectiveCity]: details });
   // Different articles from the same channel can map to the same base item but have
   // their own pack size (e.g. "Baby Banana" 500g vs "Banana 3pc" 600g, both on Blinkit,
@@ -1077,6 +1089,7 @@ export default function AdminPanel() {
 
   const cityItems = items.filter((it) => (it.city || CITIES[0]) === effectiveCity);
   const cityBarcodeFormats = barcodeFormats.filter((f) => (f.city || CITIES[0]) === effectiveCity);
+  const cityBarcodePrints = barcodePrints.filter((p) => (p.city || CITIES[0]) === effectiveCity);
   const companyDetails = companyDetailsByCity[effectiveCity] || { name: '', address: '', fssai: '' };
   const cityVendors = vendors.filter((v) => (v.city || CITIES[0]) === effectiveCity);
   const cityOrders = orders.filter((o) => (o.city || CITIES[0]) === effectiveCity);
@@ -1322,6 +1335,7 @@ export default function AdminPanel() {
               orders={cityOrders}
               packingProgress={packingProgress}
               barcodeFormats={cityBarcodeFormats}
+              barcodePrints={cityBarcodePrints}
               companyDetails={companyDetails}
               onSaveFormat={saveBarcodeFormat}
               onDeleteFormat={deleteBarcodeFormat}
@@ -1329,6 +1343,7 @@ export default function AdminPanel() {
               onUpdateAlias={mapChannelField}
               onUpdateAliasById={updateAliasById}
               onDeleteAliases={deleteAliasesByIds}
+              onRecordPrint={recordBarcodePrints}
             />
           )}
           {tab === 'users' && (
@@ -5819,6 +5834,35 @@ async function extractPdfText(file) {
   return fullText;
 }
 
+// Same as extractPdfText, but keeps each word's position instead of flattening
+// everything into one string. Zepto's GRN PDF (see parseZeptoGrnWords below)
+// wraps a multi-word item name onto two lines that straddle the row's own
+// numbers — a plain flattened-text regex reliably shreds those wrapped names
+// (a trailing word floats into the NEXT row) — so that parser reconstructs
+// each row from x/y position instead, which needs this richer per-word
+// extraction. Returns one array of { text, x, y } per page; y increases
+// downward (like a page you read top to bottom), unlike pdf.js's own
+// coordinate space which increases upward, so it's negated here once and
+// every consumer can treat "bigger y" as "further down the page".
+async function extractPdfWords(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const words = [];
+    content.items.forEach((item) => {
+      const x = item.transform[4];
+      const y = -item.transform[5];
+      String(item.str || '').split(/\s+/).filter(Boolean).forEach((w) => words.push({ text: w, x, y }));
+    });
+    pages.push(words);
+  }
+  return pages;
+}
+
 // ── Purchase Orders ──
 // A PO is the channel telling us what they'll PAY us per pack, so parsing it is
 // what turns "expected profit" from a typed-in guess into a per-article
@@ -5891,6 +5935,70 @@ function parsePoSheetRows(rows) {
   return out;
 }
 
+// ── Flipkart "Items Received" store receiving report, used as its GRN ──
+// Flipkart doesn't issue a GRN report at all — the closest thing is this CSV
+// each store exports after physically receiving a PO ("Items Received"), which
+// only carries product id/name/approved/received quantity, no price. So this
+// file isn't valued on its own: its Received Quantity is matched, by Product
+// ID, against the price on the PO already uploaded for this batch, and the
+// GRN amount is qty(received) * that PO's per-unit price (e.g. 10 units sent
+// @ ₹100 total = ₹10/unit; only 8 received -> ₹80 GRN amount).
+// The export's own quoting is minimal (only a couple of flower-name rows wrap
+// a comma in quotes), so a small quote-aware splitter is enough here instead
+// of pulling in the XLSX/CSV library used for the other channels' sheets.
+function splitFlipkartCsvLine(line) {
+  const out = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i += 1; }
+      else if (ch === '"') { inQuotes = false; }
+      else cur += ch;
+    } else if (ch === '"') { inQuotes = true; }
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+function parseFlipkartReceivingCsv(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  let headerIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const norm = normaliseHeader(lines[i]);
+    if (norm.includes('productid') && norm.includes('receivedquantity')) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return [];
+  const header = splitFlipkartCsvLine(lines[headerIdx]).map(normaliseHeader);
+  const idIdx = header.findIndex((h) => h.includes('productid'));
+  const nameIdx = header.findIndex((h) => h.includes('productdescription'));
+  const recvIdx = header.findIndex((h) => h.includes('receivedquantity'));
+  const rows = [];
+  for (let i = headerIdx + 1; i < lines.length; i += 1) {
+    if (!lines[i] || !lines[i].trim()) continue;
+    const cells = splitFlipkartCsvLine(lines[i]);
+    const code = (cells[idIdx] || '').trim();
+    const name = (cells[nameIdx] || '').trim();
+    if (!code || normaliseHeader(code).startsWith('total')) continue;
+    const qty = Number(String(cells[recvIdx] || '').replace(/,/g, '')) || 0;
+    if (qty > 0) rows.push({ code, name, qty });
+  }
+  return rows;
+}
+// Values each received row against the PO(s) already uploaded for this batch
+// (matched by Product ID) - qty is what was actually received, price is what
+// the PO said we'd be paid per unit for that product.
+function valueFlipkartReceiving(receivingRows, poRows) {
+  const priceByCode = new Map();
+  (poRows || []).forEach((r) => { if (r.code && !priceByCode.has(r.code)) priceByCode.set(r.code, r.price); });
+  return receivingRows.map((r) => {
+    const price = priceByCode.get(r.code) || 0;
+    return { code: r.code, name: r.name, qty: r.qty, price, total: Math.round(r.qty * price * 100) / 100 };
+  });
+}
+
 // Hyperpure's PO PDF flattens to: productNo name HSN MRP margin qty pricePerUnit
 // UoM gst% taxPerUnit total. The UoM is free text ("200 g", "1 unit (150 - 160 g)")
 // so it's matched loosely between the two numeric runs.
@@ -5930,6 +6038,72 @@ function parseGrnPdfText(text) {
     const price = rateGrn === '-' ? 0 : Number(rateGrn) || 0;
     if (qty > 0) rows.push({ code: code.trim(), name: desc.trim(), qty, price });
   }
+  return rows;
+}
+
+// ── Zepto GRN report PDFs ──
+// Unlike Blinkit's, Zepto's GRN table has no item code column at all — the
+// "SKU" column is just the plain item name — and a two-word-or-longer name
+// wraps onto a second line that straddles the row's own numbers (e.g. "Pumpkin"
+// sits just above the "3 ... 60" line and "Green" sits just below it). Flattening
+// the page to one line of text and reading it left to right, the way every other
+// PDF parser above does, shifts each wrapped word into the following row's name
+// instead — so this reconstructs rows from each word's position (extractPdfWords)
+// instead of from flattened text.
+//
+// The row's own number line still parses in a fixed left-to-right order — Exp
+// qty, Recv qty, Unit Price, Taxable value, four CGST/SGST/IGST/Cess rate-and-
+// amount pairs, then Total — but only the first four and the last of those are
+// used (matches priceForCode's fallback in grnValueForBatch: qty * price = Recv
+// qty * Unit Price, which is the whole point of parsing this file — Total comes
+// along mostly to sanity-check that against Taxable value while debugging).
+function parseZeptoGrnWords(pages) {
+  const isNum = (s) => /^-?\d+(\.\d+)?$/.test(s);
+  const rows = [];
+  let expectedSr = 1;
+
+  pages.forEach((words) => {
+    if (!words.length) return;
+    const sorted = [...words].sort((a, b) => a.y - b.y || a.x - b.x);
+    // The table header repeats on every page — "SKU" marks where the item
+    // rows start, and the summary "Total" row (a lone "Total" hard against
+    // the left margin, unlike the per-row "Total(INR)" column) marks where
+    // they end. Without these, the first/last row on a page would swallow
+    // the header text above it or the grand-total line below it.
+    const headerY = words.filter((w) => w.text === 'SKU').reduce((m, w) => Math.max(m, w.y), -Infinity);
+    const footerY = words.filter((w) => w.text === 'Total' && w.x < 30).reduce((m, w) => Math.min(m, w.y), Infinity);
+
+    const anchors = [];
+    sorted.forEach((w) => {
+      if (w.x < 20 && isNum(w.text) && Number(w.text) === expectedSr) {
+        anchors.push(w);
+        expectedSr += 1;
+      }
+    });
+
+    anchors.forEach((a, i) => {
+      const prevY = i > 0 ? anchors[i - 1].y : headerY;
+      const nextY = i + 1 < anchors.length ? anchors[i + 1].y : footerY;
+      const bandLo = i > 0 ? (prevY + a.y) / 2 : Math.max(headerY, a.y - 15);
+      const bandHi = i + 1 < anchors.length ? (a.y + nextY) / 2 : Math.min(footerY, a.y + 15);
+      const bandWords = words.filter((w) => w !== a && w.y >= bandLo && w.y < bandHi);
+
+      const nameWords = bandWords
+        .filter((w) => !isNum(w.text) && w.x < 115)
+        .sort((p, q) => p.y - q.y || p.x - q.x);
+      const name = nameWords.map((w) => w.text).join(' ');
+
+      const lineNums = bandWords
+        .filter((w) => isNum(w.text) && Math.abs(w.y - a.y) < 1.5)
+        .sort((p, q) => p.x - q.x);
+      if (lineNums.length < 5) return;
+      const recvQty = Number(lineNums[1].text) || 0;
+      const unitPrice = Number(lineNums[2].text) || 0;
+      const total = Number(lineNums[lineNums.length - 1].text) || 0;
+      if (recvQty > 0 && name) rows.push({ name, qty: recvQty, price: unitPrice, total });
+    });
+  });
+
   return rows;
 }
 
@@ -6704,7 +6878,7 @@ const STD_BARCODE_FIELD_DEFS = [
   { key: 'storeTemperature', label: 'Store Temperature' },
 ];
 
-function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias, onUpdateAliasById, onDeleteAliases }) {
+function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, barcodePrints, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias, onUpdateAliasById, onDeleteAliases, onRecordPrint }) {
   const [view, setView] = useState('print'); // 'print' | 'formats' | 'mapping' | 'business'
   const views = [
     { key: 'print', label: 'Print Labels' },
@@ -6730,7 +6904,7 @@ function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, co
           </button>
         ))}
       </div>
-      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} />}
+      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} barcodePrints={barcodePrints} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} onRecordPrint={onRecordPrint} />}
       {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
       {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} orders={orders} onMapFormat={(itemId, aliasId, formatId) => onUpdateAliasById(itemId, aliasId, { barcodeFormatId: formatId })} onUpdateAliasById={onUpdateAliasById} onUpdateAlias={onUpdateAlias} onDeleteAliases={onDeleteAliases} />}
       {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
@@ -7342,7 +7516,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
   );
 }
 
-function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, companyDetails, onUpdateAlias }) {
+function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barcodePrints, companyDetails, onUpdateAlias, onRecordPrint }) {
   const [platform, setPlatform] = useState(PLATFORMS[0]);
   // Blinkit's own indent only ever supplies its internal item code, never a real
   // retail UPC — so the printed barcode/QR graphic uses the UPC entered for this
@@ -7406,6 +7580,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
   const selectAllArticles = () => setSelectedKeys(new Set(articles.map((a) => a.key)));
   const clearAllArticles = () => setSelectedKeys(new Set());
   const qtyFor = (a) => qtyOverrides[a.key] ?? (a.packedQty || a.targetPacks || 0);
+  // How many of this article's labels have already been printed today, across
+  // every print run (single-row prints and the bulk "Print labels" button both
+  // add to the same running total) — shown as the small "Printed N" badge.
+  const printedFor = (a) => barcodePrints.find((p) => p.key === a.key)?.printedQty || 0;
   const codeFor = (a) => codeOverrides[a.key] ?? a.code;
   const upcFor = (a) => upcOverrides[a.key] ?? a.upc ?? '';
   // Article Name and UOM default from this print run's order data, but once saved
@@ -7609,6 +7787,9 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
     if (!w) { alert('Please allow popups to print labels.'); return; }
     w.document.write(html);
     w.document.close();
+    if (onRecordPrint) {
+      onRecordPrint(toPrint.map((a) => ({ key: a.key, date, platform, itemName: nameFor(a), qty: Math.max(1, Math.round(qtyFor(a))) })));
+    }
   };
 
   const editingArticle = editingArticleKey ? articles.find((a) => a.key === editingArticleKey) : null;
@@ -7675,6 +7856,11 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, compa
                         onBlur={() => saveRow(a)}
                         style={{ fontSize: 13, width: 160, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
+                      {printedFor(a) > 0 && (
+                        <span style={{ display: 'inline-block', marginTop: 4, background: 'rgba(47,82,51,0.12)', color: LEAF, fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '2px 8px' }}>
+                          Printed {printedFor(a)}
+                        </span>
+                      )}
                     </Td>
                     <Td>
                       <input
@@ -8143,7 +8329,11 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     };
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     if (isPdf) {
-      extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name, t)).catch(() => setPoError('Could not read this PDF.'));
+      if (batch.platform === 'Zepto') {
+        extractPdfText(file).then((t) => { const parsed = parseZeptoPoText(t); finish(parsed.rows, file.name, t); }).catch(() => setPoError('Could not read this PDF.'));
+      } else {
+        extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name, t)).catch(() => setPoError('Could not read this PDF.'));
+      }
       e.target.value = '';
       return;
     }
@@ -8167,8 +8357,32 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
       onUploadGrn(batch.platform, batchDate, name, rows, batch.id);
     };
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const isCsv = file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv');
     if (isPdf) {
-      extractPdfText(file).then((t) => finish(parseGrnPdfText(t), file.name)).catch(() => setGrnError('Could not read this PDF.'));
+      if (batch.platform === 'Zepto') {
+        extractPdfWords(file).then((pages) => finish(parseZeptoGrnWords(pages), file.name)).catch(() => setGrnError('Could not read this PDF.'));
+      } else {
+        extractPdfText(file).then((t) => finish(parseGrnPdfText(t), file.name)).catch(() => setGrnError('Could not read this PDF.'));
+      }
+      e.target.value = '';
+      return;
+    }
+    // Flipkart has no GRN report of its own - the store's "Items Received"
+    // export is used instead, valued against the PO(s) already uploaded here.
+    if (isCsv && batch.platform === 'Flipkart') {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const receivingRows = parseFlipkartReceivingCsv(String(ev.target.result || ''));
+          if (!receivingRows.length) { setGrnError('No item rows found in this receiving file.'); return; }
+          const poRows = (bf.poReports || []).flatMap((r) => r.rows);
+          const grnRows = valueFlipkartReceiving(receivingRows, poRows);
+          finish(grnRows, file.name);
+          const unmatchedCount = grnRows.filter((r) => !r.price).length;
+          if (unmatchedCount) setGrnError(`${unmatchedCount} item(s) could not be matched to an uploaded PO price and were recorded at ₹0 - upload the matching PO first for full accuracy.`);
+        } catch (err) { setGrnError('Could not read this file - use the "Items Received" CSV export.'); }
+      };
+      reader.readAsText(file);
       e.target.value = '';
       return;
     }
@@ -8233,7 +8447,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => poRef.current && poRef.current.click()} style={btn}><Upload size={13} /> {bf.poReports.length ? 'Add another PO' : 'Add PO'}</button>
             <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handlePoFile} style={{ display: 'none' }} />
-            <button onClick={() => grnRef.current && grnRef.current.click()} style={btn}><Upload size={13} /> {reports.length ? 'Add another GRN' : 'Upload GRN'}</button>
+            <button onClick={() => grnRef.current && grnRef.current.click()} style={btn}><Upload size={13} /> {batch.platform === 'Flipkart' ? (reports.length ? 'Add another Receiving' : 'Upload Receiving') : (reports.length ? 'Add another GRN' : 'Upload GRN')}</button>
             <input ref={grnRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
           </div>
         </div>
