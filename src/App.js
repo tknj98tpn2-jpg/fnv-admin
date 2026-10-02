@@ -1710,6 +1710,16 @@ function formatLabelDate(d) {
   if (!m) return d;
   return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
 }
+// Some channels (Zepto) don't want a full "Best Before: DD/MM/YY" printed —
+// just the expiry's own day-of-month as a bare number in a small box, which is
+// enough for staff doing FIFO within the same month and takes far less label
+// space. E.g. packed 2/10 with a 4-day shelf life -> expiry 6/10 -> shows "6".
+function expiryDayNumber(d) {
+  if (!d) return '';
+  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '';
+  return String(Number(m[3]));
+}
 const isDueEntry = (e) => e.payment === 'credit' && !e.settled;
 const money = (n) => `₹${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-IN')}`;
 const COMPANY_NAME = 'NILGIRI FNV SUPPLIER COMPANY';
@@ -6875,6 +6885,11 @@ const STD_BARCODE_FIELD_DEFS = [
   { key: 'expiryDate', label: 'Expiry Date' },
   { key: 'companyDetails', label: 'Company Details (Name + Address + FSSAI)' },
   { key: 'showBarcodeNumber', label: 'Show barcode number as text' },
+  // Separate from "Show barcode number as text" (which is tied to the barcode
+  // graphic itself) - this is its own independent text line with the EAN, so
+  // it can be dragged/resized anywhere on the label, even on a format that
+  // doesn't print the barcode graphic at all.
+  { key: 'eanText', label: 'Add EAN number as text' },
   { key: 'storeTemperature', label: 'Store Temperature' },
 ];
 
@@ -6905,7 +6920,29 @@ function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, ba
         ))}
       </div>
       {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} barcodePrints={barcodePrints} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} onRecordPrint={onRecordPrint} />}
-      {view === 'formats' && <BarcodeFormatsTab formats={barcodeFormats} onSave={onSaveFormat} onDelete={onDeleteFormat} />}
+      {view === 'formats' && (
+        <BarcodeFormatsTab
+          formats={barcodeFormats}
+          companyDetails={companyDetails}
+          onSave={(f) => {
+            onSaveFormat(f);
+            // "Apply to all" locks every article mapped to this format onto its
+            // one shared layout — so any per-article layout saved earlier (from
+            // the pencil icon in Print Labels) is cleared the moment this is
+            // turned on, which is what actually makes them "the same" again.
+            if (f.applyToAll) {
+              items.forEach((it) => {
+                (it.aliases || []).forEach((al) => {
+                  if (al.barcodeFormatId === f.id && al.layoutOverride) {
+                    onUpdateAliasById(it.id, al.id, { layoutOverride: null });
+                  }
+                });
+              });
+            }
+          }}
+          onDelete={onDeleteFormat}
+        />
+      )}
       {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} orders={orders} onMapFormat={(itemId, aliasId, formatId) => onUpdateAliasById(itemId, aliasId, { barcodeFormatId: formatId })} onUpdateAliasById={onUpdateAliasById} onUpdateAlias={onUpdateAlias} onDeleteAliases={onDeleteAliases} />}
       {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
     </div>
@@ -6943,10 +6980,10 @@ function formatFieldSummary(f) {
   return parts.join(' · ') || 'No fields selected';
 }
 
-function BarcodeFormatsTab({ formats, onSave, onDelete }) {
+function BarcodeFormatsTab({ formats, companyDetails, onSave, onDelete }) {
   const [editing, setEditing] = useState(null);
 
-  if (editing) return <BarcodeFormatEditor format={editing} onSave={(f) => { onSave(f); setEditing(null); }} onCancel={() => setEditing(null)} />;
+  if (editing) return <BarcodeFormatEditor format={editing} companyDetails={companyDetails} onSave={(f) => { onSave(f); setEditing(null); }} onCancel={() => setEditing(null)} />;
 
   return (
     <div>
@@ -6981,58 +7018,217 @@ function BarcodeFormatsTab({ formats, onSave, onDelete }) {
   );
 }
 
-function BarcodeFormatEditor({ format, onSave, onCancel }) {
+// Sample content the live preview renders with — a format is edited before any
+// real article is necessarily mapped to it, so the preview can't use real data.
+const PREVIEW_ARTICLE = { itemName: 'Sample Item', netWeight: '500 g', code: '8901234567890' };
+
+function BarcodeFormatEditor({ format, companyDetails, onSave, onCancel }) {
   const [name, setName] = useState(format.name);
   const [standardFields, setStandardFields] = useState(format.standardFields);
   const [customFields, setCustomFields] = useState(format.customFields || []);
   const [storeTemperatureText, setStoreTemperatureText] = useState(format.storeTemperatureText || '');
+  const [applyToAll, setApplyToAll] = useState(!!format.applyToAll);
+  // The live preview's own field layout (position + size) — starts from the
+  // format's saved layout (or the stacked default if it's never been opened
+  // here before) and is what "Save format" persists back onto the format.
+  const [layout, setLayout] = useState(() => ({ ...defaultLabelLayout(format), ...(format.layout || {}) }));
+  const [selected, setSelected] = useState(null);
+  const dragRef = useRef(null);
+  const canvasRef = useRef(null);
+  const SCALE = 6; // 50mm label drawn at 300x300px, same convention as the per-article editor
+
+  // Toggling a field on should give it a sensible starting position without ever
+  // disturbing a field that's already been placed — so this only ever ADDS
+  // missing defaults, never overwrites an existing entry.
+  useEffect(() => {
+    setLayout((l) => {
+      const defaults = defaultLabelLayout({ standardFields, customFields });
+      let changed = false;
+      const next = { ...l };
+      Object.keys(defaults).forEach((k) => { if (!next[k]) { next[k] = defaults[k]; changed = true; } });
+      return changed ? next : l;
+    });
+  }, [standardFields, customFields]);
 
   const toggleStd = (key) => setStandardFields((s) => ({ ...s, [key]: !s[key] }));
   const addCustom = () => setCustomFields((c) => [...c, { id: `CF-${Date.now().toString(36).toUpperCase()}-${c.length}`, label: '', value: '' }]);
   const updateCustom = (id, patch) => setCustomFields((c) => c.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   const removeCustom = (id) => setCustomFields((c) => c.filter((f) => f.id !== id));
   const canSave = name.trim().length > 0;
-  const save = () => { if (canSave) onSave({ ...format, name: name.trim(), standardFields, customFields: customFields.filter((f) => f.label.trim()), storeTemperatureText: storeTemperatureText.trim() }); };
+  const save = () => {
+    if (!canSave) return;
+    onSave({ ...format, name: name.trim(), standardFields, customFields: customFields.filter((f) => f.label.trim()), storeTemperatureText: storeTemperatureText.trim(), layout, applyToAll });
+  };
+
+  const activeKeys = LABEL_FIELD_DEFS
+    .filter((d) => {
+      if (d.key === 'barcode') return standardFields.printBarcode !== false;
+      if (d.key === 'qr') return !!standardFields.printQR;
+      if (d.key === 'itemName') return !!standardFields.itemName;
+      if (d.key === 'netWeight') return !!standardFields.netWeight;
+      if (d.key === 'packingDate') return !!standardFields.packingDate;
+      if (d.key === 'expiryDate') return !!standardFields.expiryDate;
+      if (d.key === 'eanText') return !!standardFields.eanText;
+      if (d.key === 'storeTemperature') return !!standardFields.storeTemperature;
+      if (['companyName', 'companyAddress', 'fssai'].includes(d.key)) return !!standardFields.companyDetails;
+      return true;
+    })
+    .map((d) => d.key)
+    .concat(customFields.filter((cf) => cf.label.trim()).map((cf) => `custom_${cf.id}`));
+
+  const defForKey = (key) => LABEL_FIELD_DEFS.find((d) => d.key === key) || { kind: 'text', hasPrefix: true };
+  const contentFor = (key) => {
+    if (key === 'itemName') return PREVIEW_ARTICLE.itemName;
+    if (key === 'netWeight') return PREVIEW_ARTICLE.netWeight;
+    if (key === 'packingDate') return formatLabelDate(todayLocalDate());
+    if (key === 'expiryDate') return formatLabelDate(addDaysToDateStr(todayLocalDate(), 4));
+    if (key === 'eanText') return PREVIEW_ARTICLE.code;
+    if (key === 'storeTemperature') return storeTemperatureText || '(store temperature)';
+    if (key === 'companyName') return companyDetails?.name || '(company name)';
+    if (key === 'companyAddress') return companyDetails?.address || '(address)';
+    if (key === 'fssai') return companyDetails?.fssai || '(FSSAI number)';
+    const cf = customFields.find((c) => `custom_${c.id}` === key);
+    return cf ? cf.value : '';
+  };
+
+  const startDrag = (e, key) => {
+    e.preventDefault();
+    setSelected(key);
+    const entry = layout[key] || { x: 25, y: 25, size: 10 };
+    dragRef.current = { key, startX: e.clientX, startY: e.clientY, origX: entry.x, origY: entry.y };
+  };
+  const onCanvasMouseMove = (e) => {
+    if (!dragRef.current) return;
+    const { key, startX, startY, origX, origY } = dragRef.current;
+    const dx = (e.clientX - startX) / SCALE;
+    const dy = (e.clientY - startY) / SCALE;
+    setLayout((l) => ({ ...l, [key]: { ...l[key], x: Math.max(0, Math.min(50, origX + dx)), y: Math.max(0, Math.min(50, origY + dy)) } }));
+  };
+  const stopDrag = () => { dragRef.current = null; };
+  const adjustSize = (key, delta) => setLayout((l) => ({ ...l, [key]: { ...l[key], size: Math.max(4, Math.round(((l[key]?.size || 10) + delta) * 10) / 10) } }));
+  const setPrefix = (key, prefix) => setLayout((l) => ({ ...l, [key]: { ...l[key], prefix } }));
 
   return (
-    <Panel style={{ maxWidth: 560 }}>
+    <Panel style={{ maxWidth: 920 }}>
       <p style={{ margin: '0 0 16px', fontWeight: 700, fontSize: 14, color: INK }}>{format.name ? 'Edit format' : 'New format'}</p>
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>FORMAT NAME</p>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Blinkit Basic" style={inputStyle} />
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>FORMAT NAME</p>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Blinkit Basic" style={inputStyle} />
 
-      <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>FIELDS TO INCLUDE</p>
-      {STD_BARCODE_FIELD_DEFS.map((d) => (
-        <div key={d.key} style={{ marginBottom: 8 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: INK }}>
-            <input type="checkbox" checked={!!standardFields[d.key]} onChange={() => toggleStd(d.key)} />
-            {d.label}
-          </label>
-          {d.key === 'storeTemperature' && standardFields.storeTemperature && (
-            <input
-              value={storeTemperatureText}
-              onChange={(e) => setStoreTemperatureText(e.target.value)}
-              placeholder="e.g. Store below 4°C / Store in a cool, dry place"
-              style={{ ...inputStyle, marginTop: 6, marginBottom: 0, marginLeft: 24, width: 'calc(100% - 24px)' }}
-            />
+          <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>FIELDS TO INCLUDE</p>
+          {STD_BARCODE_FIELD_DEFS.map((d) => (
+            <div key={d.key} style={{ marginBottom: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: INK }}>
+                <input type="checkbox" checked={!!standardFields[d.key]} onChange={() => toggleStd(d.key)} />
+                {d.label}
+              </label>
+              {d.key === 'storeTemperature' && standardFields.storeTemperature && (
+                <input
+                  value={storeTemperatureText}
+                  onChange={(e) => setStoreTemperatureText(e.target.value)}
+                  placeholder="e.g. Store below 4°C / Store in a cool, dry place"
+                  style={{ ...inputStyle, marginTop: 6, marginBottom: 0, marginLeft: 24, width: 'calc(100% - 24px)' }}
+                />
+              )}
+              {d.key === 'expiryDate' && standardFields.expiryDate && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: MUTED, cursor: 'pointer', marginTop: 6, marginLeft: 24 }}>
+                  <input type="checkbox" checked={!!standardFields.expiryDateAsNumber} onChange={() => toggleStd('expiryDateAsNumber')} />
+                  Show only the expiry day-of-month as a number in a small box, instead of a full date (e.g. "6" instead of "06/10/26")
+                </label>
+              )}
+            </div>
+          ))}
+
+          <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>CUSTOM FIELDS (any extra number, symbol, or note)</p>
+          {customFields.map((cf) => (
+            <div key={cf.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <input placeholder="Label (e.g. HSN Code)" value={cf.label} onChange={(e) => updateCustom(cf.id, { label: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+              <input placeholder="Value" value={cf.value} onChange={(e) => updateCustom(cf.id, { value: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+              <button onClick={() => removeCustom(cf.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', flexShrink: 0 }}><Trash2 size={15} /></button>
+            </div>
+          ))}
+          <button onClick={addCustom} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: `1px dashed ${LINE}`, borderRadius: RADIUS.md, padding: '8px 12px', fontSize: 12, fontWeight: 700, color: LEAF, cursor: 'pointer', marginBottom: 18 }}>
+            <Plus size={13} /> Add custom field
+          </button>
+
+          <div style={{ background: '#F6F3EA', borderRadius: RADIUS.md, padding: 12, marginBottom: 18 }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer', color: INK, fontWeight: 700 }}>
+              <input type="checkbox" checked={applyToAll} onChange={(e) => setApplyToAll(e.target.checked)} style={{ marginTop: 2 }} />
+              Apply this layout to all mapped articles
+            </label>
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: MUTED }}>
+              When on, every article mapped to this format prints with exactly this layout — any individual sizing/position saved earlier for a specific article (via the pencil icon in Print Labels) is cleared and that article can no longer be customised on its own.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={save} disabled={!canSave} style={{ background: canSave ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: canSave ? 'pointer' : 'default' }}>Save format</button>
+            <button onClick={onCancel} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </div>
+
+        <div style={{ flex: '0 0 auto' }}>
+          <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>LIVE PREVIEW — drag a field to move it, click it to resize</p>
+          <div
+            ref={canvasRef}
+            onMouseMove={onCanvasMouseMove}
+            onMouseUp={stopDrag}
+            onMouseLeave={stopDrag}
+            style={{ position: 'relative', width: 50 * SCALE, height: 50 * SCALE, background: '#fafaf7', border: `1px solid ${LINE}`, flexShrink: 0, userSelect: 'none' }}
+          >
+            {activeKeys.map((key) => {
+              const entry = layout[key] || { x: 25, y: 25, size: 10 };
+              const def = defForKey(key);
+              const isSelected = selected === key;
+              const commonStyle = {
+                position: 'absolute', left: entry.x * SCALE, top: entry.y * SCALE, transform: 'translateX(-50%)',
+                cursor: 'move', outline: isSelected ? `1.5px dashed ${LEAF}` : 'none', outlineOffset: 2, padding: 1, whiteSpace: 'nowrap',
+              };
+              if (def.kind === 'graphic') {
+                const pxSize = entry.size * SCALE;
+                const markup = key === 'barcode' ? barcodeSVGMarkup(PREVIEW_ARTICLE.code, pxSize, pxSize * 0.3, standardFields.showBarcodeNumber !== false) : qrSVGMarkup(PREVIEW_ARTICLE.code, pxSize);
+                return <div key={key} onMouseDown={(e) => startDrag(e, key)} style={commonStyle} dangerouslySetInnerHTML={{ __html: markup }} />;
+              }
+              // The expiry-as-a-number mode draws a small resizable box with just
+              // the day digit inside, instead of the usual "prefix + date" line.
+              if (key === 'expiryDate' && standardFields.expiryDateAsNumber) {
+                const box = entry.size * (SCALE / 3.78) * 1.8;
+                return (
+                  <div
+                    key={key}
+                    onMouseDown={(e) => startDrag(e, key)}
+                    style={{ ...commonStyle, width: box, height: box, border: '1.5px solid #000', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: entry.size * (SCALE / 3.78), fontWeight: 700, fontFamily: 'Arial, sans-serif', color: '#000', boxSizing: 'border-box' }}
+                  >
+                    {expiryDayNumber(addDaysToDateStr(todayLocalDate(), 4)) || '6'}
+                  </div>
+                );
+              }
+              const text = (def.hasPrefix ? `${entry.prefix ?? ''} ` : '') + contentFor(key);
+              return (
+                <div key={key} onMouseDown={(e) => startDrag(e, key)} style={{ ...commonStyle, fontSize: entry.size * (SCALE / 3.78), fontWeight: key === 'itemName' ? 700 : 600, fontFamily: 'Arial, sans-serif', color: '#000' }}>
+                  {text}
+                </div>
+              );
+            })}
+          </div>
+          {selected && (
+            <div style={{ marginTop: 10, width: 50 * SCALE, boxSizing: 'border-box' }}>
+              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{defForKey(selected).kind === 'graphic' ? 'SIZE (mm)' : (selected === 'expiryDate' && standardFields.expiryDateAsNumber ? 'BOX SIZE' : 'FONT SIZE (px)')}</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <button onClick={() => adjustSize(selected, -1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>−</button>
+                <span style={{ fontSize: 13, minWidth: 30, textAlign: 'center' }}>{layout[selected]?.size ?? 10}</span>
+                <button onClick={() => adjustSize(selected, 1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>+</button>
+              </div>
+              {defForKey(selected).hasPrefix && !(selected === 'expiryDate' && standardFields.expiryDateAsNumber) && (
+                <>
+                  <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL TEXT</p>
+                  <input value={layout[selected]?.prefix ?? ''} onChange={(e) => setPrefix(selected, e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+                </>
+              )}
+            </div>
           )}
         </div>
-      ))}
-
-      <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>CUSTOM FIELDS (any extra number, symbol, or note)</p>
-      {customFields.map((cf) => (
-        <div key={cf.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          <input placeholder="Label (e.g. HSN Code)" value={cf.label} onChange={(e) => updateCustom(cf.id, { label: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-          <input placeholder="Value" value={cf.value} onChange={(e) => updateCustom(cf.id, { value: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-          <button onClick={() => removeCustom(cf.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', flexShrink: 0 }}><Trash2 size={15} /></button>
-        </div>
-      ))}
-      <button onClick={addCustom} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: `1px dashed ${LINE}`, borderRadius: RADIUS.md, padding: '8px 12px', fontSize: 12, fontWeight: 700, color: LEAF, cursor: 'pointer', marginBottom: 18 }}>
-        <Plus size={13} /> Add custom field
-      </button>
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={save} disabled={!canSave} style={{ background: canSave ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: canSave ? 'pointer' : 'default' }}>Save format</button>
-        <button onClick={onCancel} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
       </div>
     </Panel>
   );
@@ -7306,6 +7502,7 @@ function defaultLabelLayout(format) {
   if (sf.netWeight) { layout.netWeight = { x: cx, y, size: 9.5, prefix: 'Net Wt:' }; y += 4.5; }
   if (sf.packingDate) { layout.packingDate = { x: cx, y, size: 9.5, prefix: 'Packed:' }; y += 4.5; }
   if (sf.expiryDate) { layout.expiryDate = { x: cx, y, size: 9.5, prefix: 'Best Before:' }; y += 4.5; }
+  if (sf.eanText) { layout.eanText = { x: cx, y, size: 8, prefix: 'EAN:' }; y += 4; }
   if (sf.storeTemperature) { layout.storeTemperature = { x: cx, y, size: 7 }; y += 3.5; }
   if (sf.companyDetails) {
     layout.companyName = { x: cx, y, size: 8 }; y += 3.5;
@@ -7334,6 +7531,7 @@ const LABEL_FIELD_DEFS = [
   { key: 'netWeight', kind: 'text', hasPrefix: true },
   { key: 'packingDate', kind: 'text', hasPrefix: true },
   { key: 'expiryDate', kind: 'text', hasPrefix: true },
+  { key: 'eanText', kind: 'text', hasPrefix: true },
   { key: 'storeTemperature', kind: 'text', hasPrefix: false },
   { key: 'companyName', kind: 'text', hasPrefix: false },
   { key: 'companyAddress', kind: 'text', hasPrefix: false },
@@ -7362,6 +7560,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
       if (d.key === 'netWeight') return !!sf.netWeight;
       if (d.key === 'packingDate') return !!sf.packingDate;
       if (d.key === 'expiryDate') return !!sf.expiryDate;
+      if (d.key === 'eanText') return !!sf.eanText;
       if (d.key === 'storeTemperature') return !!sf.storeTemperature;
       if (['companyName', 'companyAddress', 'fssai'].includes(d.key)) return !!sf.companyDetails;
       return true;
@@ -7375,6 +7574,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
     if (key === 'netWeight') return article.netWeight;
     if (key === 'packingDate') return article.packingDate;
     if (key === 'expiryDate') return article.expiryDate;
+    if (key === 'eanText') return article.code;
     if (key === 'storeTemperature') return format.storeTemperatureText || '(store temperature)';
     if (key === 'companyName') return companyDetails.name || '(company name)';
     if (key === 'companyAddress') return companyDetails.address || '(address)';
@@ -7456,6 +7656,18 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
                   <div key={key} onMouseDown={(e) => startDrag(e, key)} style={commonStyle} dangerouslySetInnerHTML={{ __html: markup }} />
                 );
               }
+              if (key === 'expiryDate' && format.standardFields?.expiryDateAsNumber) {
+                const box = entry.size * (SCALE / 3.78) * 1.8;
+                return (
+                  <div
+                    key={key}
+                    onMouseDown={(e) => startDrag(e, key)}
+                    style={{ ...commonStyle, width: box, height: box, border: '1.5px solid #000', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: entry.size * (SCALE / 3.78), fontWeight: 700, fontFamily: 'Arial, sans-serif', color: '#000', boxSizing: 'border-box' }}
+                  >
+                    {expiryDayNumber(article.expiryDateRaw) || '6'}
+                  </div>
+                );
+              }
               const text = (def.hasPrefix ? `${entry.prefix ?? ''} ` : '') + contentFor(key);
               return (
                 <div key={key} onMouseDown={(e) => startDrag(e, key)} style={{ ...commonStyle, fontSize: entry.size * (SCALE / 3.78), fontWeight: key === 'itemName' ? 700 : 600, fontFamily: 'Arial, sans-serif', color: '#000' }}>
@@ -7478,7 +7690,7 @@ function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
                   <span style={{ fontSize: 13, minWidth: 30, textAlign: 'center' }}>{layout[selected]?.size ?? 10}</span>
                   <button onClick={() => adjustSize(selected, 1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>+</button>
                 </div>
-                {defForKey(selected).hasPrefix && (
+                {defForKey(selected).hasPrefix && !(selected === 'expiryDate' && format.standardFields?.expiryDateAsNumber) && (
                   <>
                     <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL TEXT</p>
                     <input value={layout[selected]?.prefix ?? ''} onChange={(e) => setPrefix(selected, e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
@@ -7661,7 +7873,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
     // size, since its coordinates are defined against that exact label — A4
     // sheets keep the plain stacked layout regardless.
     const renderWithLayout = (a, format, sf) => {
-      const layout = a.layoutOverride || format.layout;
+      // A format with "apply to all" locks every mapped article onto its own
+      // layout, so an article's individual override (if any is still lying
+      // around from before that was turned on) is never allowed to win.
+      const layout = (!format.applyToAll && a.layoutOverride) || format.layout;
       const barcodeValue = barcodeValueFor(a);
       let html = '<div class="label-abs">';
       LABEL_FIELD_DEFS.forEach((d) => {
@@ -7674,8 +7889,13 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
           const px = entry.size * 3.78;
           const markup = d.key === 'barcode' ? barcodeSVGMarkup(barcodeValue, px, px * 0.3, sf.showBarcodeNumber !== false) : qrSVGMarkup(barcodeValue, px);
           if (markup) html += `<div style="${style}">${markup}</div>`;
+        } else if (d.key === 'expiryDate' && sf.expiryDateAsNumber) {
+          // Day-of-month-only mode: a small bordered box with just the digit(s),
+          // instead of the usual "Best Before: DD/MM/YY" line.
+          const box = entry.size * 1.8;
+          html += `<div style="${style} width:${box}px; height:${box}px; box-sizing:border-box; border:1.5px solid #000; border-radius:2px; display:flex; align-items:center; justify-content:center; font-size:${entry.size}px; font-weight:700; font-family:Arial,sans-serif; color:#000;">${expiryDayNumber(bestBeforeFor(a))}</div>`;
         } else {
-          const content = { itemName: nameFor(a), netWeight: uomFor(a), packingDate: formatLabelDate(date), expiryDate: formatLabelDate(bestBeforeFor(a)) || '___________', storeTemperature: format.storeTemperatureText || '', companyName: companyDetails.name || '', companyAddress: (companyDetails.address || '').replace(/\n/g, '<br/>'), fssai: companyDetails.fssai || '' }[d.key];
+          const content = { itemName: nameFor(a), netWeight: uomFor(a), packingDate: formatLabelDate(date), expiryDate: formatLabelDate(bestBeforeFor(a)) || '___________', eanText: barcodeValue, storeTemperature: format.storeTemperatureText || '', companyName: companyDetails.name || '', companyAddress: (companyDetails.address || '').replace(/\n/g, '<br/>'), fssai: companyDetails.fssai || '' }[d.key];
           const prefix = d.hasPrefix && entry.prefix ? `${entry.prefix} ` : '';
           const weight = d.key === 'itemName' ? 700 : 600;
           html += `<div style="${style} font-size:${entry.size}px; font-weight:${weight}; font-family:Arial,sans-serif; color:#000;">${prefix}${content}</div>`;
@@ -7717,7 +7937,12 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
       if (sf.itemName) oneLabel += `<div class="lbl-line lbl-name">${nameFor(a)}</div>`;
       if (sf.netWeight) oneLabel += `<div class="lbl-line lbl-key">Net Wt: ${netWeight}</div>`;
       if (sf.packingDate) oneLabel += `<div class="lbl-line lbl-key">Packed: ${formatLabelDate(date)}</div>`;
-      if (sf.expiryDate) oneLabel += `<div class="lbl-line lbl-key">Best Before: ${formatLabelDate(bestBeforeFor(a)) || '___________'}</div>`;
+      if (sf.expiryDate && sf.expiryDateAsNumber) {
+        oneLabel += `<div class="lbl-line lbl-key"><span style="display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border:1.5px solid #000; border-radius:2px; font-weight:700;">${expiryDayNumber(bestBeforeFor(a))}</span></div>`;
+      } else if (sf.expiryDate) {
+        oneLabel += `<div class="lbl-line lbl-key">Best Before: ${formatLabelDate(bestBeforeFor(a)) || '___________'}</div>`;
+      }
+      if (sf.eanText) oneLabel += `<div class="lbl-line lbl-key">EAN: ${barcodeValueFor(a)}</div>`;
       if (sf.storeTemperature && format?.storeTemperatureText) oneLabel += `<div class="lbl-line lbl-key">${format.storeTemperatureText}</div>`;
       if (sf.companyDetails) {
         oneLabel += `<div class="lbl-line lbl-company-name">${companyDetails.name || ''}</div>`;
@@ -7846,7 +8071,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
               <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Barcode (EAN)</Th>{platform === 'Blinkit' && <Th>UPC Code</Th>}<Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
               <tbody>
-                {articles.map((a) => (
+                {articles.map((a) => {
+                  const rowFormat = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
+                  const layoutLocked = !!rowFormat?.applyToAll;
+                  return (
                   <tr key={a.key}>
                     <Td><input type="checkbox" checked={selectedKeys.has(a.key)} onChange={() => toggle(a.key)} /></Td>
                     <Td>
@@ -7936,16 +8164,17 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
                         </button>
                         <button
                           onClick={() => setEditingArticleKey(a.key)}
-                          title="Edit this label's layout"
-                          disabled={!a.barcodeFormatId}
-                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: a.barcodeFormatId ? MUTED : '#C9C2AE', border: `1px solid ${a.barcodeFormatId ? LINE : '#E5E1D4'}`, borderRadius: 6, padding: '6px 8px', cursor: a.barcodeFormatId ? 'pointer' : 'default', flexShrink: 0 }}
+                          title={layoutLocked ? 'This format applies the same layout to every article — edit it under Formats' : 'Edit this label\'s layout'}
+                          disabled={!a.barcodeFormatId || layoutLocked}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: (a.barcodeFormatId && !layoutLocked) ? MUTED : '#C9C2AE', border: `1px solid ${(a.barcodeFormatId && !layoutLocked) ? LINE : '#E5E1D4'}`, borderRadius: 6, padding: '6px 8px', cursor: (a.barcodeFormatId && !layoutLocked) ? 'pointer' : 'default', flexShrink: 0 }}
                         >
                           <Pencil size={13} />
                         </button>
                       </div>
                     </Td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -7968,6 +8197,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
           netWeight: uomFor(editingArticle),
           packingDate: formatLabelDate(date),
           expiryDate: formatLabelDate(bestBeforeFor(editingArticle)) || '___________',
+          expiryDateRaw: bestBeforeFor(editingArticle),
           code: barcodeValueFor(editingArticle),
           layoutOverride: editingArticle.layoutOverride,
         }}
