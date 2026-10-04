@@ -6,42 +6,13 @@ import {
   onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, getDocs
 } from 'firebase/firestore';
 import {
-  LayoutDashboard,
-  Menu,
-  X,
-  ClipboardList,
-  ShoppingBag,
-  PackageCheck,
-  Truck,
-  Boxes,
-  Settings,
-  Upload,
-  Truck as TruckIcon,
-  CheckCircle2,
-  RotateCcw,
-  Search,
-  Tag,
-  FileSpreadsheet,
-  AlertCircle,
-  Trash2,
-  Scissors,
-  Plus,
-  Pencil,
-  Users,
-  Shield,
-  Download,
-  Store,
-  ArrowLeft,
-  Layers,
-  IndianRupee,
-  ChevronRight,
-  Barcode,
-  Wallet,
-  UserCheck,
-  Award,
+  Menu, X, LayoutDashboard, Tag, Scissors, ClipboardList, ShoppingBag,
+  PackageCheck, Truck, Truck as TruckIcon, Boxes, Users, Upload, FileSpreadsheet, AlertCircle,
+  Trash2, Pencil, Plus, ChevronRight, ArrowLeft, Download, Store,
+  Search, Layers, IndianRupee, UserCheck, Wallet, RotateCcw, Award,
 } from 'lucide-react';
 
-// ── Firebase ──────────────────────────────────────────────
+// ── Firebase — same project as the web admin panel, so data stays in sync ──
 const firebaseConfig = {
   apiKey: "AIzaSyDS-QPS9hiBRqIEyiGMTMIO4lWeSSMcY0M",
   authDomain: "fnv-business-app.firebaseapp.com",
@@ -55,7 +26,18 @@ const firebaseConfig = {
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 
-// helper — seed a collection once if it is empty
+// Today's date, in the device's local timezone — never use
+// `new Date().toISOString().split('T')[0]` for this: that renders in UTC,
+// which silently returns the wrong calendar day during part of the night in
+// any timezone ahead of UTC (all of India, for instance).
+function todayLocalDate() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 async function seedIfEmpty(colName, rows) {
   const snap = await getDocs(collection(db, colName));
   if (!snap.empty) return;
@@ -63,7 +45,7 @@ async function seedIfEmpty(colName, rows) {
   rows.forEach((r) => batch.set(doc(db, colName, r.id), r));
   await batch.commit();
 }
-// ─────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────
 
 const INK = '#20241E';
 const LEAF = '#2F5233';
@@ -77,16 +59,11 @@ const LOGO_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAY
 const BG = '#F6F3EA';
 
 // ── Design system tokens (visual only — no business logic touches these) ──
-// A consistent scale used going forward instead of ad-hoc numbers, so spacing,
-// rounding and elevation stay uniform as screens get upgraded one at a time.
+// Mirrors the admin panel's token set so both apps read as one product.
 const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 };
 const RADIUS = { sm: 6, md: 8, lg: 10, xl: 14 };
 const SHADOW_SM = '0 1px 2px rgba(32,36,30,0.05)';
-const SHADOW_MD = '0 4px 16px rgba(32,36,30,0.08)';
-const TEXT_SECONDARY = '#57584B'; // between INK and MUTED — de-emphasized but still easily readable
-// One semantic mapping so every status badge in the app — order status, payment
-// due/settled, active/inactive, etc. — draws from the same restrained palette
-// instead of each screen inventing its own bg/fg pair.
+const TEXT_SECONDARY = '#57584B';
 const STATUS_COLORS = {
   success: { bg: '#EAF3DE', fg: LEAF_DARK },
   info:    { bg: '#E6F1FB', fg: '#1B5E8C' },
@@ -100,297 +77,6 @@ const PLATFORMS = ['Blinkit', 'Flipkart', 'Zepto'];
 // reissued on a relisting, or — for Zepto — is an internal UUID rather than a
 // stable article code) — matching for these channels relies on EAN only.
 const EAN_ONLY_PLATFORMS = new Set(['Flipkart', 'Zepto']);
-
-// ── Barcode rendering — EAN-13 for numeric codes (Flipkart's EANs), Code 128
-// Set B for anything else (Blinkit's alphanumeric SKUs like "BLK-ONI-600").
-// Both tables are the standardised, publicly defined bar patterns for their
-// symbology — not any particular library's implementation — since a single
-// wrong digit here would make a label print but silently fail to scan.
-// Checksum formulas verified against real EAN-13 codes from this business's own
-// data (890429370450-3, -0, etc.) and against a published Code-128 worked example.
-const EAN13_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
-const EAN13_G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
-const EAN13_R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'];
-const EAN13_PARITY = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
-
-function ean13CheckDigit(digits12) {
-  let sum = 0;
-  for (let i = 0; i < 12; i++) sum += (i % 2 === 0) ? Number(digits12[i]) : Number(digits12[i]) * 3;
-  return (10 - (sum % 10)) % 10;
-}
-
-function ean13ToBits(code) {
-  let digits = code.replace(/\D/g, '');
-  if (digits.length === 12) digits += String(ean13CheckDigit(digits));
-  if (digits.length !== 13) return null;
-  const parity = EAN13_PARITY[Number(digits[0])];
-  let bits = '101';
-  for (let i = 1; i <= 6; i++) bits += parity[i - 1] === 'L' ? EAN13_L[Number(digits[i])] : EAN13_G[Number(digits[i])];
-  bits += '01010';
-  for (let i = 7; i <= 12; i++) bits += EAN13_R[Number(digits[i])];
-  bits += '101';
-  return { bits, displayText: digits };
-}
-
-const CODE128_PATTERNS = [
-  '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
-  '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
-  '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
-  '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
-  '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
-  '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
-  '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
-  '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
-  '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
-  '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
-  '114131', '311141', '411131', '211412', '211214', '211232', '233111',
-];
-const CODE128_START_B = 104;
-const CODE128_STOP_PATTERN = '2331112';
-
-function code128ToBits(text) {
-  const chars = String(text).split('').filter((c) => { const n = c.charCodeAt(0); return n >= 32 && n <= 127; });
-  if (chars.length === 0) return null;
-  const values = chars.map((c) => c.charCodeAt(0) - 32);
-  let checksum = CODE128_START_B;
-  values.forEach((v, i) => { checksum += v * (i + 1); });
-  checksum %= 103;
-  const widthStr = [CODE128_START_B, ...values, checksum].map((v) => CODE128_PATTERNS[v]).join('') + CODE128_STOP_PATTERN;
-  let bits = '';
-  let isBar = true;
-  for (const ch of widthStr) { bits += (isBar ? '1' : '0').repeat(Number(ch)); isBar = !isBar; }
-  return { bits, displayText: chars.join('') };
-}
-
-// Dispatches to EAN-13 for a 12-13 digit numeric code, Code 128 otherwise.
-// Returns { bars: [{x,w}], totalWidth, height, displayText } ready for SVG rendering.
-// QR Code encoder — Version 1 (21x21), Numeric mode, EC level M, fixed mask 0.
-// A 12-13 digit EAN/UPC comfortably fits Version 1-M's 34-digit numeric capacity,
-// so this deliberately uses one fixed, small configuration rather than a
-// general-purpose encoder — no alignment patterns (those start at version 2+), no
-// version/mask selection, no byte/alphanumeric modes to get subtly wrong.
-// Verified by generating real EAN codes and decoding them back with an independent
-// decoder (OpenCV's QRCodeDetector) before this was ever wired into the app.
-const QR_GF_EXP = new Array(512);
-const QR_GF_LOG = new Array(256);
-(function initQrGF() {
-  let x = 1;
-  for (let i = 0; i < 255; i++) {
-    QR_GF_EXP[i] = x;
-    QR_GF_LOG[x] = i;
-    x <<= 1;
-    if (x & 0x100) x ^= 0x11d; // primitive polynomial specified by the QR standard
-  }
-  for (let i = 255; i < 512; i++) QR_GF_EXP[i] = QR_GF_EXP[i - 255];
-})();
-function qrGfMul(a, b) { if (a === 0 || b === 0) return 0; return QR_GF_EXP[QR_GF_LOG[a] + QR_GF_LOG[b]]; }
-function qrMultiplyPoly(a, b) {
-  const result = new Array(a.length + b.length - 1).fill(0);
-  for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) result[i + j] ^= qrGfMul(a[i], b[j]);
-  return result;
-}
-function qrBuildGeneratorPoly(n) {
-  let g = [1];
-  for (let i = 0; i < n; i++) g = qrMultiplyPoly(g, [1, QR_GF_EXP[i]]);
-  return g;
-}
-function qrComputeECCodewords(dataBytes, numEC) {
-  const gen = qrBuildGeneratorPoly(numEC);
-  const msg = dataBytes.concat(new Array(numEC).fill(0));
-  for (let i = 0; i < dataBytes.length; i++) {
-    const coef = msg[i];
-    if (coef === 0) continue;
-    for (let j = 0; j < gen.length; j++) msg[i + j] ^= qrGfMul(gen[j], coef);
-  }
-  return msg.slice(dataBytes.length);
-}
-// Numeric mode only fits digits 0-9. Codes with letters (rare, but some SKUs have
-// them) fall back to null so the caller can skip the QR rather than emit a wrong one.
-function encodeNumericQR1M(rawDigits) {
-  const digits = String(rawDigits || '');
-  // Must be ALL digits — silently stripping non-digit characters here (as an
-  // earlier version did) would let a code like "BLK-ONI-600" quietly encode as
-  // just "600", so a non-numeric character means this mode doesn't apply at all.
-  if (!/^\d+$/.test(digits) || digits.length > 34) return null; // Version 1-M numeric capacity
-  let bits = '0001' + digits.length.toString(2).padStart(10, '0');
-  for (let i = 0; i < digits.length; i += 3) {
-    const g = digits.slice(i, i + 3);
-    const w = g.length === 3 ? 10 : g.length === 2 ? 7 : 4;
-    bits += parseInt(g, 10).toString(2).padStart(w, '0');
-  }
-  return qrFinish1M(bits);
-}
-// Alphanumeric mode: 0-9, A-Z, space, $ % * + - . / : (45 chars) — needed because
-// SKU-style codes (e.g. "BLK-ONI-600") aren't purely numeric like an EAN/UPC.
-const QR_ALPHANUM_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
-function encodeAlphanumericQR1M(rawText) {
-  const text = String(rawText || '').toUpperCase();
-  if (!text || text.length > 20 || ![...text].every((ch) => QR_ALPHANUM_CHARS.includes(ch))) return null;
-  let bits = '0010' + text.length.toString(2).padStart(9, '0');
-  for (let i = 0; i < text.length; i += 2) {
-    if (i + 1 < text.length) {
-      const val = QR_ALPHANUM_CHARS.indexOf(text[i]) * 45 + QR_ALPHANUM_CHARS.indexOf(text[i + 1]);
-      bits += val.toString(2).padStart(11, '0');
-    } else {
-      bits += QR_ALPHANUM_CHARS.indexOf(text[i]).toString(2).padStart(6, '0');
-    }
-  }
-  return qrFinish1M(bits);
-}
-// Tries the more compact numeric mode first, falls back to alphanumeric for
-// SKU-style codes, and gives up (no QR) only for characters neither supports
-// (e.g. lowercase-sensitive text) rather than emit a wrong/truncated code.
-function encodeQR1M(rawCode) {
-  return encodeNumericQR1M(rawCode) || encodeAlphanumericQR1M(rawCode);
-}
-function qrFinish1M(bits) {
-  const CAPACITY_BITS = 16 * 8; // Version 1-M: 16 data codewords
-  if (bits.length > CAPACITY_BITS) return null;
-  bits += '0000'.slice(0, Math.min(4, CAPACITY_BITS - bits.length));
-  while (bits.length % 8 !== 0) bits += '0';
-  const padBytes = ['11101100', '00010001'];
-  let p = 0;
-  while (bits.length < CAPACITY_BITS) { bits += padBytes[p % 2]; p++; }
-
-  const dataBytes = [];
-  for (let i = 0; i < bits.length; i += 8) dataBytes.push(parseInt(bits.slice(i, i + 8), 2));
-  const ecBytes = qrComputeECCodewords(dataBytes, 10);
-  const allCodewords = dataBytes.concat(ecBytes);
-
-  const SIZE = 21;
-  const matrix = Array.from({ length: SIZE }, () => new Array(SIZE).fill(0));
-  const reserved = Array.from({ length: SIZE }, () => new Array(SIZE).fill(false));
-  const setM = (r, c, v) => { if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) { matrix[r][c] = v; reserved[r][c] = true; } };
-
-  function placeFinder(r0, c0) {
-    for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
-      const rr = r0 + r, cc = c0 + c;
-      if (rr < 0 || cc < 0 || rr >= SIZE || cc >= SIZE) continue;
-      let v = 0;
-      if (r >= 0 && r <= 6 && c >= 0 && c <= 6) {
-        const onBorder = r === 0 || r === 6 || c === 0 || c === 6;
-        const onCore = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-        v = (onBorder || onCore) ? 1 : 0;
-      }
-      setM(rr, cc, v);
-    }
-  }
-  placeFinder(0, 0); placeFinder(0, 14); placeFinder(14, 0);
-  for (let i = 8; i <= 12; i++) { setM(6, i, i % 2 === 0 ? 1 : 0); setM(i, 6, i % 2 === 0 ? 1 : 0); }
-  setM(13, 8, 1); // dark module — row 4*version+9, col 8; version 1 → row 13
-
-  const FORMAT_TL_POS = [[0,8],[1,8],[2,8],[3,8],[4,8],[5,8],[7,8],[8,8],[8,7],[8,5],[8,4],[8,3],[8,2],[8,1],[8,0]];
-  const FORMAT_OTHER_POS = [
-    [8, SIZE-1], [8, SIZE-2], [8, SIZE-3], [8, SIZE-4], [8, SIZE-5], [8, SIZE-6], [8, SIZE-7],
-    [SIZE-8, 8], [SIZE-7, 8], [SIZE-6, 8], [SIZE-5, 8], [SIZE-4, 8], [SIZE-3, 8], [SIZE-2, 8], [SIZE-1, 8],
-  ];
-  FORMAT_TL_POS.concat(FORMAT_OTHER_POS).forEach(([c, r]) => { reserved[r][c] = true; });
-
-  const allBits = allCodewords.map((b) => b.toString(2).padStart(8, '0')).join('');
-  let bitIdx = 0, col = SIZE - 1, upward = true;
-  while (col > 0) {
-    if (col === 6) col--;
-    for (let i = 0; i < SIZE; i++) {
-      const row = upward ? SIZE - 1 - i : i;
-      for (let c = 0; c < 2; c++) {
-        const cc = col - c;
-        if (!reserved[row][cc]) {
-          const bit = bitIdx < allBits.length ? Number(allBits[bitIdx]) : 0;
-          bitIdx++;
-          matrix[row][cc] = (row + cc) % 2 === 0 ? bit ^ 1 : bit; // fixed mask pattern 0
-        }
-      }
-    }
-    upward = !upward;
-    col -= 2;
-  }
-
-  const FORMAT_CODEWORD = 0x5412; // verified masked codeword for (EC level M, mask 0)
-  const fbits = FORMAT_CODEWORD.toString(2).padStart(15, '0').split('').map(Number);
-  for (let k = 0; k < 15; k++) {
-    const [c1, r1] = FORMAT_TL_POS[k]; matrix[r1][c1] = fbits[k];
-    const [c2, r2] = FORMAT_OTHER_POS[k]; matrix[r2][c2] = fbits[k];
-  }
-  return matrix;
-}
-// Renders the QR matrix as an SVG-markup string sized to fit a `size`×`size` box,
-// matching how barcodeSVGMarkup returns a plain string for the print window.
-function qrSVGMarkup(code, size = 100) {
-  const matrix = encodeQR1M(code);
-  if (!matrix) return '';
-  const n = matrix.length;
-  const module = size / n;
-  let rects = '';
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    if (matrix[r][c]) rects += `<rect x="${(c * module).toFixed(2)}" y="${(r * module).toFixed(2)}" width="${module.toFixed(2)}" height="${module.toFixed(2)}" fill="#000"/>`;
-  }
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><rect x="0" y="0" width="${size}" height="${size}" fill="#fff"/>${rects}</svg>`;
-}
-
-function renderBarcodeData(code, width = 200, height = 45) {
-  const cleaned = String(code || '').trim();
-  if (!cleaned) return null;
-  const isNumeric = /^\d{12,13}$/.test(cleaned);
-  const result = isNumeric ? ean13ToBits(cleaned) : code128ToBits(cleaned);
-  if (!result) return null;
-  const { bits, displayText } = result;
-  const moduleWidth = width / bits.length;
-  const bars = [];
-  let i = 0;
-  while (i < bits.length) {
-    if (bits[i] === '1') {
-      let j = i;
-      while (j < bits.length && bits[j] === '1') j += 1;
-      bars.push({ x: i * moduleWidth, w: (j - i) * moduleWidth });
-      i = j;
-    } else i += 1;
-  }
-  return { bars, totalWidth: width, height, displayText };
-}
-
-// Lets each article "remember" its own shelf life: whatever gap the user sets once
-// between packing date and best-before gets stored as a day-count on that article's
-// alias, so future print runs auto-advance the best-before date along with the
-// packing date instead of it needing to be re-typed every single day.
-// Formats a Date using its LOCAL calendar fields — never use toISOString()
-// for this: that renders in UTC, which silently shifts the date by a day
-// whenever local time and UTC fall on different calendar dates (e.g. in IST,
-// any local time before 5:30am is still "yesterday" in UTC).
-function formatLocalDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-// Today's date, in the browser's local timezone — the correct replacement
-// for the old `new Date().toISOString().split('T')[0]` pattern that used to
-// appear throughout this file, which returns the wrong calendar day during
-// part of the night in any timezone ahead of UTC (all of India, for instance).
-function todayLocalDate() {
-  return formatLocalDate(new Date());
-}
-function addDaysToDateStr(dateStr, days) {
-  if (!dateStr) return '';
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + Number(days));
-  return formatLocalDate(d);
-}
-function diffDaysBetween(fromStr, toStr) {
-  const from = new Date(`${fromStr}T00:00:00`);
-  const to = new Date(`${toStr}T00:00:00`);
-  return Math.round((to - from) / (1000 * 60 * 60 * 24));
-}
-
-// Renders a barcode as a raw HTML/SVG string, for building the print window's page
-// (which isn't a React tree, so JSX can't be used there).
-function barcodeSVGMarkup(code, width = 200, height = 45, showText = true) {
-  const data = renderBarcodeData(code, width, height);
-  if (!data) return '<div style="font-size:10px;color:#D9552C;">No code</div>';
-  const totalH = showText ? height + 14 : height;
-  const bars = data.bars.map((b) => `<rect x="${b.x}" y="0" width="${b.w}" height="${height}" fill="#000"/>`).join('');
-  const text = showText ? `<text x="${width / 2}" y="${height + 11}" text-anchor="middle" font-size="10" font-family="monospace" fill="#000">${data.displayText}</text>` : '';
-  return `<svg width="${width}" height="${totalH}" viewBox="0 0 ${width} ${totalH}"><rect x="0" y="0" width="${width}" height="${height}" fill="#fff"/>${bars}${text}</svg>`;
-}
 
 // Each indent can be split across dark stores (Flipkart lists one column per store);
 // Blinkit has a single store. Orders carry a `store`; older orders without one fall back
@@ -407,6 +93,27 @@ function storeOptionsFor(orders, platform) {
     .sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
     .map((s) => ({ value: s || '__none__', store: s, label: storeLabel(s) }));
 }
+// When a target's short packs are split across its orders (one order per store), keep
+// them in whole packs instead of fractions. Returns null when it can't (non-integer input).
+function allocateShortPacks(targetOrders, shortQty) {
+  const total = targetOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0);
+  if (!(total > 0) || !Number.isInteger(shortQty) || targetOrders.some((o) => !Number.isInteger(Number(o.packQty) || 0))) return null;
+  const alloc = {};
+  const rem = [];
+  let given = 0;
+  targetOrders.forEach((o, i) => {
+    const p = Number(o.packQty) || 0;
+    const exact = (shortQty * p) / total;
+    const base = Math.min(Math.floor(exact), p);
+    alloc[o.id] = base;
+    given += base;
+    rem.push({ id: o.id, frac: exact - Math.floor(exact), room: p - base, i });
+  });
+  let left = shortQty - given;
+  rem.sort((a, b) => (b.frac - a.frac) || (a.i - b.i));
+  rem.forEach((r) => { if (left > 0 && r.room > 0) { alloc[r.id] += 1; left -= 1; } });
+  return alloc;
+}
 
 // Phase 1 of multi-city support: each business location gets its own Items and
 // Vendors (Orders, Purchases, Dispatch, P&L follow in later phases). Records made
@@ -414,101 +121,37 @@ function storeOptionsFor(orders, platform) {
 // first city here so nothing already in the database disappears.
 const CITIES = ['Jabalpur', 'Satna', 'Indore'];
 
-const SEED_ORDERS = [];
-
-const SEED_PURCHASES = [];
-
-// Strips a trailing quantity+unit (e.g. "2 Units", "500 gm", "500.0g", "_100 gm")
-// from a raw article name, so auto-mapping can still recognise an item whose
-// own name was simplified to drop the unit — "Apple Red Delicious 2 Units"
-// (from an indent file) should still match an item saved as "Apple Red Delicious".
-function stripQtyUom(name) {
-  return String(name || '').replace(/[\s_]+\d+(?:\.\d+)?\s*(?:Units?|gm|g|Kg|Ft)\.?$/i, '').trim();
-}
-function findAlias(item, channel, packSize, packUnit, ean) {
-  const aliases = item?.aliases || [];
-  // EAN is the article's permanent retail barcode, so it's the most reliable
-  // way to reattach a saved label/format to the right alias — a manually-set
-  // pack size (kept for the admin's own costing) can drift slightly from what
-  // a given day's indent reports, which would otherwise break the match.
-  if (ean) {
-    const byEan = aliases.find((a) => a.channel === channel && a.ean && String(a.ean).toLowerCase() === String(ean).toLowerCase());
-    if (byEan) return byEan;
-  }
-  // An item can have more than one alias for the same channel — e.g. "Baby
-  // Banana" (500g) and "Banana 3pc" (600g) are different articles that both
-  // map to the item "Banana" on Blinkit. Channel alone can't tell them apart,
-  // so when a pack size is known, only a match on it counts — falling back to
-  // "any alias on this channel" here would just recreate the same mix-up for
-  // whichever pack-size variant doesn't have its own alias yet. The match
-  // tolerates numeric-formatting differences (e.g. "2" vs "2.0") since both
-  // plainly mean the same pack size — but never bridges a genuine unit
-  // mismatch (e.g. a raw "500 gm" label against a value actually in kg).
-  if (packSize != null && packSize !== '') {
-    const numTarget = parseFloat(packSize);
-    return aliases.find((a) => {
-      if (a.channel !== channel) return false;
-      if (String(a.packUnit || '') !== String(packUnit || '')) return false;
-      if (String(a.packSize) === String(packSize)) return true;
-      const numA = parseFloat(a.packSize);
-      return !Number.isNaN(numA) && !Number.isNaN(numTarget) && Math.abs(numA - numTarget) < 0.001;
-    });
-  }
-  return aliases.find((a) => a.channel === channel);
-}
 function newAliasId() {
   return `AL-${Date.now().toString(36).toUpperCase().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
 }
 
 const SEED_ITEMS = [];
 
+const SEED_ORDERS = [];
+
+const SEED_PURCHASES = [];
+
 const SEED_RECIPES = [];
 
-const PERMISSION_SECTIONS = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'items', label: 'Items' },
-  { key: 'vendors', label: 'Vendors' },
-  { key: 'cutprocess', label: 'Cut & Process' },
-  { key: 'orders', label: 'Orders' },
-  { key: 'advanceindent', label: 'Advance Indent (mobile app)' },
-  { key: 'purchase', label: 'Purchases' },
-  { key: 'grading', label: 'Grading' },
-  { key: 'stockcount', label: 'Stock Count' },
-  { key: 'pricing', label: 'Pricing' },
-  { key: 'sales', label: 'Sales' },
-  { key: 'staff', label: 'Staff' },
-  { key: 'attendance', label: 'Attendance (mobile app)' },
-  { key: 'packaging', label: 'Packaging' },
-  { key: 'dispatch', label: 'Dispatch' },
-  { key: 'crates', label: 'Crates & boxes' },
-  { key: 'barcodelabels', label: 'Barcode Labels' },
-  { key: 'users', label: 'Users & Roles' },
-];
-
 const SEED_ROLES = [
-  {
-    id: 'ROLE-ADMIN',
-    name: 'Admin',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: true, purchase: true, grading: true, stockcount: true, pricing: true, profitloss: true, sales: true, staff: true, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: true, users: true },
-  },
-  {
-    id: 'ROLE-WAREHOUSE',
-    name: 'Warehouse Staff',
-    permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, advanceindent: false, purchase: false, grading: true, stockcount: true, pricing: false, profitloss: false, sales: false, staff: false, attendance: true, packaging: true, dispatch: true, crates: true, barcodelabels: false, users: false },
-  },
-  {
-    id: 'ROLE-PURCHASE',
-    name: 'Purchase Manager',
-    permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: false, purchase: true, grading: true, stockcount: true, pricing: true, profitloss: true, sales: true, staff: false, attendance: false, packaging: false, dispatch: false, crates: false, barcodelabels: false, users: false },
-  },
+  { id: 'ROLE-ADMIN', name: 'Admin', permissions: { dashboard: true, items: true, vendors: true, cutprocess: true, orders: true, advanceindent: true, purchase: true, grading: true, stockcount: true, pricing: true, sales: true, staff: true, attendance: true, packaging: true, dispatch: true, crates: true, users: true } },
+  { id: 'ROLE-WAREHOUSE', name: 'Warehouse Staff', permissions: { dashboard: true, items: false, vendors: false, cutprocess: false, orders: false, advanceindent: false, purchase: false, grading: true, stockcount: true, pricing: false, sales: false, staff: false, attendance: true, packaging: true, dispatch: true, crates: true, users: false } },
 ];
 
 const SEED_USERS = [];
 
 const SEED_VENDORS = [];
 
+const CATEGORY_MAP = { fruit: 'FRUITS', fruits: 'FRUITS', veg: 'VEGETABLES', vegetable: 'VEGETABLES', vegetables: 'VEGETABLES', 'fresh vegetables': 'VEGETABLES', exotic: 'EXOTIC', exotics: 'EXOTIC', flower: 'FLOWER', flowers: 'FLOWER', flowres: 'FLOWER', grain: 'GRAINS', grains: 'GRAINS', cut: 'CUT' };
+function normalizeCategory(raw) { return CATEGORY_MAP[String(raw || '').toLowerCase().trim()] || 'VEGETABLES'; }
+
+const CATEGORY_OPTIONS = ['FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
+const UOM_OPTIONS = ['kg', 'dozen', 'bunch', 'piece', 'pack', 'box', 'crate'];
+
 const NAV = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { key: 'attendance', label: 'Attendance', icon: UserCheck },
+  { key: 'staff', label: 'Staff', icon: UserCheck },
   { key: 'items', label: 'Items', icon: Tag },
   { key: 'vendors', label: 'Vendors', icon: Store },
   { key: 'cutprocess', label: 'Cut & Process', icon: Scissors },
@@ -518,78 +161,21 @@ const NAV = [
   { key: 'stockcount', label: 'Stock Count', icon: Layers },
   { key: 'pricing', label: 'Pricing', icon: IndianRupee },
   { key: 'sales', label: 'Sales', icon: Wallet },
-  { key: 'staff', label: 'Staff', icon: UserCheck },
   { key: 'packaging', label: 'Packaging', icon: PackageCheck },
   { key: 'dispatch', label: 'Dispatch', icon: Truck },
   { key: 'crates', label: 'Crates & boxes', icon: Boxes },
-  { key: 'barcodelabels', label: 'Barcode Labels', icon: Barcode },
   { key: 'users', label: 'Users & Roles', icon: Users },
 ];
 
-function LoginScreen({ onLogin, error }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
-  const submit = () => {
-    if (!username.trim() || !password.trim()) return;
-    onLogin(username, password);
-  };
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: BG }}>
-      <div style={{ width: 360, maxWidth: '90vw', background: '#fff', borderRadius: 18, padding: 32, boxShadow: '0 20px 50px rgba(0,0,0,0.10)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 24 }}>
-          <img src={LOGO_DATA_URI} alt="Nilgiri" style={{ width: 64, height: 'auto', display: 'block' }} />
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: INK }}>FNV Business App</p>
-          <p style={{ margin: 0, fontSize: 12, color: MUTED }}>Sign in to continue</p>
-        </div>
-        <input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          style={inputStyle}
-          autoFocus
-        />
-        <div style={{ position: 'relative' }}>
-          <input
-            placeholder="Password"
-            type={showPassword ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-            style={{ ...inputStyle, paddingRight: 60 }}
-          />
-          <button
-            onClick={() => setShowPassword((s) => !s)}
-            style={{ position: 'absolute', right: 10, top: 9, background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-          >
-            {showPassword ? 'Hide' : 'Show'}
-          </button>
-        </div>
-        {error && (
-          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 12px' }}>
-            <AlertCircle size={13} /> {error}
-          </p>
-        )}
-        <button
-          onClick={submit}
-          disabled={!username.trim() || !password.trim()}
-          style={{ width: '100%', background: (!username.trim() || !password.trim()) ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: (!username.trim() || !password.trim()) ? 'default' : 'pointer' }}
-        >
-          Sign in
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Tracks window width so the shell can switch from a fixed sidebar (desktop) to
-// an overlay drawer (tablet/narrow browser) — the same drawer pattern the mobile
-// app already uses, just triggered by viewport width instead of always-on.
+// Keeps a filter's value in localStorage so it survives leaving the section (or the
+// whole page reloading) — it only ever changes when the person picks something new.
+// Detects whether this is genuinely being viewed on a phone-width screen (a real
+// phone's own browser, or the installed PWA/APK) versus a wide desktop browser.
+// The decorative phone-mockup frame below only makes sense in the second case —
+// on an actual phone, the phone itself IS the frame, so drawing another one around
+// the content just wastes screen space and looks like a phone-inside-a-phone.
 function useViewportWidth() {
-  const [width, setWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1280);
+  const [width, setWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 390);
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
     window.addEventListener('resize', onResize);
@@ -597,44 +183,236 @@ function useViewportWidth() {
   }, []);
   return width;
 }
-const NARROW_BREAKPOINT = 880;
+const REAL_PHONE_BREAKPOINT = 500;
 
-export default function AdminPanel() {
+function usePersistedState(key, defaultValue) {
+  const [state, setState] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem(key);
+      return saved !== null ? JSON.parse(saved) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(state));
+    } catch {}
+  }, [key, state]);
+  return [state, setState];
+}
+
+function pickField(rowObj, candidates) {
+  const keys = Object.keys(rowObj);
+  for (const c of candidates) {
+    const found = keys.find((k) => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(c));
+    if (found && String(rowObj[found]).trim() !== '') return rowObj[found];
+  }
+  return '';
+}
+const KNOWN_INDENT_HEADERS = new Set(['fsn', 'title', 'category', 'type', 'umo', 'uom', 'unit', 'mrp', 'price', 't100t500fsn', 'eancode', 'shelflifedays', 'shelflife', 'temperaturezone', 'itemcode', 'articlecode', 'productcode', 'sku', 'code', 'productdescription', 'description', 'article', 'product', 'item', 'productname', 'indent', 'qty', 'quantity', 'orderedqty', 'finalindent', 'storename', 'storeid', 'subcategory', 'vendername', 'city', 'cc', 'bb', 'rr']);
+function sumUnknownNumericColumns(rowObj, headers) {
+  // Returns { "<store column header>": qty } for every leftover numeric column with a
+  // positive value, or null when there is none.
+  const stores = {};
+  headers.forEach((h) => {
+    if (!h) return;
+    const norm = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (KNOWN_INDENT_HEADERS.has(norm)) return;
+    const v = rowObj[h];
+    if (v === '' || v === null || v === undefined) return;
+    const num = Number(v);
+    if (!isNaN(num) && num > 0) stores[String(h).trim()] = num;
+  });
+  return Object.keys(stores).length > 0 ? stores : null;
+}
+
+function parseIndentRows(json, platform) {
+  const parsed = json
+    .map((r, idx) => {
+      const headers = Object.keys(r);
+      const rawName = String(pickField(r, ['productname', 'title', 'article', 'product', 'item', 'description']) || '').trim();
+      // Articles are matched on the channel's own SKU/FSN — that is also what the
+      // GRN and PO exports carry, so one code ties the whole chain together
+      // (except for EAN_ONLY_PLATFORMS, where the code is never used to match).
+      const rawCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
+      // The EAN is the article's permanent retail barcode — the primary
+      // matching key for EAN_ONLY_PLATFORMS, and always used for labels.
+      const rawEan = String(pickField(r, ['eancode', 'ean']) || '').trim();
+      // "Final Indent" (Zepto) always wins over a plain "Indent" column when a
+      // sheet has both — checked before the generic 'indent' keyword.
+      let qty = Number(pickField(r, ['finalindent', 'indent', 'qty', 'quantity', 'orderedqty']) || 0);
+      let storeQtys = null;
+      if (!qty) {
+        const st = sumUnknownNumericColumns(r, headers);
+        if (st) { storeQtys = st; qty = Object.values(st).reduce((s, v) => s + v, 0); }
+      }
+      const unit = String(pickField(r, ['umo', 'uom', 'unit']) || '').trim();
+      const rawCategory = String(pickField(r, ['type', 'category']) || '').trim();
+      // Zepto lists one row per (article, dark store) rather than one row per
+      // article with a column per store — the store itself is a named column.
+      const rawStore = String(pickField(r, ['storename', 'store']) || '').trim();
+      return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawEan, qty, unit, rawCategory, storeQtys, rawStore };
+    })
+    .filter((r) => r.rawName && r.qty > 0);
+
+  // Fold "one row per (article, store)" back into "one row per article" with a
+  // per-store quantity map — matching the shape a per-store-column format
+  // already produces — so the mapping table shows one line per article
+  // instead of one per store, and every store's demand still becomes its own
+  // order downstream.
+  const hasStoreRows = parsed.some((r) => r.rawStore && !r.storeQtys);
+  if (!hasStoreRows) return parsed;
+  const groups = {};
+  const order = [];
+  parsed.forEach((r) => {
+    if (!r.rawStore || r.storeQtys) { order.push(r); return; }
+    const groupKey = r.rawEan ? `ean:${r.rawEan.toLowerCase()}` : `name:${r.rawName.toLowerCase()}__${r.rawCode.toLowerCase()}`;
+    if (!groups[groupKey]) {
+      const merged = { ...r, storeQtys: {} };
+      groups[groupKey] = merged;
+      order.push(merged);
+    }
+    const g = groups[groupKey];
+    g.storeQtys[r.rawStore] = (g.storeQtys[r.rawStore] || 0) + r.qty;
+    g.qty = Object.values(g.storeQtys).reduce((s, v) => s + v, 0);
+  });
+  return order;
+}
+
+// ---------- shared small UI ----------
+function Card({ children, style }) {
+  return <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: RADIUS.xl, boxShadow: SHADOW_SM, padding: SPACE.md + 2, ...style }}>{children}</div>;
+}
+// A plain window.confirm() popup does not reliably appear inside this app's
+// Android WebView — a click can silently do nothing. This is the safe
+// replacement for a single delete action: tap once to arm it, tap Yes to
+// commit — nothing native involved.
+function ConfirmDeleteButton({ onConfirm, icon: Icon = Trash2, size = 14, title, style }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    return (
+      <button onClick={() => setConfirming(true)} title={title} style={{ background: 'none', border: 'none', color: TOMATO, display: 'inline-flex', ...style }}>
+        <Icon size={size} />
+      </button>
+    );
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <button onClick={onConfirm} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>Yes</button>
+      <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>No</button>
+    </span>
+  );
+}
+function Field(props) {
+  return <input {...props} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: RADIUS.md, border: `1px solid ${LINE}`, fontSize: 13, marginBottom: SPACE.sm, ...(props.style || {}) }} />;
+}
+function PrimaryBtn({ children, onClick, disabled, color }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ width: '100%', background: disabled ? '#C9C2AE' : (color || LEAF), color: '#fff', border: 'none', borderRadius: RADIUS.lg, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: disabled ? 'default' : 'pointer', transition: 'opacity 0.12s' }}>
+      {children}
+    </button>
+  );
+}
+function Chip({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} style={{ padding: '6px 11px', borderRadius: 999, border: `1px solid ${active ? LEAF : LINE}`, background: active ? LEAF : '#fff', color: active ? '#fff' : INK, fontSize: 12, fontWeight: 600, marginRight: 6, marginBottom: 6, cursor: 'pointer', transition: 'background 0.12s, border-color 0.12s' }}>
+      {label}
+    </button>
+  );
+}
+function StatusPill({ status }) {
+  const map = { pending: { bg: STATUS_COLORS.warning.bg, color: STATUS_COLORS.warning.fg, label: 'Pending' }, packed: { bg: STATUS_COLORS.info.bg, color: STATUS_COLORS.info.fg, label: 'Packed' }, dispatched: { bg: STATUS_COLORS.success.bg, color: STATUS_COLORS.success.fg, label: 'Dispatched' } };
+  const s = map[status] || map.pending;
+  return <span style={{ background: s.bg, color: s.color, fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999 }}>{s.label}</span>;
+}
+const sectionTitle = { fontWeight: 700, fontSize: 14, color: INK, marginBottom: SPACE.sm };
+const hint = { fontSize: 11, color: TEXT_SECONDARY, marginBottom: SPACE.sm, lineHeight: 1.5 };
+const smallLabel = { fontSize: 11, color: MUTED, fontWeight: 700, marginBottom: 4, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.3 };
+
+function MobileLoginScreen({ onLogin, error }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const viewportWidth = useViewportWidth();
+  const isRealPhone = viewportWidth < REAL_PHONE_BREAKPOINT;
+
+  const submit = () => {
+    if (!username.trim() || !password.trim()) return;
+    onLogin(username, password);
+  };
+
+  return (
+    <div style={isRealPhone
+      ? { display: 'flex', justifyContent: 'center', fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }
+      : { display: 'flex', justifyContent: 'center', padding: '24px 12px', fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <div style={isRealPhone
+        ? { width: '100%', minHeight: '100vh', boxSizing: 'border-box', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '0 28px' }
+        : { width: 390, height: 760, background: BG, borderRadius: 34, border: `8px solid ${INK}`, boxShadow: '0 20px 50px rgba(0,0,0,0.18)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '0 28px' }}>
+        <img src={LOGO_DATA_URI} alt="Nilgiri" style={{ width: 60, height: 'auto', display: 'block' }} />
+        <p style={{ margin: '10px 0 2px', fontWeight: 800, fontSize: 17, color: INK }}>FNV Business App</p>
+        <p style={{ margin: '0 0 20px', fontSize: 12, color: MUTED }}>Sign in to continue</p>
+        <div style={{ width: '100%' }}>
+          <Field placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus />
+          <div style={{ position: 'relative' }}>
+            <Field
+              placeholder="Password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              style={{ paddingRight: 60 }}
+            />
+            <button onClick={() => setShowPassword((s) => !s)} style={{ position: 'absolute', right: 10, top: 9, background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          {error && (
+            <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '0 0 12px' }}>
+              <AlertCircle size={13} /> {error}
+            </p>
+          )}
+          <PrimaryBtn onClick={submit} disabled={!username.trim() || !password.trim()}>Sign in</PrimaryBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function FnvMobilePreview() {
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [tab, setTab] = useState('dashboard');
   const viewportWidth = useViewportWidth();
-  const isNarrow = viewportWidth < NARROW_BREAKPOINT;
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  // ── Firebase real-time state ───────────────────────────
-  const [items,         setItems]         = useState([]);
-  const [orders,        setOrders]        = useState([]);
-  const [purchases,     setPurchases]     = useState([]);
-  const [recipes,       setRecipes]       = useState([]);
-  const [roles,         setRoles]         = useState([]);
-  const [users,         setUsers]         = useState([]);
-  const [vendors,       setVendors]       = useState([]);
-  const [vendorLedger,  setVendorLedger]  = useState([]);
-  const [placedOrders,  setPlacedOrders]  = useState([]); // { id, name, date, items: [{itemId, itemName, uom, qty, no}] } — saved requirement lists for WhatsApp sharing
+  const isRealPhone = viewportWidth < REAL_PHONE_BREAKPOINT;
+
+  const [items, setItems] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [purchases, setPurchases] = useState([]);
+  const [recipes, setRecipes] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [vendorLedger, setVendorLedger] = useState([]);  // { id, vendorId, itemName, qty, unit, unitPrice, total, payment, date, note }
+  const [placedOrders, setPlacedOrders] = useState([]); // { id, name, date, items: [{itemId, itemName, uom, qty, toBuy}] }
+  const [cratesByCity, setCratesByCity] = useState({});
+  const [crateLog, setCrateLog] = useState([]);
+  const [dispatchLog, setDispatchLog] = useState([]);
   const [indentBatches, setIndentBatches] = useState([]);
-  const [cratesByCity,  setCratesByCity]  = useState({});
-  const [barcodeFormats, setBarcodeFormats] = useState([]);
+  const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
+  const [packingAssignments, setPackingAssignments] = useState({}); // { [targetKey]: { assignedTo, assignedToName } }
+  const [stockCounts, setStockCounts] = useState([]); // nightly closing-stock entries, one per item per date
+  const [pricingConfig, setPricingConfig] = useState([]); // editable per-article pricing inputs
+  const [grnReports, setGrnReports] = useState([]); // uploaded GRN files per channel + day
+  const [gradingRecords, setGradingRecords] = useState([]); // per-item quality grading entries (Grade A / Grade B / Dump split)
   const [salesInvoices, setSalesInvoices] = useState([]);
   const [salesPayments, setSalesPayments] = useState([]);
   const [staff, setStaff] = useState([]);
-  const [staffAttendance, setStaffAttendance] = useState([]);
   const [staffAdvances, setStaffAdvances] = useState([]);
-  const [companyDetailsByCity, setCompanyDetailsByCity] = useState({});
-  const [crateLog,      setCrateLog]      = useState([]);
-  const [dispatchLog,   setDispatchLog]   = useState([]);
-  const [stockCounts,   setStockCounts]   = useState([]); // nightly closing-stock entries, one per item per date
-  const [pricingConfig, setPricingConfig] = useState([]); // editable per-article pricing inputs (grading %, margins, etc.)
-  const [grnReports,    setGrnReports]    = useState([]); // uploaded GRN (goods received note) files per channel
-  const [gradingRecords, setGradingRecords] = useState([]); // per-item quality grading entries (Grade A / Grade B / Dump split)
-  const [barcodePrints, setBarcodePrints] = useState([]); // running "how many labels printed" total per article/date/platform, for the Printed badge
-  const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
-  const [dbReady,       setDbReady]       = useState(false);
-  const [selectedCity,  setSelectedCity]  = usePersistedState('fnv_selected_city', CITIES[0]);
-  const [currentUser,   setCurrentUser]   = useState(null);
-  const [loginError,    setLoginError]    = useState('');
+  const [staffAttendance, setStaffAttendance] = useState([]);
+  const [dbReady, setDbReady] = useState(false);
+  const [selectedCity, setSelectedCity] = usePersistedState('fnv_selected_city', CITIES[0]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loginError, setLoginError] = useState('');
   // A city-locked employee always operates on their own city, no matter what the
   // switcher happens to be set to — only an "All Cities" login can actually change it.
   const effectiveCity = (currentUser && currentUser.city && currentUser.city !== 'All Cities') ? currentUser.city : selectedCity;
@@ -654,8 +432,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','barcodeFormats','barcodePrints','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, barcodePrints: setBarcodePrints, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','staff','staffAttendance','staffAdvances','salesInvoices','salesPayments'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -677,12 +455,6 @@ export default function AdminPanel() {
       }
     });
 
-    // Company details for barcode labels (name/address/FSSAI) — one per city, since a
-    // separate warehouse/premises can hold its own FSSAI licence.
-    const unsub2b = onSnapshot(doc(db, 'settings', 'companyDetails'), (d) => {
-      if (d.exists()) setCompanyDetailsByCity(d.data());
-    });
-
     // packing progress — keyed by target id, stored as a map for O(1) lookup
     const unsub3 = onSnapshot(collection(db, 'packingProgress'), (snap) => {
       const map = {};
@@ -690,9 +462,17 @@ export default function AdminPanel() {
       setPackingProgress(map);
     });
 
-    return () => { unsubs.forEach((u) => u()); unsub2(); unsub2b(); unsub3(); };
+    // packing task assignments — same key as packingProgress, but a separate
+    // collection so saving a packed/short quantity never wipes who it's
+    // assigned to (packingProgress is written with a plain setDoc, not a merge).
+    const unsub4 = onSnapshot(collection(db, 'packingAssignments'), (snap) => {
+      const map = {};
+      snap.docs.forEach((d) => { map[d.id] = d.data(); });
+      setPackingAssignments(map);
+    });
+
+    return () => { unsubs.forEach((u) => u()); unsub2(); unsub3(); unsub4(); };
   }, []);
-  // ──────────────────────────────────────────────────────
 
   // ── Session — restore a saved login once the users list has loaded ──
   useEffect(() => {
@@ -726,9 +506,13 @@ export default function AdminPanel() {
   // ── Role-based section access — the Roles & Permissions UI has always let
   // someone tick/untick sections per role, but nothing ever actually read those
   // values until now. This is the single source of truth for what a logged-in
-  // user's sidebar and page routing are allowed to show.
+  // user's drawer and page routing are allowed to show.
   const currentRole = currentUser ? roles.find((r) => r.id === currentUser.roleId) : null;
-  const visibleNav = NAV.filter((n) => (n.key === 'staff' ? hasSensitivePermission(currentRole?.permissions, 'staff') : hasPermission(currentRole?.permissions, n.key)));
+  const visibleNav = NAV.filter((n) => {
+    if (n.key === 'attendance') return hasPermission(currentRole?.permissions, 'attendance') && !hasSensitivePermission(currentRole?.permissions, 'staff');
+    if (n.key === 'staff') return hasSensitivePermission(currentRole?.permissions, 'staff');
+    return hasPermission(currentRole?.permissions, n.key);
+  });
   // If the active tab isn't one this user's role can see — because their role
   // was just restricted, or a stale tab carried over from a previous session —
   // drop them onto the first section they do have access to instead of leaving
@@ -739,46 +523,114 @@ export default function AdminPanel() {
     if (visibleNav[0]) setTab(visibleNav[0].key);
   }, [currentUser, tab, visibleNav]);
 
-  // ── Write helpers (replace old setState handlers) ──────
+  // ── Zoom lock ─────────────────────────────────────────────
+  // Pinch/double-tap zoom is what makes this feel like a browser tab instead of
+  // an installed app. The viewport meta + touch-action cover most browsers;
+  // Safari on iOS still fires its own 'gesturestart'/'gesturechange' events for a
+  // pinch even when both of those say no, so that's blocked directly too, along
+  // with the double-tap-to-zoom fallback some older engines still honor.
+  useEffect(() => {
+    let meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.setAttribute('name', 'viewport');
+      document.head.appendChild(meta);
+    }
+    const prevContent = meta.getAttribute('content');
+    meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+
+    const style = document.createElement('style');
+    style.setAttribute('data-fnv-zoom-lock', '1');
+    style.textContent = 'html, body { touch-action: pan-x pan-y; }';
+    document.head.appendChild(style);
+
+    const blockGesture = (e) => e.preventDefault();
+    const blockPinchTouch = (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); };
+    let lastTouchEnd = 0;
+    const blockDoubleTapZoom = (e) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) e.preventDefault();
+      lastTouchEnd = now;
+    };
+    document.addEventListener('gesturestart', blockGesture, { passive: false });
+    document.addEventListener('gesturechange', blockGesture, { passive: false });
+    document.addEventListener('touchmove', blockPinchTouch, { passive: false });
+    document.addEventListener('touchend', blockDoubleTapZoom, { passive: false });
+
+    return () => {
+      document.removeEventListener('gesturestart', blockGesture);
+      document.removeEventListener('gesturechange', blockGesture);
+      document.removeEventListener('touchmove', blockPinchTouch);
+      document.removeEventListener('touchend', blockDoubleTapZoom);
+      style.remove();
+      if (prevContent) meta.setAttribute('content', prevContent);
+    };
+  }, []);
+
+  // ── Swipe-back gesture ───────────────────────────────────
+  // Remembers which sections were visited, in order, so an edge-swipe (like
+  // iOS's native back gesture) can return to whichever one was open before the
+  // current tab — not just a fixed "home" section.
+  const tabHistoryRef = useRef(['dashboard']);
+  const swipeBackRef = useRef(false);
+  useEffect(() => {
+    if (swipeBackRef.current) { swipeBackRef.current = false; return; }
+    const hist = tabHistoryRef.current;
+    if (hist[hist.length - 1] !== tab) {
+      hist.push(tab);
+      if (hist.length > 20) hist.shift();
+    }
+  }, [tab]);
+  const goBackTab = () => {
+    const hist = tabHistoryRef.current;
+    if (hist.length <= 1) return;
+    hist.pop();
+    swipeBackRef.current = true;
+    setTab(hist[hist.length - 1]);
+  };
+  // Only starts tracking a swipe that begins right at the screen's left edge —
+  // same rule iOS uses — so it never hijacks an ordinary swipe/scroll started
+  // in the middle of a list or a table.
+  const edgeSwipeRef = useRef(null); // { startX, startY }
+  const onFrameTouchStart = (e) => {
+    if (drawerOpen || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (t.clientX > 24) return;
+    edgeSwipeRef.current = { startX: t.clientX, startY: t.clientY };
+  };
+  const onFrameTouchEnd = (e) => {
+    if (!edgeSwipeRef.current) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - edgeSwipeRef.current.startX;
+    const dy = t.clientY - edgeSwipeRef.current.startY;
+    edgeSwipeRef.current = null;
+    if (dx > 70 && Math.abs(dy) < 50) goBackTab();
+  };
+  // Swipe left anywhere on the open drawer to dismiss it, same as tapping the
+  // backdrop — the natural gesture for a panel that slid in from the left.
+  const drawerSwipeRef = useRef(null);
+  const onDrawerTouchStart = (e) => {
+    if (e.touches.length !== 1) return;
+    drawerSwipeRef.current = { startX: e.touches[0].clientX };
+  };
+  const onDrawerTouchEnd = (e) => {
+    if (!drawerSwipeRef.current) return;
+    const dx = e.changedTouches[0].clientX - drawerSwipeRef.current.startX;
+    drawerSwipeRef.current = null;
+    if (dx < -60) setDrawerOpen(false);
+  };
+
   const fbUpdate = (col, id, patch)  => updateDoc(doc(db, col, id), patch);
   const fbDelete = (col, id)         => deleteDoc(doc(db, col, id));
   const fbSetDoc = (col, id, obj)    => setDoc(doc(db, col, id), obj);
 
-  // ── Items ───────────────────────────────────────────────
-  const addItem      = (item) => fbSetDoc('items', item.id, { ...item, city: effectiveCity });
-  const addItemsBulk = (rows) => { const b = writeBatch(db); rows.forEach((r) => b.set(doc(db,'items',r.id), { ...r, city: effectiveCity })); b.commit(); };
-  const deleteItem   = (id)   => fbDelete('items', id);
-  const updateItem   = (id, patch) => fbUpdate('items', id, patch);
-  const mapChannelField = (itemId, channel, patch, packSize, packUnit, ean) => {
-    const it = items.find((x) => x.id === itemId); if (!it) return;
-    const existing = findAlias(it, channel, packSize, packUnit, ean);
-    const nextAliases = existing
-      ? it.aliases.map((a) => (a.id === existing.id ? { ...a, ...patch } : a))
-      : [...(it.aliases || []), { id: newAliasId(), channel, code: '', packSize: packSize || '', packUnit: packUnit || 'kg', ...patch }];
-    fbUpdate('items', itemId, { aliases: nextAliases });
-  };
-  // Barcode label formats — each is a named, reusable set of which fields print on a
-  // label (Blinkit/Flipkart genuinely need different fields per article, hence formats
-  // being separate from any one item). Mapping which format an article uses reuses
-  // mapChannelField above, since that's already a per-channel-alias patch.
-  const saveBarcodeFormat = (format) => fbSetDoc('barcodeFormats', format.id, { ...format, city: effectiveCity });
-  const deleteBarcodeFormat = (id) => fbDelete('barcodeFormats', id);
-  // Running "how many labels printed so far" per article/date/platform, so the
-  // Printed badge keeps adding up across several print runs the same day
-  // (e.g. printing 30 now, then another 30 later) instead of resetting each time.
-  const recordBarcodePrints = (entries) => {
-    entries.forEach((e) => {
-      const existing = barcodePrints.find((p) => p.key === e.key);
-      const id = existing ? existing.id : `BCP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      const printedQty = (existing?.printedQty || 0) + e.qty;
-      fbSetDoc('barcodePrints', id, { id, key: e.key, date: e.date, platform: e.platform, itemName: e.itemName, printedQty, city: effectiveCity });
-    });
-  };
-  const updateCompanyDetails = (details) => fbSetDoc('settings', 'companyDetails', { ...companyDetailsByCity, [effectiveCity]: details });
+  const addItem = (it) => fbSetDoc('items', it.id, { ...it, city: effectiveCity });
+  const addItemsBulk = (newItems) => { const b = writeBatch(db); newItems.forEach((it) => b.set(doc(db,'items',it.id), { ...it, city: effectiveCity })); b.commit(); };
+  const updateItem = (id, u) => fbUpdate('items', id, u);
+  const deleteItem = (id) => fbDelete('items', id);
   // Different articles from the same channel can map to the same base item but have
   // their own pack size (e.g. "Baby Banana" 500g vs "Banana 3pc" 600g, both on Blinkit,
-  // both = item "Banana"). So each distinct article code gets its OWN alias entry —
-  // never share one alias between two different codes on the same channel.
+  // both = item "Banana"). So each distinct article code gets its OWN alias entry.
   // A single article code must only ever belong to ONE item — if it's already an
   // alias on a different item (e.g. someone picked the wrong item from a long
   // dropdown once), transfer it here instead of letting two items share the same
@@ -791,13 +643,12 @@ export default function AdminPanel() {
       fbUpdate('items', itemId, { aliases: [...(it.aliases || []), { id: newAliasId(), channel, code: '', ean: '', packSize: '', packUnit: 'kg' }] });
       return;
     }
-    // EAN is the item's permanent retail barcode; the channel's own FSN/SKU
-    // code can be reissued (e.g. a relisting) even though the physical
-    // product — and its EAN — hasn't changed. Checking EAN first means a
-    // changed FSN updates the existing alias instead of creating a duplicate.
-    // For EAN_ONLY_PLATFORMS (Flipkart, Zepto), the code is never used to
-    // identify/dedupe an alias — only EAN drives matching there; the code is
-    // still saved on the alias purely as a reference field, never compared against.
+    // EAN is the item's permanent retail barcode; a channel's own FSN/SKU code
+    // can be reissued (e.g. a relisting) even though the physical product —
+    // and its EAN — hasn't changed. Flipkart's code is never used to
+    // identify/dedupe an alias — per instruction, only EAN drives Flipkart
+    // matching; the code is still saved on the alias purely as a reference
+    // field, never compared against.
     const eanLower = ean ? String(ean).toLowerCase() : '';
     const rawCodeLower = code ? code.toLowerCase() : '';
     const codeLower = EAN_ONLY_PLATFORMS.has(channel) ? '' : rawCodeLower;
@@ -822,45 +673,38 @@ export default function AdminPanel() {
         fbUpdate('items', other.id, { aliases: other.aliases.filter((a) => !(a.channel === channel && ((eanLower && a.ean && String(a.ean).toLowerCase() === eanLower) || (codeLower && a.code && a.code.toLowerCase() === codeLower)))) });
       }
     });
-    const nextAliases = [...(it.aliases || []), { id: newAliasId(), channel, code: code || '', ean: ean || '', packSize: '', packUnit: 'kg' }];
-    fbUpdate('items', itemId, { aliases: nextAliases });
+    fbUpdate('items', itemId, { aliases: [...(it.aliases || []), { id: newAliasId(), channel, code: code || '', ean: ean || '', packSize: '', packUnit: 'kg' }] });
   };
   const updateAliasById = (itemId, aliasId, patch) => {
     const it = items.find((x) => x.id === itemId); if (!it) return;
-    const nextAliases = (it.aliases || []).map((a) => (a.id === aliasId ? { ...a, ...patch } : a));
-    fbUpdate('items', itemId, { aliases: nextAliases });
+    fbUpdate('items', itemId, { aliases: (it.aliases || []).map((a) => (a.id === aliasId ? { ...a, ...patch } : a)) });
   };
-  // Deletes one or more article/barcode mappings — pairs can span different
-  // items (a multi-select delete in the Map Formats to Articles table), so
-  // this groups by item and writes each item's aliases once.
-  const deleteAliasesByIds = (pairs) => {
-    const byItem = {};
-    pairs.forEach(({ itemId, aliasId }) => { (byItem[itemId] = byItem[itemId] || []).push(aliasId); });
-    Object.entries(byItem).forEach(([itemId, aliasIds]) => {
-      const it = items.find((x) => x.id === itemId); if (!it) return;
-      const nextAliases = (it.aliases || []).filter((a) => !aliasIds.includes(a.id));
-      fbUpdate('items', itemId, { aliases: nextAliases });
-    });
+  const importOrder = (o) => fbSetDoc('orders', o.id, { ...o, city: effectiveCity });
+  const advanceMany = (ids, next) => { const b = writeBatch(db); ids.forEach((id) => b.update(doc(db,'orders',id), { status: next })); b.commit(); };
+  const excludeOldOrdersFromPurchase = (ids) => {
+    if (!ids.length) return;
+    const b = writeBatch(db);
+    ids.forEach((id) => b.update(doc(db, 'orders', id), { excludeFromPurchase: true }));
+    b.commit();
   };
-
-  // ── Recipes ─────────────────────────────────────────────
-  const addRecipe    = (r)  => fbSetDoc('recipes', r.id, r);
-  const deleteRecipe = (id) => fbDelete('recipes', id);
-
-  // ── Purchases ───────────────────────────────────────────
-  // "purchased" rows are real, completed transactions and count toward stock.
-  // "requirement" rows are just a to-buy queue (from indent release / recipe push) — they do NOT count as stock until actually purchased.
-  const addPurchase            = (p)   => fbSetDoc('purchases', p.id, { date: todayLocalDate(), type: 'purchased', ...p, city: effectiveCity });
+  const restoreExcludedOrders = (ids) => {
+    if (!ids.length) return;
+    const b = writeBatch(db);
+    ids.forEach((id) => b.update(doc(db, 'orders', id), { excludeFromPurchase: false }));
+    b.commit();
+  };
+  const resetOldOrders = (orderIds, batchIds) => {
+    const b = writeBatch(db);
+    orderIds.forEach((id) => b.delete(doc(db, 'orders', id)));
+    batchIds.forEach((id) => b.delete(doc(db, 'indentBatches', id)));
+    b.commit();
+  };
+  const addPurchase = (p) => fbSetDoc('purchases', p.id, { date: todayLocalDate(), type: 'purchased', ...p, city: effectiveCity });
   const addPurchaseRequirements = (rows, dateOverride) => { const b = writeBatch(db); const today = dateOverride || todayLocalDate(); rows.forEach((r) => b.set(doc(db,'purchases',r.id), { date: today, type: 'requirement', ...r, city: effectiveCity })); b.commit(); };
-  const removePurchasesByIds   = (ids) => { const b = writeBatch(db); ids.forEach((id) => b.delete(doc(db,'purchases',id))); b.commit(); };
-
-  // ── Stock count (nightly closing stock) ─────────────────
+  const removePurchasesByIds = (ids) => { const b = writeBatch(db); ids.forEach((id) => b.delete(doc(db,'purchases',id))); b.commit(); };
   const recordStockCount = (itemId, itemName, unit, date, closingQty) => {
     fbSetDoc('stockCounts', `${itemId}__${date}`, { id: `${itemId}__${date}`, itemId, itemName, unit, date, closingQty: Number(closingQty) || 0, city: effectiveCity });
   };
-  // Zeroes every item's stock count for one date in a single atomic write —
-  // used to wipe out a bad count (e.g. after a data entry mistake) and start
-  // that day's counting over, rather than correcting items one at a time.
   const resetStockCounts = (itemList, date) => {
     const b = writeBatch(db);
     itemList.forEach((it) => {
@@ -868,8 +712,6 @@ export default function AdminPanel() {
     });
     b.commit();
   };
-
-  // ── Pricing ─────────────────────────────────────────────
   // legacyKey (optional): the pre-city-scoping shared key this article used to save
   // under. The first time a city edits this article under its own new city-scoped
   // key, we carry over whatever was already set there instead of resetting to zero.
@@ -879,169 +721,14 @@ export default function AdminPanel() {
     const base = existing || legacy || {};
     fbSetDoc('pricingConfig', key, { ...base, id: key, ...patch });
   };
-
-  // ── GRN reports (Goods Received Note — uploaded per channel + day to reconcile) ─
   const uploadGrnReport = (channel, date, fileName, rows, batchId) => {
     const id = `GRN-${channel.slice(0, 3).toUpperCase()}-${date}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     fbSetDoc('grnReports', id, { id, channel, date, fileName, uploadedAt: todayLocalDate(), rows, batchId: batchId || null });
   };
-  const deleteGrnReport = (id) => fbDelete('grnReports', id);
-
   const saveGradingRecord = (record) => fbSetDoc('gradingRecords', record.id, { ...record, city: effectiveCity });
   const deleteGradingRecord = (id) => fbDelete('gradingRecords', id);
-
-  // ── Sales tracking: Flipkart is invoiced then paid; Blinkit settles straight off
-  // GRN with no separate invoice step. Both funnels end at the same Payments log,
-  // which is what actually answers "how much have we been paid" — everything
-  // upstream (dispatch, GRN, invoice) is only ever an estimate of what's owed.
-  const saveSalesInvoice = (invoice) => fbSetDoc('salesInvoices', invoice.id, { ...invoice, city: effectiveCity });
-  const deleteSalesInvoice = (id) => fbDelete('salesInvoices', id);
-  const saveSalesPayment = (payment) => fbSetDoc('salesPayments', payment.id, { ...payment, city: effectiveCity });
-  const deleteSalesPayment = (id) => fbDelete('salesPayments', id);
-
-  // ── Staff: one doc per person, plus a per-day attendance doc and a log of
-  // advances. Attendance uses a deterministic id (staff + date) so marking the
-  // same day twice overwrites rather than creating duplicates.
-  const saveStaff = (s) => fbSetDoc('staff', s.id, { ...s, city: effectiveCity });
-  const deleteStaff = (id) => fbDelete('staff', id);
-  const markAttendance = (staffId, date, status) => fbSetDoc('staffAttendance', `${staffId}__${date}`, { id: `${staffId}__${date}`, staffId, date, status, city: effectiveCity });
-  const clearAttendance = (staffId, date) => fbDelete('staffAttendance', `${staffId}__${date}`);
-  const saveAdvance = (adv) => fbSetDoc('staffAdvances', adv.id, { ...adv, city: effectiveCity });
-  const deleteAdvance = (id) => fbDelete('staffAdvances', id);
-
-  // ── Indent batches ──────────────────────────────────────
-  const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, { ...batch, city: effectiveCity });
-  const updateIndentBatch = (batchId, patch) => fbUpdate('indentBatches', batchId, patch);
-  // An article is only ever fully resolved two ways: fully packed, or packed+short
-  // adding up to the full target — there's no partial/unresolved state that reaches
-  // Dispatch. Packing progress is tracked per aggregated target (it can combine several
-  // orders sharing the same product/platform/pack size/date), so the packed vs short
-  // split is distributed across those orders in proportion to each order's own pack
-  // count — an order that ends up with zero packed (fully short) never becomes
-  // dispatchable; its whole quantity is recorded as short right away instead of sitting
-  // in "packed" with nothing to send.
-  const updatePackedQty = (key, packedQty, shortQty, orderIds, targetPacks) => {
-    fbSetDoc('packingProgress', key, { packedQty, shortQty });
-    const resolved = targetPacks > 0 && (packedQty + shortQty) >= targetPacks;
-    const targetOrders = orderIds.map((id) => orders.find((o) => o.id === id)).filter(Boolean);
-    const totalPacks = targetOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0) || 1;
-    targetOrders.forEach((o) => {
-      if (o.status === 'dispatched') return; // already sent or already resolved-short, leave as is
-      if (!resolved) {
-        if (o.status !== 'pending') fbUpdate('orders', o.id, { status: 'pending' });
-        return;
-      }
-      const share = (Number(o.packQty) || 0) / totalPacks;
-      const myShortPacks = Math.round(shortQty * share * 100) / 100;
-      const myPackedPacks = Math.round(packedQty * share * 100) / 100;
-      const packSize = Number(o.packSize) || 1;
-      const myShortQty = Math.round(myShortPacks * packSize * 100) / 100;
-      if (myPackedPacks <= 0) {
-        // Fully short — nothing to dispatch, so it's resolved immediately rather than
-        // waiting in the packed list.
-        fbUpdate('orders', o.id, { status: 'dispatched', dispatchedQty: 0, shortQty: myShortQty });
-      } else {
-        fbUpdate('orders', o.id, { status: 'packed', shortQty: myShortQty });
-      }
-    });
-  };
-  const toggleReleaseBatch = async (batchId, purchaseDate) => {
-    const batch = indentBatches.find((b) => b.id === batchId);
-    if (!batch) return;
-    if (batch.released) {
-      removePurchasesByIds(batch.purchaseRowIds);
-      fbUpdate('indentBatches', batchId, { released: false, purchaseRowIds: [] });
-    } else {
-      const newRows = batch.compiled.map((c, i) => ({
-        id: `P-REL-${batchId}-${i}`, item: c.itemName, supplier: '', qty: c.qty, unit: c.unit, cost: 0,
-        source: `Released: ${batch.platform} indent (${batch.fileName})`,
-      }));
-      addPurchaseRequirements(newRows, purchaseDate);
-      fbUpdate('indentBatches', batchId, { released: true, purchaseRowIds: newRows.map((r) => r.id), purchaseDate });
-    }
-  };
-
-  // ── Users & Roles ───────────────────────────────────────
-  const addUser    = (u)  => fbSetDoc('users', u.id, u);
-  const updateUser = (id, patch) => fbUpdate('users', id, patch);
-  const deleteUser = (id) => fbDelete('users', id);
-  const addRole    = (r)  => fbSetDoc('roles', r.id, r);
-  const deleteRole = (id) => fbDelete('roles', id);
-  const toggleRolePermission = (roleId, key, val) => {
-    const r = roles.find((x) => x.id === roleId); if (!r) return;
-    fbUpdate('roles', roleId, { permissions: { ...r.permissions, [key]: val } });
-  };
-
-  // ── Vendors ─────────────────────────────────────────────
-  const addVendor      = (v)  => fbSetDoc('vendors', v.id, { ...v, city: effectiveCity });
-  const deleteVendor   = (id) => fbDelete('vendors', id);
-  const toggleVendorItem = (vendorId, itemId) => {
-    const v = vendors.find((x) => x.id === vendorId); if (!v) return;
-    const next = v.itemIds.includes(itemId) ? v.itemIds.filter((id) => id !== itemId) : [...v.itemIds, itemId];
-    fbUpdate('vendors', vendorId, { itemIds: next });
-  };
-
-  // ── Vendor ledger ───────────────────────────────────────
-  const addLedgerEntry = (entry) => {
-    fbSetDoc('vendorLedger', entry.id, { ...entry, city: effectiveCity });
-    const pid = `P-${Date.now().toString(36).toUpperCase().slice(-5)}`;
-    addPurchase({ id: pid, itemId: entry.itemId || null, item: entry.itemName, supplier: entry.vendorName, qty: entry.qty, unit: entry.unit, cost: entry.total, source: entry.payment === 'credit' ? `Credit — ${entry.vendorName}` : entry.payment, date: entry.date });
-  };
-  const savePlacedOrder = (order) => fbSetDoc('placedOrders', order.id, order);
-  const updatePlacedOrder = (id, itemsList) => fbUpdate('placedOrders', id, { items: itemsList });
-  const deletePlacedOrder = (id) => fbDelete('placedOrders', id);
-  const settleEntries = (ids, paymentMode, note, edits = {}) => {
-    const b = writeBatch(db);
-    ids.forEach((id) => {
-      const e = vendorLedger.find((x) => x.id === id); if (!e) return;
-      const d = edits[id] || {};
-      const qty = d.qty !== undefined ? Number(d.qty) : e.qty;
-      const unitPrice = d.unitPrice !== undefined ? Number(d.unitPrice) : e.unitPrice;
-      const total = d.total !== undefined ? Number(d.total) : Math.round(qty * unitPrice * 100) / 100;
-      b.update(doc(db, 'vendorLedger', id), { qty, unitPrice, total, settled: true, settledPayment: paymentMode, settledNote: note, settledDate: todayLocalDate() });
-    });
-    b.commit();
-  };
-
-  // ── Orders ──────────────────────────────────────────────
-  const importOrder  = (o)   => fbSetDoc('orders', o.id, { ...o, city: effectiveCity });
-  const deleteOrder  = (id)  => fbDelete('orders', id);
-  // Deletes old orders AND their parent indent batches together — used for a
-  // full "Reset Orders" cleanup, not the same as excluding from purchase-need
-  // (which keeps the order but stops counting it). This is permanent: the
-  // batch's own PO data goes with it, and it drops out of Sales' Indents & P&L
-  // list entirely, since that list is built from indentBatches.
-  const resetOldOrders = (orderIds, batchIds) => {
-    const b = writeBatch(db);
-    orderIds.forEach((id) => b.delete(doc(db, 'orders', id)));
-    batchIds.forEach((id) => b.delete(doc(db, 'indentBatches', id)));
-    b.commit();
-  };
-  const advanceMany   = (ids, next) => { const b = writeBatch(db); ids.forEach((id) => b.update(doc(db,'orders',id), { status: next })); b.commit(); };
-  // Uploading a fresh indent means today's real requirement has moved on — an
-  // item that couldn't be bought for the old indent (e.g. not available in
-  // mandi that day) shouldn't keep inflating the purchase list forever. This
-  // only hides the OLD orders from the "needs purchase" total; their own
-  // status, packing and dispatch are completely untouched, so if they still
-  // need to ship, that work isn't lost — only re-buying for them is skipped.
-  const excludeOldOrdersFromPurchase = (ids) => {
-    if (!ids.length) return;
-    const b = writeBatch(db);
-    ids.forEach((id) => b.update(doc(db, 'orders', id), { excludeFromPurchase: true }));
-    b.commit();
-  };
-  // Clears the exclude-from-purchase flag on the given orders — the undo for
-  // the above. Safe to run broadly: an order that's genuinely been bought
-  // already won't reappear in "needs purchase" anyway, since stock will cover
-  // it; only a still-unmet need comes back.
-  const restoreExcludedOrders = (ids) => {
-    if (!ids.length) return;
-    const b = writeBatch(db);
-    ids.forEach((id) => b.update(doc(db, 'orders', id), { excludeFromPurchase: false }));
-    b.commit();
-  };
-
-  // ── Crates ──────────────────────────────────────────────
+  const addRecipe = (r) => fbSetDoc('recipes', r.id, r);
+  const deleteRecipe = (id) => fbDelete('recipes', id);
   const adjustCrates = async (type, delta, note) => {
     const current = cratesByCity[effectiveCity] || { crates: 0, boxes: 0 };
     const next = { ...current, [type]: Math.max(0, current[type] + delta) };
@@ -1049,12 +736,9 @@ export default function AdminPanel() {
     const logId = `CL-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     fbSetDoc('crateLog', logId, { id: logId, type, delta, note: note || '', time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), city: effectiveCity });
   };
-
-  // ── Dispatch ────────────────────────────────────────────
-  // Supports partial dispatch: an order's full qty doesn't have to go out in one
-  // trip. Each entry carries how much is actually leaving now (dispatchQty) and how
-  // much is permanently short (shortQty) — whatever's left over stays "packed" for
-  // the next trip rather than being wrongly counted as short.
+  // Supports partial dispatch: an order's full qty doesn't have to go out in one trip.
+  // Each entry carries how much is actually leaving now (dispatchQty) and how much is
+  // permanently short (shortQty) — whatever's left stays "packed" for the next trip.
   const dispatchBatch = ({ items: dispatchItems, vehicleNo, driverName, cratesUsed, boxesUsed }) => {
     const b = writeBatch(db);
     let totalDispatchQty = 0;
@@ -1082,17 +766,122 @@ export default function AdminPanel() {
     b.commit();
     const dispatchDate = todayLocalDate();
     if (cratesUsed > 0) adjustCrates('crates', -cratesUsed, `Dispatch ${vehicleNo || ''}`.trim());
-    if (boxesUsed > 0)  adjustCrates('boxes',  -boxesUsed,  `Dispatch ${vehicleNo || ''}`.trim());
+    if (boxesUsed > 0) adjustCrates('boxes', -boxesUsed, `Dispatch ${vehicleNo || ''}`.trim());
     const did = `DSP-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     fbSetDoc('dispatchLog', did, { id: did, date: dispatchDate, items: logItems, orderIds: logItems.map((li) => li.orderId), totalDispatchQty, vehicleNo: vehicleNo || '—', driverName: driverName || '—', cratesUsed, boxesUsed, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), city: effectiveCity });
   };
+  const createIndentBatch = (b) => fbSetDoc('indentBatches', b.id, { ...b, city: effectiveCity });
+  const updateIndentBatch = (batchId, patch) => fbUpdate('indentBatches', batchId, patch);
+  // An article is only ever fully resolved two ways: fully packed, or packed+short
+  // adding up to the full target — there's no partial/unresolved state that reaches
+  // Dispatch. Packing progress is tracked per aggregated target (it can combine several
+  // orders sharing the same product/platform/pack size/date), so the packed vs short
+  // split is distributed across those orders in proportion to each order's own pack
+  // count — an order that ends up with zero packed (fully short) never becomes
+  // dispatchable; its whole quantity is recorded as short right away instead of sitting
+  // in "packed" with nothing to send.
+  const updatePackedQty = (key, packedQty, shortQty, orderIds, targetPacks) => {
+    fbSetDoc('packingProgress', key, { packedQty, shortQty });
+    const resolved = targetPacks > 0 && (packedQty + shortQty) >= targetPacks;
+    const targetOrders = orderIds.map((id) => orders.find((o) => o.id === id)).filter(Boolean);
+    const totalPacks = targetOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0) || 1;
+    const alloc = resolved ? allocateShortPacks(targetOrders, shortQty) : null;
+    targetOrders.forEach((o) => {
+      if (o.status === 'dispatched') return;
+      if (!resolved) {
+        if (o.status !== 'pending') fbUpdate('orders', o.id, { status: 'pending' });
+        return;
+      }
+      const share = (Number(o.packQty) || 0) / totalPacks;
+      const myShortPacks = alloc ? alloc[o.id] : Math.round(shortQty * share * 100) / 100;
+      const myPackedPacks = alloc ? (Number(o.packQty) || 0) - alloc[o.id] : Math.round(packedQty * share * 100) / 100;
+      const packSize = Number(o.packSize) || 1;
+      const myShortQty = Math.round(myShortPacks * packSize * 100) / 100;
+      if (myPackedPacks <= 0) {
+        fbUpdate('orders', o.id, { status: 'dispatched', dispatchedQty: 0, shortQty: myShortQty });
+      } else {
+        fbUpdate('orders', o.id, { status: 'packed', shortQty: myShortQty });
+      }
+    });
+  };
+  // A packing task lives in its own collection, separate from packingProgress —
+  // that one gets overwritten wholesale every time someone saves a packed/short
+  // count (see updatePackedQty above), so an assignment stored there would get
+  // wiped the next time the packer updates their own progress.
+  const assignPackingTask = (key, userId, userName) => fbSetDoc('packingAssignments', key, { assignedTo: userId, assignedToName: userName, city: effectiveCity });
+  const unassignPackingTask = (key) => fbDelete('packingAssignments', key);
+  const toggleReleaseBatch = (batchId, purchaseDate) => {
+    const batch = indentBatches.find((b) => b.id === batchId);
+    if (!batch) return;
+    if (batch.released) {
+      removePurchasesByIds(batch.purchaseRowIds);
+      fbUpdate('indentBatches', batchId, { released: false, purchaseRowIds: [] });
+    } else {
+      const newRows = batch.compiled.map((c, i) => ({ id: `P-REL-${batchId}-${i}`, item: c.itemName, supplier: '', qty: c.qty, unit: c.unit, cost: 0, source: `Released: ${batch.platform} indent (${batch.fileName})` }));
+      addPurchaseRequirements(newRows, purchaseDate);
+      fbUpdate('indentBatches', batchId, { released: true, purchaseRowIds: newRows.map((r) => r.id), purchaseDate });
+    }
+  };
+  const addUser = (u) => fbSetDoc('users', u.id, u);
+  const updateUser = (id, u) => fbUpdate('users', id, u);
+  const deleteUser = (id) => fbDelete('users', id);
+  const addRole = (r) => fbSetDoc('roles', r.id, r);
+  const deleteRole = (id) => fbDelete('roles', id);
+  const toggleRolePermission = (roleId, key, val) => {
+    const r = roles.find((x) => x.id === roleId); if (!r) return;
+    fbUpdate('roles', roleId, { permissions: { ...r.permissions, [key]: val } });
+  };
+  const addVendor = (v) => fbSetDoc('vendors', v.id, { ...v, city: effectiveCity });
+  // Attendance uses a deterministic id (staff + date) so marking the same day
+  // twice overwrites rather than creating duplicates - same scheme the admin
+  // panel writes, so a day marked from either app shows correctly in both.
+  const saveSalesInvoice = (invoice) => fbSetDoc('salesInvoices', invoice.id, { ...invoice, city: effectiveCity });
+  const deleteSalesInvoice = (id) => fbDelete('salesInvoices', id);
+  const saveSalesPayment = (payment) => fbSetDoc('salesPayments', payment.id, { ...payment, city: effectiveCity });
+  const deleteSalesPayment = (id) => fbDelete('salesPayments', id);
+  const saveStaff = (s) => fbSetDoc('staff', s.id, { ...s, city: effectiveCity });
+  const deleteStaff = (id) => fbDelete('staff', id);
+  const saveAdvance = (adv) => fbSetDoc('staffAdvances', adv.id, { ...adv, city: effectiveCity });
+  const deleteAdvance = (id) => fbDelete('staffAdvances', id);
+  const markAttendance = (staffId, date, status) => fbSetDoc('staffAttendance', `${staffId}__${date}`, { id: `${staffId}__${date}`, staffId, date, status, city: effectiveCity });
+  const clearAttendance = (staffId, date) => fbDelete('staffAttendance', `${staffId}__${date}`);
+  const savePlacedOrder = (order) => fbSetDoc('placedOrders', order.id, order);
+  const updatePlacedOrder = (id, itemsList) => fbUpdate('placedOrders', id, { items: itemsList });
+  const deletePlacedOrder = (id) => fbDelete('placedOrders', id);
+  const addLedgerEntry = (entry) => {
+    fbSetDoc('vendorLedger', entry.id, { ...entry, city: effectiveCity });
+    addPurchase({ id: `P-${Date.now().toString(36).toUpperCase().slice(-5)}`, itemId: entry.itemId || null, item: entry.itemName, supplier: entry.vendorName, qty: entry.qty, unit: entry.unit, cost: entry.total, source: entry.payment === 'credit' ? `Credit — ${entry.vendorName}` : entry.payment, date: entry.date });
+  };
+  const settleEntries = (ids, paymentMode, note, edits = {}) => {
+    const b = writeBatch(db);
+    ids.forEach((id) => {
+      const e = vendorLedger.find((x) => x.id === id); if (!e) return;
+      const d = edits[id] || {};
+      const qty = d.qty !== undefined ? Number(d.qty) : e.qty;
+      const unitPrice = d.unitPrice !== undefined ? Number(d.unitPrice) : e.unitPrice;
+      const total = d.total !== undefined ? Number(d.total) : Math.round(qty * unitPrice * 100) / 100;
+      b.update(doc(db, 'vendorLedger', id), { qty, unitPrice, total, settled: true, settledPayment: paymentMode, settledNote: note, settledDate: todayLocalDate() });
+    });
+    b.commit();
+  };
+  const deleteVendor = (id) => fbDelete('vendors', id);
+  const toggleVendorItem = (vendorId, itemId) => {
+    const v = vendors.find((x) => x.id === vendorId); if (!v) return;
+    const next = v.itemIds.includes(itemId) ? v.itemIds.filter((id) => id !== itemId) : [...v.itemIds, itemId];
+    fbUpdate('vendors', vendorId, { itemIds: next });
+  };
 
+  const currentNav = NAV.find((n) => n.key === tab);
   const cityItems = items.filter((it) => (it.city || CITIES[0]) === effectiveCity);
-  const cityBarcodeFormats = barcodeFormats.filter((f) => (f.city || CITIES[0]) === effectiveCity);
-  const cityBarcodePrints = barcodePrints.filter((p) => (p.city || CITIES[0]) === effectiveCity);
-  const companyDetails = companyDetailsByCity[effectiveCity] || { name: '', address: '', fssai: '' };
   const cityVendors = vendors.filter((v) => (v.city || CITIES[0]) === effectiveCity);
+  const cityGradingRecords = gradingRecords.filter((g) => (g.city || CITIES[0]) === effectiveCity);
+  const citySalesInvoices = salesInvoices.filter((inv) => (inv.city || CITIES[0]) === effectiveCity);
+  const citySalesPayments = salesPayments.filter((p) => (p.city || CITIES[0]) === effectiveCity);
+  const cityStaff = staff.filter((s) => (s.city || CITIES[0]) === effectiveCity && s.status !== 'inactive');
+  const cityAllStaff = staff.filter((s) => (s.city || CITIES[0]) === effectiveCity);
+  const cityStaffAdvances = staffAdvances.filter((a) => (a.city || CITIES[0]) === effectiveCity);
   const cityOrders = orders.filter((o) => (o.city || CITIES[0]) === effectiveCity);
+  const cityOperationalOrders = cityOrders.filter((o) => !o.isAdvance);
   const cityPurchases = purchases.filter((p) => (p.city || CITIES[0]) === effectiveCity);
   const cityIndentBatches = indentBatches.filter((b) => (b.city || CITIES[0]) === effectiveCity);
   const cityStockCounts = stockCounts.filter((sc) => (sc.city || CITIES[0]) === effectiveCity);
@@ -1109,214 +898,54 @@ export default function AdminPanel() {
     const batch = indentBatches.find((b) => b.id === g.batchId);
     return batch ? (batch.city || CITIES[0]) === effectiveCity : CITIES[0] === effectiveCity;
   });
-  const cityGradingRecords = gradingRecords.filter((g) => (g.city || CITIES[0]) === effectiveCity);
-  const citySalesInvoices = salesInvoices.filter((inv) => (inv.city || CITIES[0]) === effectiveCity);
-  const citySalesPayments = salesPayments.filter((p) => (p.city || CITIES[0]) === effectiveCity);
-  const cityOperationalOrders = cityOrders.filter((o) => !o.isAdvance);
-  const cityStaff = staff.filter((s) => (s.city || CITIES[0]) === effectiveCity);
-  const cityStaffAttendance = staffAttendance.filter((a) => (a.city || CITIES[0]) === effectiveCity);
-  const cityStaffAdvances = staffAdvances.filter((a) => (a.city || CITIES[0]) === effectiveCity);
-  const pendingCount = cityOrders.filter((o) => o.status === 'pending').length;
-  const totalSpend = cityPurchases.reduce((s, p) => s + p.cost, 0);
 
   if (!dbReady) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: 16, background: '#fff' }}>
-      <img src={LOGO_DATA_URI} alt="Nilgiri" style={{ width: 160, height: 'auto', display: 'block' }} />
-      <div style={{ fontWeight: 700, fontSize: 16, color: INK }}>Connecting to database…</div>
-      <div style={{ fontSize: 13, color: MUTED }}>FNV Business App</div>
+    <div style={isRealPhone
+      ? { display: 'flex', justifyContent: 'center', fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }
+      : { display: 'flex', justifyContent: 'center', padding: '24px 12px', fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <div style={isRealPhone
+        ? { width: '100%', minHeight: '100vh', boxSizing: 'border-box', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }
+        : { width: 390, height: 760, background: '#fff', borderRadius: 34, border: `8px solid ${INK}`, boxShadow: '0 20px 50px rgba(0,0,0,0.18)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+        <img src={LOGO_DATA_URI} alt="Nilgiri" style={{ width: 150, height: 'auto', display: 'block' }} />
+        <div style={{ fontWeight: 700, fontSize: 16, color: INK }}>Connecting to database…</div>
+      </div>
     </div>
   );
 
-  if (!currentUser) return <LoginScreen onLogin={handleLogin} error={loginError} />;
+  if (!currentUser) return <MobileLoginScreen onLogin={handleLogin} error={loginError} />;
 
   const isCityLocked = currentUser.city && currentUser.city !== 'All Cities';
 
   return (
-    <div style={{ display: 'flex', minHeight: 640, background: BG, fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', border: `1px solid ${LINE}`, borderRadius: RADIUS.xl, overflow: 'hidden', position: 'relative' }}>
-      {/* Backdrop — narrow viewports only, closes the overlay sidebar on outside click */}
-      {isNarrow && sidebarOpen && (
-        <div onClick={() => setSidebarOpen(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 20 }} />
-      )}
-      {/* Sidebar — a normal flex column on desktop; below NARROW_BREAKPOINT it becomes an
-          off-canvas overlay (same pattern the mobile app already uses for its drawer),
-          toggled by the hamburger button that appears in the header at that width. */}
-      {(!isNarrow || sidebarOpen) && (
-        <div style={{
-          width: 216,
-          background: SIDEBAR,
-          color: '#fff',
-          display: 'flex',
-          flexDirection: 'column',
-          flexShrink: 0,
-          ...(isNarrow ? { position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 21, boxShadow: SHADOW_MD } : {}),
-        }}>
-        <div style={{ padding: '18px 20px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <img src={LOGO_DATA_URI} alt="Nilgiri" style={{ width: 26, height: 'auto', display: 'block', filter: 'brightness(0) invert(1)', opacity: 0.92 }} />
-            <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: 0.2 }}>FNV Admin</span>
-          </div>
-          {isNarrow && (
-            <button onClick={() => setSidebarOpen(false)} style={{ background: 'none', border: 'none', color: '#B7C2B2', cursor: 'pointer', display: 'flex' }}><X size={18} /></button>
-          )}
-        </div>
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <p style={{ margin: '0 0 6px', fontSize: 10, color: '#8A968A', fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase' }}>City</p>
-          {isCityLocked ? (
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#fff' }}>{currentUser.city}</p>
-          ) : (
-            <select
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
-              style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: RADIUS.md, padding: '7px 8px', fontSize: 13, fontWeight: 700 }}
-            >
-              {CITIES.map((c) => <option key={c} value={c} style={{ color: INK }}>{c}</option>)}
-            </select>
-          )}
-        </div>
-        <div style={{ padding: '10px 10px', flex: 1, overflowY: 'auto' }}>
-          {visibleNav.map((n) => {
-            const active = tab === n.key;
-            return (
-              <button
-                key={n.key}
-                onClick={() => { setTab(n.key); if (isNarrow) setSidebarOpen(false); }}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '9px 12px',
-                  marginBottom: 2,
-                  borderRadius: RADIUS.md,
-                  border: 'none',
-                  borderLeft: active ? '3px solid #8FBF7A' : '3px solid transparent',
-                  background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
-                  color: active ? '#fff' : '#B7C2B2',
-                  fontSize: 13,
-                  fontWeight: active ? 700 : 500,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background 0.12s, color 0.12s',
-                }}
-                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
-                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-              >
-                <n.icon size={16} />
-                {n.label}
-                {n.key === 'orders' && pendingCount > 0 && (
-                  <span style={{ marginLeft: 'auto', background: TOMATO, color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>
-                    {pendingCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ padding: '12px 20px 18px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-          <p style={{ margin: '0 0 8px', fontSize: 11, color: '#8A968A' }}>Signed in as <strong style={{ color: '#fff' }}>{currentUser.name}</strong></p>
-          <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0, marginBottom: 8 }}>
-            <ArrowLeft size={14} /> Log out
+    <div style={isRealPhone
+      ? { display: 'flex', justifyContent: 'center', fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }
+      : { display: 'flex', justifyContent: 'center', padding: '24px 12px', fontFamily: '"Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <div
+        onTouchStart={onFrameTouchStart}
+        onTouchEnd={onFrameTouchEnd}
+        style={isRealPhone
+        ? { width: '100%', height: '100vh', background: BG, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }
+        : { width: 390, height: 760, background: BG, borderRadius: 34, border: `8px solid ${INK}`, boxShadow: '0 20px 50px rgba(0,0,0,0.18)', overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        {/* On a real phone the device's own status bar is already visible above this
+            page — this strip only needs to exist as a mockup decoration on desktop.
+            On the real device we instead pad the header itself for any safe-area
+            inset (notch/home-indicator), which is 0px on an ordinary phone so it's
+            invisible unless this is ever run fullscreen as an installed PWA/APK. */}
+        {!isRealPhone && <div style={{ height: 22, background: LEAF_DARK, flexShrink: 0 }} />}
+        <div style={{ background: LEAF_DARK, color: '#fff', padding: '12px 16px', paddingTop: isRealPhone ? 'max(12px, env(safe-area-inset-top, 0px))' : '12px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <button onClick={() => setDrawerOpen(true)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex' }}>
+            <Menu size={20} />
           </button>
-          <button style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0 }}>
-            <Settings size={14} /> Settings
-          </button>
-        </div>
-        </div>
-      )}
-
-
-      {/* Main content */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <div style={{ padding: `${SPACE.lg}px ${SPACE.xxl}px`, borderBottom: `1px solid ${LINE}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: SPACE.md }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, minWidth: 0 }}>
-            {isNarrow && (
-              <button onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', color: INK, cursor: 'pointer', display: 'flex', flexShrink: 0 }}>
-                <Menu size={20} />
-              </button>
-            )}
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: INK, letterSpacing: 0.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {NAV.find((n) => n.key === tab)?.label}
-            </h1>
-          </div>
-          {!isNarrow && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: BG, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '6px 10px', width: 200, flexShrink: 0 }}>
-              <Search size={14} color={MUTED} />
-              <input placeholder="Search..." style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12, width: '100%' }} />
-            </div>
-          )}
+          <Text style={{ fontWeight: 800, fontSize: 16 }}>{currentNav?.label}</Text>
         </div>
 
-        <div style={{ padding: isNarrow ? SPACE.lg : SPACE.xxl, flex: 1, overflowY: 'auto' }}>
-          {tab === 'dashboard' && (
-            <Dashboard orders={cityOrders} purchases={cityPurchases} items={cityItems} crates={cityCrates} pendingCount={pendingCount} totalSpend={totalSpend} visibleNav={visibleNav} onGo={setTab} />
-          )}
-          {tab === 'items' && <ItemsPanel items={cityItems} onAdd={addItem} onAddBulk={addItemsBulk} onMapChannel={mapChannelField} onUpdate={updateItem} onDelete={deleteItem} />}
-          {tab === 'vendors' && (
-            <VendorsPanel items={cityItems} vendors={cityVendors} vendorLedger={cityVendorLedger} placedOrders={placedOrders} purchases={cityPurchases} onAdd={addVendor} onDelete={deleteVendor} onToggleItem={toggleVendorItem} onSettle={settleEntries} onAddLedgerEntry={addLedgerEntry} onUpdatePlacedOrder={updatePlacedOrder} onDeletePlacedOrder={deletePlacedOrder} />
-          )}
-          {tab === 'cutprocess' && (
-            <CutProcessPanel
-              items={items}
-              recipes={recipes}
-              orders={orders}
-              onAddRecipe={addRecipe}
-              onDeleteRecipe={deleteRecipe}
-              onAddPurchaseRequirements={addPurchaseRequirements}
-            />
-          )}
-          {tab === 'orders' && (
-            <OrdersPanel
-              orders={cityOrders}
-              items={cityItems}
-              indentBatches={cityIndentBatches}
-              onImport={importOrder}
-              onDelete={deleteOrder}
-              onAddItem={addItem}
-              onEnsureAlias={ensureAliasForCode}
-              onUpdateAlias={updateAliasById}
-              onCreateIndentBatch={createIndentBatch}
-              onToggleReleaseBatch={toggleReleaseBatch}
-              onExcludeOldFromPurchase={excludeOldOrdersFromPurchase}
-              onResetOldOrders={resetOldOrders}
-            />
-          )}
-          {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} onDeleteOldPurchases={removePurchasesByIds} onResetPurchaseNeeds={excludeOldOrdersFromPurchase} onRestoreExcluded={restoreExcludedOrders} />}
-          {tab === 'stockcount' && <StockCountPanel items={cityItems} stockCounts={cityStockCounts} purchases={cityPurchases} dispatchLog={cityDispatchLog} onRecord={recordStockCount} onReset={resetStockCounts} />}
-          {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} recipes={recipes} />}
-          {tab === 'sales' && (
-            <SalesPanel
-              items={cityItems}
-              orders={cityOrders}
-              purchases={cityPurchases}
-              pricingConfig={pricingConfig}
-              dispatchLog={cityDispatchLog}
-              grnReports={cityGrnReports}
-              indentBatches={cityIndentBatches}
-              salesInvoices={citySalesInvoices}
-              salesPayments={citySalesPayments}
-              city={effectiveCity}
-              onSaveInvoice={saveSalesInvoice}
-              onDeleteInvoice={deleteSalesInvoice}
-              onSavePayment={saveSalesPayment}
-              onDeletePayment={deleteSalesPayment}
-              onUploadGrn={uploadGrnReport}
-              onDeleteGrn={deleteGrnReport}
-              onUpdateIndentBatch={updateIndentBatch}
-              recipes={recipes}
-            />
-          )}
-          {tab === 'grading' && (
-            <GradingPanel
-              items={cityItems}
-              records={cityGradingRecords}
-              onSave={saveGradingRecord}
-              onDelete={deleteGradingRecord}
-            />
-          )}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {tab === 'dashboard' && <DashboardTab orders={cityOrders} purchases={cityPurchases} crates={cityCrates} packingProgress={packingProgress} dispatchLog={cityDispatchLog} />}
+          {tab === 'attendance' && <AttendanceTab staff={cityStaff} attendance={staffAttendance} onMark={markAttendance} onClear={clearAttendance} />}
           {tab === 'staff' && (
-            <StaffPanel
-              staff={cityStaff}
-              attendance={cityStaffAttendance}
+            <StaffPanelMobile
+              staff={cityAllStaff}
+              attendance={staffAttendance}
               advances={cityStaffAdvances}
               onSaveStaff={saveStaff}
               onDeleteStaff={deleteStaff}
@@ -1326,150 +955,670 @@ export default function AdminPanel() {
               onDeleteAdvance={deleteAdvance}
             />
           )}
-          {tab === 'packaging' && <PackagingPanel orders={cityOperationalOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
-          {tab === 'dispatch' && <DispatchPanel orders={cityOperationalOrders} items={cityItems} crates={cityCrates} dispatchLog={cityDispatchLog} indentBatches={cityIndentBatches} onDispatchBatch={dispatchBatch} />}
-          {tab === 'crates' && <CratesPanel crates={cityCrates} log={cityCrateLog} onAdjust={adjustCrates} />}
-          {tab === 'barcodelabels' && (
-            <BarcodeLabelsPanel
+          {tab === 'items' && <ItemsTab items={cityItems} onAdd={addItem} onAddBulk={addItemsBulk} onUpdate={updateItem} onDelete={deleteItem} />}
+          {tab === 'vendors' && (
+            <VendorsTab items={cityItems} vendors={cityVendors} vendorLedger={cityVendorLedger} placedOrders={placedOrders} purchases={cityPurchases} onAdd={addVendor} onDelete={deleteVendor} onToggleItem={toggleVendorItem} onSettle={settleEntries} onUpdatePlacedOrder={updatePlacedOrder} onDeletePlacedOrder={deletePlacedOrder} onAddLedgerEntry={addLedgerEntry} />
+          )}
+          {tab === 'cutprocess' && <CutProcessTab items={items} recipes={recipes} orders={orders} onAddRecipe={addRecipe} onDeleteRecipe={deleteRecipe} onAddPurchaseRequirements={addPurchaseRequirements} />}
+          {tab === 'orders' && (
+            <OrdersTab
+              orders={cityOrders} items={cityItems} indentBatches={cityIndentBatches}
+              onImport={importOrder} onAddItem={addItem} onEnsureAlias={ensureAliasForCode} onUpdateAlias={updateAliasById}
+              onCreateIndentBatch={createIndentBatch} onToggleReleaseBatch={toggleReleaseBatch}
+              canAdvanceIndent={hasSensitivePermission(currentRole?.permissions, 'advanceindent')}
+              onExcludeOldFromPurchase={excludeOldOrdersFromPurchase}
+              onResetOldOrders={resetOldOrders}
+            />
+          )}
+          {tab === 'purchase' && <PurchasesTab purchases={cityPurchases} orders={cityOrders} items={cityItems} allItems={items} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} stockCounts={cityStockCounts} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} indentBatches={cityIndentBatches} onDeleteOldPurchases={removePurchasesByIds} onResetPurchaseNeeds={excludeOldOrdersFromPurchase} onRestoreExcluded={restoreExcludedOrders} />}
+          {tab === 'grading' && (
+            <GradingTabMobile
+              items={cityItems}
+              records={cityGradingRecords}
+              onSave={saveGradingRecord}
+              onDelete={deleteGradingRecord}
+            />
+          )}
+          {tab === 'stockcount' && <StockCountTab items={cityItems} stockCounts={cityStockCounts} purchases={cityPurchases} dispatchLog={cityDispatchLog} onRecord={recordStockCount} onReset={resetStockCounts} />}
+          {tab === 'pricing' && <PricingTab orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} />}
+          {tab === 'sales' && (
+            <SalesTabMobile
               items={cityItems}
               orders={cityOrders}
-              packingProgress={packingProgress}
-              barcodeFormats={cityBarcodeFormats}
-              barcodePrints={cityBarcodePrints}
-              companyDetails={companyDetails}
-              onSaveFormat={saveBarcodeFormat}
-              onDeleteFormat={deleteBarcodeFormat}
-              onUpdateCompanyDetails={updateCompanyDetails}
-              onUpdateAlias={mapChannelField}
-              onUpdateAliasById={updateAliasById}
-              onDeleteAliases={deleteAliasesByIds}
-              onRecordPrint={recordBarcodePrints}
+              purchases={cityPurchases}
+              pricingConfig={pricingConfig}
+              grnReports={cityGrnReports}
+              indentBatches={cityIndentBatches}
+              salesInvoices={citySalesInvoices}
+              salesPayments={citySalesPayments}
+              city={effectiveCity}
+              onUploadGrn={uploadGrnReport}
+              onUpdateIndentBatch={updateIndentBatch}
+              onSaveInvoice={saveSalesInvoice}
+              onDeleteInvoice={deleteSalesInvoice}
+              onSavePayment={saveSalesPayment}
+              onDeletePayment={deleteSalesPayment}
             />
           )}
+          {tab === 'packaging' && <PackagingTab orders={cityOperationalOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} packingAssignments={packingAssignments} onAssignTask={assignPackingTask} onUnassignTask={unassignPackingTask} users={users} roles={roles} currentUser={currentUser} />}
+          {tab === 'dispatch' && (
+            <DispatchTab orders={cityOperationalOrders} crates={cityCrates} dispatchLog={cityDispatchLog} indentBatches={cityIndentBatches} onDispatchBatch={dispatchBatch} />
+          )}
+          {tab === 'crates' && <CratesTab crates={cityCrates} log={cityCrateLog} onAdjust={adjustCrates} />}
           {tab === 'users' && (
-            <UsersRolesPanel
-              users={users}
-              roles={roles}
-              onAddUser={addUser}
-              onUpdateUser={updateUser}
-              onDeleteUser={deleteUser}
-              onAddRole={addRole}
-              onDeleteRole={deleteRole}
-              onToggleRolePermission={toggleRolePermission}
+            <UsersRolesTab
+              users={users} roles={roles}
+              onAddUser={addUser} onUpdateUser={updateUser} onDeleteUser={deleteUser}
+              onAddRole={addRole} onDeleteRole={deleteRole} onToggleRolePermission={toggleRolePermission}
             />
           )}
+        </div>
+
+        {drawerOpen && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
+            <div onTouchStart={onDrawerTouchStart} onTouchEnd={onDrawerTouchEnd} style={{ width: 250, background: SIDEBAR, height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '18px 18px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <img src={LOGO_DATA_URI} alt="Nilgiri" style={{ width: 22, height: 'auto', display: 'block', filter: 'brightness(0) invert(1)', opacity: 0.92 }} />
+                  <span style={{ color: '#fff', fontWeight: 800, fontSize: 14 }}>FNV Admin</span>
+                </div>
+                <button onClick={() => setDrawerOpen(false)} style={{ background: 'none', border: 'none', color: '#B7C2B2', cursor: 'pointer' }}><X size={18} /></button>
+              </div>
+              <div style={{ padding: '12px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <p style={{ margin: '0 0 6px', fontSize: 10, color: '#8A968A', fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase' }}>City</p>
+                {isCityLocked ? (
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#fff' }}>{currentUser.city}</p>
+                ) : (
+                  <select
+                    value={selectedCity}
+                    onChange={(e) => setSelectedCity(e.target.value)}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: RADIUS.md, padding: '8px', fontSize: 13, fontWeight: 700 }}
+                  >
+                    {CITIES.map((c) => <option key={c} value={c} style={{ color: INK }}>{c}</option>)}
+                  </select>
+                )}
+              </div>
+              <div style={{ padding: '10px 8px', flex: 1, overflowY: 'auto' }}>
+                {visibleNav.map((n) => {
+                  const active = tab === n.key;
+                  return (
+                    <button
+                      key={n.key}
+                      onClick={() => { setTab(n.key); setDrawerOpen(false); }}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 2, borderRadius: RADIUS.md, border: 'none', borderLeft: active ? '3px solid #8FBF7A' : '3px solid transparent', background: active ? 'rgba(255,255,255,0.10)' : 'transparent', color: active ? '#fff' : '#B7C2B2', fontSize: 13, fontWeight: active ? 700 : 500, cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      <n.icon size={16} />
+                      {n.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ padding: '12px 18px 16px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <p style={{ margin: '0 0 8px', fontSize: 11, color: '#8A968A' }}>Signed in as <strong style={{ color: '#fff' }}>{currentUser.name}</strong></p>
+                <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', color: '#B7C2B2', fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                  <ArrowLeft size={14} /> Log out
+                </button>
+              </div>
+            </div>
+            <div onClick={() => setDrawerOpen(false)} style={{ flex: 1, background: 'rgba(0,0,0,0.35)' }} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Text({ children, style }) {
+  return <span style={style}>{children}</span>;
+}
+
+// ---------- Dashboard ----------
+// For one channel (Blinkit/Flipkart) on one date: how much of today's ordered qty
+// has been dispatched (reads each order's own dispatchedQty directly), and how much
+// has been packed (grouped by the exact same product+platform+packSize key the
+// Packaging screen itself uses, so this ring always agrees with that screen).
+function computeChannelDayProgress(orders, packingProgress, platform, dateStr) {
+  const dayOrders = orders.filter((o) => o.platform === platform && o.fulfilmentDate === dateStr);
+
+  let totalQty = 0, dispatchedQty = 0;
+  dayOrders.forEach((o) => {
+    totalQty += Number(o.qty) || 0;
+    dispatchedQty += Number(o.dispatchedQty) || 0;
+  });
+  const dispatchPercent = totalQty > 0 ? Math.min(100, Math.round((dispatchedQty / totalQty) * 100)) : 0;
+
+  const groups = {};
+  dayOrders.forEach((o) => {
+    const hasPack = !!(o.packQty && o.packSize);
+    const cityKey = o.city || CITIES[0];
+    const key = hasPack
+      ? `${cityKey}__${dateStr}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`
+      : `${cityKey}__${dateStr}__${o.product}__${o.unit}`;
+    if (!groups[key]) groups[key] = { key, hasPack, targetPacks: 0, doneViaStatus: 0 };
+    if (hasPack) {
+      groups[key].targetPacks += Number(o.packQty) || 0;
+      // An order already at 'packed' or 'dispatched' status necessarily finished
+      // packing to get there (that's how status advances), regardless of whether a
+      // packingProgress record still exists for it — this is the more reliable signal.
+      if (o.status === 'packed' || o.status === 'dispatched') groups[key].doneViaStatus += Number(o.packQty) || 0;
+    }
+  });
+  // Pack-based totals — this is what "total indent" means in this business (a count
+  // of packs to prepare), so it's exposed as its own clean whole number, separate
+  // from the blended percentage below (which also folds in non-pack, sold-by-weight items).
+  let indentPacks = 0, packedPacks = 0;
+  Object.values(groups).forEach((g) => {
+    if (!g.hasPack) return;
+    indentPacks += g.targetPacks;
+    const progress = packingProgress[g.key] || { packedQty: 0, shortQty: 0 };
+    const viaProgress = Math.min(g.targetPacks, (progress.packedQty || 0) + (progress.shortQty || 0));
+    packedPacks += Math.max(g.doneViaStatus, viaProgress);
+  });
+  let totalTarget = indentPacks, totalDone = packedPacks;
+  // Non-pack items have no granular packingProgress entry of their own — the best
+  // available signal is the order's own status (packed/dispatched means it's done).
+  dayOrders.filter((o) => !(o.packQty && o.packSize)).forEach((o) => {
+    totalTarget += Number(o.qty) || 0;
+    if (o.status === 'packed' || o.status === 'dispatched') totalDone += Number(o.qty) || 0;
+  });
+  const packagePercent = totalTarget > 0 ? Math.min(100, Math.round((totalDone / totalTarget) * 100)) : 0;
+
+  return { dispatchPercent, packagePercent, orderCount: dayOrders.length, indentPacks, packedPacks };
+}
+
+// Two concentric activity-style rings for one channel: the outer ring is packaging
+// progress, the inner ring is dispatch progress, and the channel name sits in the
+// centre — dispatch can only complete once packing has, so outer-then-inner filling
+// mirrors the real order of work.
+function ChannelProgressRings({ channel, dispatchPercent, packagePercent, orderCount }) {
+  const size = 116;
+  const c = size / 2;
+  const outerR = 50;
+  const innerR = 37;
+  const outerCirc = 2 * Math.PI * outerR;
+  const innerCirc = 2 * Math.PI * innerR;
+  const outerOffset = outerCirc * (1 - packagePercent / 100);
+  const innerOffset = innerCirc * (1 - dispatchPercent / 100);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flex: 1 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={c} cy={c} r={outerR} fill="none" stroke={LINE} strokeWidth={8} />
+        <circle cx={c} cy={c} r={innerR} fill="none" stroke={LINE} strokeWidth={8} />
+        <circle
+          cx={c} cy={c} r={outerR} fill="none" stroke={AMBER} strokeWidth={8} strokeLinecap="round"
+          strokeDasharray={outerCirc} strokeDashoffset={outerOffset} transform={`rotate(-90 ${c} ${c})`}
+          style={{ transition: 'stroke-dashoffset 0.4s ease' }}
+        />
+        <circle
+          cx={c} cy={c} r={innerR} fill="none" stroke={LEAF} strokeWidth={8} strokeLinecap="round"
+          strokeDasharray={innerCirc} strokeDashoffset={innerOffset} transform={`rotate(-90 ${c} ${c})`}
+          style={{ transition: 'stroke-dashoffset 0.4s ease' }}
+        />
+        <text x={c} y={c - 3} textAnchor="middle" fontSize="13" fontWeight="800" fill={INK}>{channel}</text>
+        <text x={c} y={c + 13} textAnchor="middle" fontSize="9" fill={MUTED}>{orderCount} order{orderCount !== 1 ? 's' : ''}</text>
+      </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: MUTED, width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 4, background: AMBER, flexShrink: 0 }} />
+          Packed {packagePercent}%
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 4, background: LEAF, flexShrink: 0 }} />
+          Dispatched {dispatchPercent}%
         </div>
       </div>
     </div>
   );
 }
 
-function Metric({ label, value, color }) {
+// ── Attendance (the only Staff feature exposed on mobile — a supervisor marks
+// who worked today; salary, advances and payroll stay admin-only) ──
+const ATTENDANCE_STATUSES = [
+  { key: 'present', label: 'P', full: 'Present', color: LEAF, payFactor: 1 },
+  { key: 'halfday', label: 'H', full: 'Half day', color: AMBER, payFactor: 0.5 },
+  { key: 'leave', label: 'L', full: 'Paid leave', color: '#5B8DB8', payFactor: 1 },
+  { key: 'absent', label: 'A', full: 'Absent', color: TOMATO, payFactor: 0 },
+];
+const attendanceMeta = (key) => ATTENDANCE_STATUSES.find((s) => s.key === key);
+function daysInMonth(monthStr) {
+  const [y, m] = monthStr.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+function monthDateStrings(monthStr) {
+  return Array.from({ length: daysInMonth(monthStr) }, (_, i) => `${monthStr}-${String(i + 1).padStart(2, '0')}`);
+}
+function tenureText(joiningDate) {
+  if (!joiningDate) return '—';
+  const start = new Date(`${joiningDate}T00:00:00`);
+  const now = new Date();
+  let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 0) return 'Starts soon';
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  if (y === 0) return `${m} month${m === 1 ? '' : 's'}`;
+  return m === 0 ? `${y} year${y === 1 ? '' : 's'}` : `${y}y ${m}m`;
+}
+// Payroll for one person in one month. Unmarked days are treated as worked —
+// marking every present day would be a lot of clicking, so only exceptions
+// (absent/half-day/leave) need recording, which is how most small teams run it.
+function computePayroll(person, monthStr, attendance, advances) {
+  const dates = monthDateStrings(monthStr);
+  const totalDays = dates.length;
+  const perDay = (Number(person.monthlySalary) || 0) / totalDays;
+  const marks = {};
+  attendance.filter((a) => a.staffId === person.id && (a.date || '').startsWith(monthStr)).forEach((a) => { marks[a.date] = a.status; });
+  const joined = person.joiningDate || '';
+  const eligible = dates.filter((d) => !joined || d >= joined);
+  const counts = { present: 0, halfday: 0, leave: 0, absent: 0, unmarked: 0 };
+  let payableDays = 0;
+  eligible.forEach((d) => {
+    const status = marks[d];
+    if (!status) { counts.unmarked += 1; payableDays += 1; return; }
+    counts[status] = (counts[status] || 0) + 1;
+    payableDays += attendanceMeta(status)?.payFactor ?? 1;
+  });
+  const earned = Math.round(perDay * payableDays * 100) / 100;
+  const monthAdvances = advances.filter((a) => a.staffId === person.id && (a.date || '').startsWith(monthStr));
+  const advanceTotal = Math.round(monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+  return {
+    totalDays, eligibleDays: eligible.length, counts, payableDays: Math.round(payableDays * 100) / 100,
+    earned, advanceTotal, netPayable: Math.round((earned - advanceTotal) * 100) / 100,
+  };
+}
+
+function AttendanceTab({ staff, attendance, onMark, onClear }) {
+  const today = todayLocalDate();
+  const [date, setDate] = useState(today);
+  const isLocked = date !== today;
+
+  const markMap = useMemo(() => {
+    const m = {};
+    attendance.filter((a) => a.date === date).forEach((a) => { m[a.staffId] = a.status; });
+    return m;
+  }, [attendance, date]);
+
+  // Tapping a person's status walks Present → Half day → Paid leave → Absent →
+  // blank, so the whole thing works with one thumb and no dropdowns.
+  const cycle = (staffId) => {
+    if (isLocked) return;
+    const current = markMap[staffId];
+    if (!current) { onMark(staffId, date, 'present'); return; }
+    const idx = ATTENDANCE_STATUSES.findIndex((s) => s.key === current);
+    if (idx === ATTENDANCE_STATUSES.length - 1) { onClear(staffId, date); return; }
+    onMark(staffId, date, ATTENDANCE_STATUSES[idx + 1].key);
+  };
+
+  const markedCount = staff.filter((p) => markMap[p.id]).length;
+
   return (
-    <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: RADIUS.lg, boxShadow: SHADOW_SM, padding: `${SPACE.md}px ${SPACE.lg}px`, flex: 1 }}>
-      <p style={{ margin: `0 0 ${SPACE.xs}px`, fontSize: 11, color: TEXT_SECONDARY, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</p>
-      <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: color || INK, fontVariantNumeric: 'tabular-nums' }}>{value}</p>
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 10 }}>
+        <p style={sectionTitle}>Attendance</p>
+        <p style={hint}>Tap a person to mark them. Tap again to cycle Present → Half day → Paid leave → Absent → blank (blank counts as not yet marked).</p>
+        <p style={smallLabel}>DATE</p>
+        <Field type="date" value={date} onChange={(e) => setDate(e.target.value)} max={today} />
+        <p style={{ margin: 0, fontSize: 12, color: MUTED }}>{markedCount} / {staff.length} marked</p>
+      </Card>
+
+      {isLocked && (
+        <div style={{ background: '#FFF4E5', border: `1px solid ${AMBER}`, borderRadius: RADIUS.lg, padding: '10px 12px', marginBottom: 14, fontSize: 12, color: INK }}>
+          This day is locked — only today's attendance can be marked here. To correct a past day, use the admin panel.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        {ATTENDANCE_STATUSES.map((s) => (
+          <span key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: MUTED }}>
+            <span style={{ width: 16, height: 16, borderRadius: 4, background: s.color, color: '#fff', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.label}</span>
+            {s.full}
+          </span>
+        ))}
+      </div>
+
+      {staff.length === 0 ? (
+        <Card><p style={{ margin: 0, fontSize: 13, color: MUTED }}>No staff added yet — ask an admin to add staff in the admin panel first.</p></Card>
+      ) : (
+        staff.map((p) => {
+          const beforeJoining = p.joiningDate && date < p.joiningDate;
+          const disabled = beforeJoining || isLocked;
+          const status = markMap[p.id];
+          const meta = status ? attendanceMeta(status) : null;
+          return (
+            <Card key={p.id} style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: disabled ? 0.5 : 1 }}>
+              <div>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>{p.name}</p>
+                {p.role && <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{p.role}</p>}
+                {beforeJoining && <p style={{ margin: '2px 0 0', fontSize: 10, color: MUTED }}>Joins {p.joiningDate}</p>}
+              </div>
+              <button
+                onClick={() => cycle(p.id)}
+                disabled={disabled}
+                style={{
+                  minWidth: 84, padding: '10px 14px', borderRadius: RADIUS.lg, border: meta ? 'none' : `1px solid ${LINE}`,
+                  background: meta ? meta.color : '#fff', color: meta ? '#fff' : MUTED, fontWeight: 800, fontSize: 13,
+                  cursor: disabled ? 'default' : 'pointer',
+                }}
+              >
+                {meta ? meta.full : 'Not marked'}
+              </button>
+            </Card>
+          );
+        })
+      )}
     </div>
   );
 }
 
-function Th({ children }) {
-  return <th style={{ textAlign: 'left', fontSize: 11, color: TEXT_SECONDARY, fontWeight: 700, padding: `0 ${SPACE.md}px ${SPACE.sm}px`, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${LINE}` }}>{children}</th>;
+// ── Staff (mobile, full — Admin role only) — People, Attendance, Advances,
+// Payroll, using the exact same verified helpers as the admin panel ──
+function StaffPanelMobile({ staff, attendance, advances, onSaveStaff, onDeleteStaff, onMarkAttendance, onClearAttendance, onSaveAdvance, onDeleteAdvance }) {
+  const [view, setView] = useState('people');
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ marginBottom: 12 }}>
+        <Chip label="People" active={view === 'people'} onClick={() => setView('people')} />
+        <Chip label="Attendance" active={view === 'attendance'} onClick={() => setView('attendance')} />
+        <Chip label="Advances" active={view === 'advances'} onClick={() => setView('advances')} />
+        <Chip label="Payroll" active={view === 'payroll'} onClick={() => setView('payroll')} />
+      </div>
+      {view !== 'people' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>MONTH</span>
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ padding: '7px 8px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12 }} />
+        </div>
+      )}
+      {view === 'people' && <StaffPeopleMobile staff={staff} onSaveStaff={onSaveStaff} onDeleteStaff={onDeleteStaff} />}
+      {view === 'attendance' && <StaffAttendanceMobile staff={staff} attendance={attendance} month={month} onMark={onMarkAttendance} onClear={onClearAttendance} />}
+      {view === 'advances' && <StaffAdvancesMobile staff={staff} advances={advances} month={month} onSave={onSaveAdvance} onDelete={onDeleteAdvance} />}
+      {view === 'payroll' && <StaffPayrollMobile staff={staff} attendance={attendance} advances={advances} month={month} />}
+    </div>
+  );
 }
-function Td({ children, style }) {
-  return <td style={{ padding: `${SPACE.md}px ${SPACE.md}px`, fontSize: 13, color: INK, borderTop: `1px solid ${LINE}`, ...style }}>{children}</td>;
-}
-// A plain window.confirm() popup does not reliably appear inside this app's
-// Android WebView — a click can silently do nothing. This is the safe
-// replacement used everywhere a single delete action needs a yes/no step:
-// tapping once arms it, a second tap (Yes) commits it, and nothing native
-// is involved.
-function ConfirmDeleteButton({ onConfirm, icon: Icon = Trash2, size = 14, title, style }) {
-  const [confirming, setConfirming] = useState(false);
-  if (!confirming) {
+
+function StaffPeopleMobile({ staff, onSaveStaff, onDeleteStaff }) {
+  const blank = { id: '', name: '', phone: '', role: '', joiningDate: todayLocalDate(), monthlySalary: '', status: 'active' };
+  const [editing, setEditing] = useState(null);
+
+  const save = () => {
+    if (!editing.name.trim()) return;
+    onSaveStaff({ ...editing, id: editing.id || `STF-${Date.now().toString(36).toUpperCase()}`, name: editing.name.trim(), monthlySalary: Number(editing.monthlySalary) || 0 });
+    setEditing(null);
+  };
+
+  if (editing) {
     return (
-      <button onClick={() => setConfirming(true)} title={title} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'inline-flex', ...style }}>
-        <Icon size={size} />
-      </button>
+      <Card>
+        <p style={sectionTitle}>{editing.id ? 'Edit staff member' : 'Add staff member'}</p>
+        <p style={smallLabel}>NAME</p>
+        <Field value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+        <p style={smallLabel}>ROLE / DESIGNATION</p>
+        <Field value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })} placeholder="e.g. Packer, Driver" />
+        <p style={smallLabel}>PHONE</p>
+        <Field value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+        <p style={smallLabel}>JOINING DATE</p>
+        <Field type="date" value={editing.joiningDate} onChange={(e) => setEditing({ ...editing, joiningDate: e.target.value })} />
+        <p style={smallLabel}>MONTHLY SALARY (₹)</p>
+        <Field type="number" value={editing.monthlySalary} onChange={(e) => setEditing({ ...editing, monthlySalary: e.target.value })} />
+        <p style={smallLabel}>STATUS</p>
+        <select value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 8px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, marginBottom: 10 }}>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive (left)</option>
+        </select>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <PrimaryBtn onClick={save}>Save</PrimaryBtn>
+          <button onClick={() => setEditing(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 16px', fontWeight: 700, fontSize: 12 }}>Cancel</button>
+        </div>
+      </Card>
     );
   }
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-      <button onClick={onConfirm} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-      <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>No</button>
-    </span>
-  );
-}
-function Panel({ children, style }) {
-  return <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: RADIUS.lg, boxShadow: SHADOW_SM, padding: SPACE.xxl, ...style }}>{children}</div>;
-}
-function StatusPill({ status }) {
-  const map = {
-    pending: { bg: STATUS_COLORS.warning.bg, color: STATUS_COLORS.warning.fg, label: 'Pending' },
-    packed: { bg: STATUS_COLORS.info.bg, color: STATUS_COLORS.info.fg, label: 'Packed' },
-    dispatched: { bg: STATUS_COLORS.success.bg, color: STATUS_COLORS.success.fg, label: 'Dispatched' },
-  };
-  const s = map[status] || map.pending;
-  return <span style={{ background: s.bg, color: s.color, fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999 }}>{s.label}</span>;
-}
 
-function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend, visibleNav, onGo }) {
-  const dispatchedToday = orders.filter((o) => o.status === 'dispatched').length;
-  const canSee = (key) => visibleNav.some((n) => n.key === key);
+  const active = staff.filter((s) => s.status !== 'inactive');
+  const inactive = staff.filter((s) => s.status === 'inactive');
+  const monthlyWageBill = active.reduce((s, p) => s + (Number(p.monthlySalary) || 0), 0);
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
-        <Metric label="Active items" value={items.length} />
-        <Metric label="Pending orders" value={pendingCount} color={AMBER} />
-        <Metric label="Dispatched" value={dispatchedToday} color={LEAF} />
-        <Metric label="Purchase spend" value={`₹${totalSpend.toLocaleString('en-IN')}`} color={TOMATO} />
-        <Metric label="Crates in stock" value={crates.crates} />
-        <Metric label="Boxes in stock" value={crates.boxes} />
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>ACTIVE STAFF</div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{active.length}</div>
+        </Card>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>WAGE BILL</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: LEAF }}>{money(monthlyWageBill)}</div>
+        </Card>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Recent orders</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <tbody>
-              {orders.slice(0, 5).map((o) => (
-                <tr key={o.id}>
-                  <Td style={{ borderTop: 'none' }}>{o.id}</Td>
-                  <Td style={{ borderTop: 'none' }}>{o.articleName || o.product} · {o.qty}{o.unit}</Td>
-                  <Td style={{ borderTop: 'none' }}><StatusPill status={o.status} /></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <button onClick={() => setEditing(blank)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontWeight: 700, fontSize: 12, marginBottom: 12 }}>
+        <Plus size={13} /> Add staff
+      </button>
+      {[...active, ...inactive].map((p) => (
+        <Card key={p.id} style={{ marginBottom: 8, opacity: p.status === 'inactive' ? 0.55 : 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{p.name}{p.status === 'inactive' && <span style={{ fontSize: 10, color: MUTED, fontWeight: 400 }}> (left)</span>}</div>
+              <div style={{ fontSize: 11, color: MUTED }}>{p.role || '—'} · {tenureText(p.joiningDate)}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 2 }}>{money(p.monthlySalary)}/mo</div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setEditing({ ...blank, ...p })} style={{ background: 'none', border: 'none', color: LEAF }}><Pencil size={15} /></button>
+              <ConfirmDeleteButton onConfirm={() => onDeleteStaff(p.id)} size={15} title={`Delete ${p.name}`} />
+            </div>
           </div>
-          <button onClick={() => onGo('orders')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, display: canSee('orders') ? 'inline-flex' : 'none' }}>
-            View all orders →
-          </button>
-        </Panel>
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Recent purchases</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <tbody>
-              {purchases.slice(0, 5).map((p) => (
-                <tr key={p.id}>
-                  <Td style={{ borderTop: 'none' }}>{p.item}</Td>
-                  <Td style={{ borderTop: 'none' }}>{p.supplier}</Td>
-                  <Td style={{ borderTop: 'none' }}>₹{p.cost.toLocaleString('en-IN')}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-          <button onClick={() => onGo('purchase')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, display: canSee('purchase') ? 'inline-flex' : 'none' }}>
-            View all purchases →
-          </button>
-        </Panel>
-      </div>
+        </Card>
+      ))}
+      {staff.length === 0 && <Card><div style={{ fontSize: 12, color: MUTED }}>No staff added yet.</div></Card>}
     </div>
   );
 }
 
+function StaffAttendanceMobile({ staff, attendance, month, onMark, onClear }) {
+  const dates = monthDateStrings(month);
+  const active = staff.filter((s) => s.status !== 'inactive');
+  const markMap = useMemo(() => {
+    const m = {};
+    attendance.forEach((a) => { m[`${a.staffId}__${a.date}`] = a.status; });
+    return m;
+  }, [attendance]);
+  const [openStaffId, setOpenStaffId] = useState(active[0]?.id || null);
+
+  const cycle = (staffId, date) => {
+    const current = markMap[`${staffId}__${date}`];
+    if (!current) { onMark(staffId, date, 'present'); return; }
+    const idx = ATTENDANCE_STATUSES.findIndex((s) => s.key === current);
+    if (idx === ATTENDANCE_STATUSES.length - 1) { onClear(staffId, date); return; }
+    onMark(staffId, date, ATTENDANCE_STATUSES[idx + 1].key);
+  };
+
+  if (active.length === 0) return <Card><div style={{ fontSize: 12, color: MUTED }}>No active staff yet.</div></Card>;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 10 }}>
+        {active.map((p) => <Chip key={p.id} label={p.name} active={openStaffId === p.id} onClick={() => setOpenStaffId(p.id)} />)}
+      </div>
+      {openStaffId && (
+        <Card>
+          <div style={hint}>Tap a day to cycle Present → Half day → Paid leave → Absent → blank.</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {dates.map((d) => {
+              const person = active.find((p) => p.id === openStaffId);
+              const beforeJoining = person?.joiningDate && d < person.joiningDate;
+              const status = markMap[`${openStaffId}__${d}`];
+              const meta = status ? attendanceMeta(status) : null;
+              return (
+                <button
+                  key={d}
+                  onClick={() => !beforeJoining && cycle(openStaffId, d)}
+                  disabled={beforeJoining}
+                  title={d}
+                  style={{ width: 34, height: 34, borderRadius: 6, border: meta ? 'none' : `1px solid ${LINE}`, background: beforeJoining ? '#F0F0EC' : (meta ? meta.color : '#fff'), color: meta ? '#fff' : MUTED, fontSize: 10, fontWeight: 800 }}
+                >
+                  {Number(d.slice(-2))}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function StaffAdvancesMobile({ staff, advances, month, onSave, onDelete }) {
+  const [adding, setAdding] = useState(false);
+  const [staffId, setStaffId] = useState('');
+  const [date, setDate] = useState(todayLocalDate());
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+
+  const monthAdvances = advances.filter((a) => (a.date || '').startsWith(month)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const total = monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+  const nameOf = (id) => staff.find((s) => s.id === id)?.name || 'Unknown';
+
+  const save = () => {
+    if (!staffId || !amount) return;
+    onSave({ id: `ADV-${Date.now().toString(36).toUpperCase()}`, staffId, date, amount: Number(amount), note: note.trim() });
+    setAdding(false); setStaffId(''); setAmount(''); setNote('');
+  };
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 12, padding: 10 }}>
+        <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>ADVANCES THIS MONTH</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: AMBER }}>{money(total)}</div>
+      </Card>
+      {!adding ? (
+        <button onClick={() => setAdding(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontWeight: 700, fontSize: 12, marginBottom: 12 }}>
+          <Plus size={13} /> Give advance
+        </button>
+      ) : (
+        <Card style={{ marginBottom: 12 }}>
+          <p style={sectionTitle}>Record an advance</p>
+          <p style={smallLabel}>STAFF MEMBER</p>
+          <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 8px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, marginBottom: 8 }}>
+            <option value="">— Select —</option>
+            {staff.filter((s) => s.status !== 'inactive').map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <p style={smallLabel}>DATE</p>
+          <Field type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <p style={smallLabel}>AMOUNT (₹)</p>
+          <Field type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <p style={smallLabel}>NOTE (optional)</p>
+          <Field value={note} onChange={(e) => setNote(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <PrimaryBtn onClick={save}>Save</PrimaryBtn>
+            <button onClick={() => setAdding(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 16px', fontWeight: 700, fontSize: 12 }}>Cancel</button>
+          </div>
+        </Card>
+      )}
+      {monthAdvances.map((a) => (
+        <Card key={a.id} style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{nameOf(a.staffId)}</div>
+              <div style={{ fontSize: 11, color: MUTED }}>{a.date}{a.note ? ` · ${a.note}` : ''}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontWeight: 700, color: AMBER }}>{money(a.amount)}</span>
+              <ConfirmDeleteButton onConfirm={() => onDelete(a.id)} title="Delete this advance" />
+            </div>
+          </div>
+        </Card>
+      ))}
+      {monthAdvances.length === 0 && <Card><div style={{ fontSize: 12, color: MUTED }}>No advances given in {month}.</div></Card>}
+    </div>
+  );
+}
+
+function StaffPayrollMobile({ staff, attendance, advances, month }) {
+  const active = staff.filter((s) => s.status !== 'inactive');
+  const rows = active.map((p) => ({ person: p, ...computePayroll(p, month, attendance, advances) }));
+  const totalNet = rows.reduce((s, r) => s + r.netPayable, 0);
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 12, padding: 10 }}>
+        <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>NET PAYABLE ({month})</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: LEAF }}>{money(totalNet)}</div>
+      </Card>
+      {rows.map((r) => (
+        <Card key={r.person.id} style={{ marginBottom: 8 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{r.person.name}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: MUTED, marginBottom: 2 }}>
+            <span>Salary {money(r.person.monthlySalary)}</span>
+            <span>{r.payableDays}/{r.eligibleDays} days</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: MUTED, marginBottom: 4 }}>
+            {r.counts.absent > 0 && <span style={{ color: TOMATO }}>Absent {r.counts.absent}</span>}
+            {r.counts.halfday > 0 && <span style={{ color: AMBER }}>Half {r.counts.halfday}</span>}
+            {r.advanceTotal > 0 && <span>Advance −{money(r.advanceTotal)}</span>}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: `1px solid ${LINE}`, paddingTop: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>Net payable</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: r.netPayable < 0 ? TOMATO : LEAF }}>{money(r.netPayable)}</span>
+          </div>
+        </Card>
+      ))}
+      {rows.length === 0 && <Card><div style={{ fontSize: 12, color: MUTED }}>No active staff to pay.</div></Card>}
+    </div>
+  );
+}
+
+function DashboardTab({ orders, purchases, crates, packingProgress, dispatchLog }) {
+  const today = todayLocalDate();
+  const todayTrips = dispatchLog.filter((d) => d.date === today).length;
+  const todaySpend = purchases.filter((p) => p.date === today).reduce((s, p) => s + p.cost, 0);
+  // One progress card per platform (Blinkit, Flipkart, Zepto, and any future
+  // channel) — driven off PLATFORMS so a new channel shows up here automatically.
+  const channelProgress = PLATFORMS.map((p) => ({ platform: p, progress: computeChannelDayProgress(orders, packingProgress, p, today) }));
+  return (
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 10 }}>
+        <div style={{ ...sectionTitle, marginBottom: 10 }}>Today's progress</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {channelProgress.map(({ platform: p, progress }) => (
+            <ChannelProgressRings key={p} channel={p} {...progress} />
+          ))}
+        </div>
+      </Card>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+        {channelProgress.map(({ platform: p, progress }) => (
+          <Card key={p} style={{ flex: 1 }}>
+            <div style={hint}>{p}</div>
+            <div style={{ fontSize: 22, fontWeight: 800 }}>{progress.indentPacks}</div>
+            <div style={{ fontSize: 10, color: MUTED, marginTop: -2, marginBottom: 4 }}>total indent</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: LEAF }}>{progress.packedPacks} packed</div>
+          </Card>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+        <Card style={{ flex: 1 }}><div style={hint}>Total trips today</div><div style={{ fontSize: 22, fontWeight: 800, color: LEAF }}>{todayTrips}</div></Card>
+        <Card style={{ flex: 1 }}><div style={hint}>Today's purchase</div><div style={{ fontSize: 18, fontWeight: 800, color: TOMATO }}>₹{todaySpend.toLocaleString('en-IN')}</div></Card>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+        <Card style={{ flex: 1 }}><div style={hint}>Crates</div><div style={{ fontSize: 20, fontWeight: 800 }}>{crates.crates}</div></Card>
+        <Card style={{ flex: 1 }}><div style={hint}>Boxes</div><div style={{ fontSize: 20, fontWeight: 800 }}>{crates.boxes}</div></Card>
+      </div>
+      <Card>
+        <div style={sectionTitle}>Recent orders</div>
+        {orders.slice(0, 6).map((o) => (
+          <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${LINE}`, padding: '8px 0' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{o.id}</div>
+              <div style={{ fontSize: 12, color: MUTED }}>{o.articleName || o.product} · {o.qty}{o.unit}</div>
+            </div>
+            <StatusPill status={o.status} />
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ---------- Items ----------
 // "Code" is the channel's own SKU/FSN — it can be reissued on a relisting.
 // "EAN" is the item's permanent retail barcode and should be filled whenever
 // it's known, since it's what keeps indent-matching working even after a
@@ -1507,59 +1656,11 @@ function downloadItemsTemplate() {
   URL.revokeObjectURL(url);
 }
 
-// Exports every current item in the same column layout as the Bulk Import
-// template, so the file round-trips straight back through "Bulk import
-// items" — either into another city's Items section, or back into this one
-// after editing in a spreadsheet. An item can carry more than one alias per
-// channel (different pack sizes are different articles) but this format only
-// has room for one Blinkit + one Flipkart line per item, so only the first
-// alias of each channel is exported; anything beyond that is noted in a
-// trailing "Notes" column rather than silently dropped.
-function downloadAllItems(items) {
-  const rows = items.map((it) => {
-    const blinkitAliases = (it.aliases || []).filter((a) => a.channel === 'Blinkit');
-    const flipkartAliases = (it.aliases || []).filter((a) => a.channel === 'Flipkart');
-    const b = blinkitAliases[0];
-    const f = flipkartAliases[0];
-    const extraCount = Math.max(0, blinkitAliases.length - 1) + Math.max(0, flipkartAliases.length - 1);
-    return {
-      'Item Name': it.name,
-      UOM: it.uom || 'kg',
-      Category: it.category || '',
-      'Blinkit Code': b?.code || '',
-      'Blinkit EAN': b?.ean || '',
-      'Blinkit Pack Size': b?.packSize ?? '',
-      'Blinkit Pack Unit': b?.packUnit || '',
-      'Flipkart Code': f?.code || '',
-      'Flipkart EAN': f?.ean || '',
-      'Flipkart Pack Size': f?.packSize ?? '',
-      'Flipkart Pack Unit': f?.packUnit || '',
-      Notes: extraCount > 0 ? `Has ${extraCount} more alias(es) not shown here — see Map Formats to Articles` : '',
-    };
-  });
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, 'Items');
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob = new Blob([wbout], { type: 'application/octet-stream' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `fnv-items-export-${todayLocalDate()}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 function parseBulkItemRows(json) {
   const results = { valid: [], skipped: 0 };
   json.forEach((r) => {
     const name = String(pickField(r, ['itemname', 'name', 'article', 'product']) || '').trim();
-    if (!name) {
-      results.skipped += 1;
-      return;
-    }
+    if (!name) { results.skipped += 1; return; }
     const uom = String(pickField(r, ['uom', 'unit']) || 'kg').trim() || 'kg';
     const category = normalizeCategory(pickField(r, ['category', 'type']));
     const blinkitCode = String(pickField(r, ['blinkitcode']) || '').trim();
@@ -1575,309 +1676,16 @@ function parseBulkItemRows(json) {
     if (flipkartCode || flipkartEan || flipkartPackSize) aliases.push({ id: newAliasId(), channel: 'Flipkart', code: flipkartCode, ean: flipkartEan, packSize: flipkartPackSize, packUnit: flipkartPackUnit });
     results.valid.push({
       id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}-${results.valid.length}`,
-      name,
-      uom,
-      category,
-      aliases,
+      name, uom, category, aliases,
     });
   });
   return results;
 }
 
-// The ledger above only carries CREDIT purchases (those are the ones that create a
-// due). Anything bought for cash/UPI/bank settles instantly and never lands there,
-// so it was invisible on this screen. This reads the purchases collection directly
-// instead, which holds every purchase from this vendor whatever the payment mode.
-function VendorPurchaseHistory({ vendorName, purchases }) {
-  const [openDate, setOpenDate] = useState(null);
-
-  const byDate = useMemo(() => {
-    const groups = {};
-    purchases
-      .filter((p) => (p.supplier || '').trim().toLowerCase() === (vendorName || '').trim().toLowerCase())
-      .forEach((p) => {
-        const d = p.date || '—';
-        if (!groups[d]) groups[d] = { date: d, rows: [], total: 0 };
-        groups[d].rows.push(p);
-        groups[d].total += Number(p.cost) || 0;
-      });
-    return Object.values(groups).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [purchases, vendorName]);
-
-  return (
-    <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Purchase history — date wise</p>
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Every purchase from this vendor, in any payment mode. Click a date to see that day's items.</p>
-      {byDate.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>No purchases recorded from this vendor yet.</p>}
-      {byDate.map((g) => {
-        const isOpen = openDate === g.date;
-        return (
-          <div key={g.date} style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS.md, marginBottom: 8, overflow: 'hidden' }}>
-            <button
-              onClick={() => setOpenDate(isOpen ? null : g.date)}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: isOpen ? '#F4F6F1' : '#fff', border: 'none', padding: '10px 14px', cursor: 'pointer', textAlign: 'left' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <ChevronRight size={14} style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', color: MUTED, flexShrink: 0 }} />
-                <span style={{ fontWeight: 700, fontSize: 13, color: INK }}>{g.date}</span>
-                <span style={{ fontSize: 11, color: MUTED }}>{g.rows.length} item{g.rows.length === 1 ? '' : 's'}</span>
-              </span>
-              <span style={{ fontWeight: 800, fontSize: 14, color: LEAF, flexShrink: 0 }}>₹{g.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-            </button>
-            {isOpen && (
-              <div style={{ borderTop: `1px solid ${LINE}`, padding: '4px 14px 10px', overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead><tr><Th>Item</Th><Th>Qty</Th><Th>Cost</Th><Th>Paid by</Th></tr></thead>
-                  <tbody>
-                    {g.rows.map((r) => (
-                      <tr key={r.id}>
-                        <Td>{r.item}</Td>
-                        <Td>{r.qty} {r.unit}</Td>
-                        <Td style={{ fontWeight: 700 }}>₹{(Number(r.cost) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Td>
-                        <Td style={{ fontSize: 12, color: MUTED }}>{r.source || '—'}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </Panel>
-  );
-}
-
-function VendorItemLinker({ vendorId, vendorItemIds, items, onToggle }) {
-  const [search, setSearch] = useState('');
-  const linkedItems = items.filter((it) => vendorItemIds.includes(it.id));
-  const suggestions = search.trim().length > 0
-    ? items.filter((it) => !vendorItemIds.includes(it.id) && it.name.toLowerCase().includes(search.toLowerCase())).slice(0, 8)
-    : [];
-
-  return (
-    <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-        {linkedItems.map((it) => (
-          <span key={it.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#EAF3DE', color: LEAF_DARK, fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 999 }}>
-            {it.name}
-            <button onClick={() => onToggle(vendorId, it.id)} style={{ background: 'none', border: 'none', color: LEAF_DARK, cursor: 'pointer', lineHeight: 1, padding: 0, fontSize: 13, fontWeight: 900 }}>×</button>
-          </span>
-        ))}
-        {linkedItems.length === 0 && <span style={{ fontSize: 12, color: MUTED }}>No items linked yet</span>}
-      </div>
-      <div style={{ position: 'relative' }}>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search and add item..."
-          style={{ ...inputStyle, marginBottom: 0, fontSize: 12, padding: '6px 10px' }}
-        />
-        {suggestions.length > 0 && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10, maxHeight: 220, overflowY: 'auto' }}>
-            {suggestions.map((it) => (
-              <div
-                key={it.id}
-                onClick={() => { onToggle(vendorId, it.id); setSearch(''); }}
-                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, display: 'flex', justifyContent: 'space-between' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#F6F3EA'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-              >
-                <span style={{ fontWeight: 600 }}>{it.name}</span>
-                <span style={{ fontSize: 11, color: MUTED }}>{it.category} · {it.uom}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function formatLedgerDate(d, short) {
-  if (!d) return 'No date';
-  const dt = new Date(`${d}T00:00:00`);
-  if (isNaN(dt.getTime())) return String(d);
-  return short
-    ? dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-    : dt.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
-}
-// Barcode labels print dates as DD/MM/YY (e.g. "25/09/26") rather than the
-// underlying YYYY-MM-DD value used internally for date math and filtering.
-function formatLabelDate(d) {
-  if (!d) return d;
-  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return d;
-  return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
-}
-// Some channels (Zepto) don't want a full "Best Before: DD/MM/YY" printed —
-// just the expiry's own day-of-month as a bare number in a small box, which is
-// enough for staff doing FIFO within the same month and takes far less label
-// space. E.g. packed 2/10 with a 4-day shelf life -> expiry 6/10 -> shows "6".
-function expiryDayNumber(d) {
-  if (!d) return '';
-  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return '';
-  return String(Number(m[3]));
-}
-const isDueEntry = (e) => e.payment === 'credit' && !e.settled;
-const money = (n) => `₹${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-IN')}`;
-const COMPANY_NAME = 'NILGIRI FNV SUPPLIER COMPANY';
-
-// Role permissions were previously editable in the Users & Roles UI but never
-// actually enforced anywhere — every section was visible regardless. This is the
-// single gate now used everywhere access is checked. A missing role, or a section
-// a role has simply never been asked about yet (e.g. one added after the role was
-// created), defaults to allowed — only an explicit `false` actually hides it, so
-// existing roles never lose access to something they were silently already using.
-function hasPermission(permissions, key) {
-  return !permissions || permissions[key] !== false;
-}
-// Sensitive, admin-only features (staff pay/payroll, committing to advance
-// purchases) must be explicitly granted — the opposite default from every
-// other permission. Otherwise a role saved before this permission existed
-// would fail OPEN (missing key = allowed) and suddenly gain access the
-// moment this ships, instead of needing an admin to turn it on.
-function hasSensitivePermission(permissions, key) {
-  return !!permissions && permissions[key] === true;
-}
-
-// Renders a purchase-requirement list as a shareable PNG, styled like a printed order sheet.
-function generateOrderImage(order) {
-  const canvas = document.createElement('canvas');
-  const ROW_H = 44, HEADER_H = 72, TITLE_H = 52, PAD = 24;
-  const cols = [60, 260, 100, 100]; // NO, ITEM NAME, UOM, QTY
-  const totalW = cols.reduce((s, c) => s + c, 0) + PAD * 2;
-  canvas.width = totalW;
-  canvas.height = TITLE_H + HEADER_H + ROW_H * (order.items.length + 1) + PAD;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.fillStyle = '#1B2E1D';
-  ctx.fillRect(0, 0, canvas.width, TITLE_H);
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = 'bold 18px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText(COMPANY_NAME, canvas.width / 2, 22);
-  ctx.font = '13px Arial';
-  ctx.fillStyle = '#B7C2B2';
-  ctx.fillText(`${order.name}  ·  ${order.date}`, canvas.width / 2, 42);
-
-  let x = PAD, y = TITLE_H;
-  ctx.fillStyle = '#F0EDE4';
-  ctx.fillRect(0, y, canvas.width, HEADER_H);
-  const headers = ['NO.', 'ITEM NAME', 'UOM', 'QTY'];
-  ctx.fillStyle = '#2F5233';
-  ctx.font = 'bold 13px Arial';
-  ctx.textAlign = 'left';
-  headers.forEach((h, i) => {
-    ctx.fillText(h, x + 6, y + 28);
-    x += cols[i];
-  });
-
-  ctx.strokeStyle = '#D0CBB8';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(0, y + HEADER_H - 1); ctx.lineTo(canvas.width, y + HEADER_H - 1); ctx.stroke();
-
-  order.items.forEach((it, idx) => {
-    const rowY = TITLE_H + HEADER_H + idx * ROW_H;
-    ctx.fillStyle = idx % 2 === 0 ? '#FFFFFF' : '#F9F7F0';
-    ctx.fillRect(0, rowY, canvas.width, ROW_H);
-
-    ctx.strokeStyle = '#E3DECF';
-    ctx.beginPath(); ctx.moveTo(0, rowY + ROW_H); ctx.lineTo(canvas.width, rowY + ROW_H); ctx.stroke();
-
-    let cx = PAD;
-    const vals = [String(it.no), it.itemName.toUpperCase(), it.uom, String(it.qty)];
-    ctx.fillStyle = '#20241E';
-    ctx.font = idx === 0 ? 'bold 13px Arial' : '13px Arial';
-    vals.forEach((v, i) => {
-      ctx.fillText(v, cx + 6, rowY + ROW_H / 2 + 5);
-      cx += cols[i];
-    });
-  });
-
-  ctx.strokeStyle = '#D0CBB8';
-  let dx = PAD;
-  cols.slice(0, -1).forEach((w) => {
-    dx += w;
-    ctx.beginPath(); ctx.moveTo(dx, TITLE_H); ctx.lineTo(dx, canvas.height); ctx.stroke();
-  });
-
-  return canvas.toDataURL('image/png');
-}
-
-function PlacedOrderCard({ order, onUpdate, onDelete }) {
-  const [expanded, setExpanded] = useState(false);
-  const [editItems, setEditItems] = useState(order.items);
-  const [confirmDel, setConfirmDel] = useState(false);
-
-  const updateRow = (idx, field, val) => {
-    const updated = editItems.map((it, i) => (i === idx ? { ...it, [field]: val } : it));
-    setEditItems(updated);
-    onUpdate(order.id, updated);
-  };
-
-  const downloadImage = () => {
-    const dataUrl = generateOrderImage({ ...order, items: editItems });
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = `${order.name.replace(/\s+/g, '_')}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  return (
-    <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 12, marginBottom: 4 }}>
-      <div onClick={() => setExpanded((x) => !x)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: expanded ? 10 : 0 }}>
-        <div>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{order.name}</p>
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{order.date} · {editItems.length} items · {expanded ? '▲' : '▼'}</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={(e) => { e.stopPropagation(); downloadImage(); }} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-            ↓ Image
-          </button>
-          {confirmDel ? (
-            <>
-              <button onClick={(e) => { e.stopPropagation(); onDelete(order.id); }} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-              <button onClick={(e) => { e.stopPropagation(); setConfirmDel(false); }} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '7px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>No</button>
-            </>
-          ) : (
-            <button onClick={(e) => { e.stopPropagation(); setConfirmDel(true); }} style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 8, padding: '7px 10px', fontSize: 11, color: TOMATO, fontWeight: 700, cursor: 'pointer' }}>Delete</button>
-          )}
-        </div>
-      </div>
-
-      {expanded && (
-        <div style={{ background: '#F6F3EA', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 80px 80px', gap: 6, marginBottom: 6 }}>
-            {['#', 'ITEM', 'UOM', 'QTY'].map((h) => <div key={h} style={{ fontSize: 9, fontWeight: 700, color: MUTED }}>{h}</div>)}
-          </div>
-          {editItems.map((it, idx) => (
-            <div key={it.itemId || idx} style={{ display: 'grid', gridTemplateColumns: '24px 1fr 80px 80px', gap: 6, alignItems: 'center', borderTop: `1px solid ${LINE}`, paddingTop: 6, marginTop: 4 }}>
-              <div style={{ fontSize: 11, color: MUTED, fontWeight: 700 }}>{it.no}</div>
-              <input value={it.itemName} onChange={(e) => updateRow(idx, 'itemName', e.target.value)} style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
-              <input value={it.uom} onChange={(e) => updateRow(idx, 'uom', e.target.value)} style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
-              <input type="number" value={it.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
-            </div>
-          ))}
-          <button onClick={downloadImage} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 9, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginTop: 12 }}>
-            Download order image
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Lets a purchase be logged against ANY date, not just today — the point being
-// that a missed entry from an earlier day can still be added correctly later,
-// under the vendor's own ledger, instead of silently becoming today's entry.
-function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
+// Mirrors the admin panel's Add Purchase flow — stage as many items from this
+// vendor visit as needed, then save them all together — using this app's own
+// bottom-sheet modal convention instead of a centered dialog.
+function AddPurchaseModalMobile({ vendor, items, defaultDate, onSave, onClose }) {
   const vendorItems = items.filter((it) => (vendor.itemIds || []).includes(it.id));
   const itemOptions = vendorItems.length > 0 ? vendorItems : items;
   const [itemId, setItemId] = useState(itemOptions[0]?.id || '');
@@ -1887,9 +1695,6 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
   const [note, setNote] = useState('');
   const [date, setDate] = useState(defaultDate);
   const [paymentMode, setPaymentMode] = useState('credit');
-  // Items added to this visit but not yet saved — lets several purchases from
-  // the same vendor visit be logged in one go, instead of reopening this
-  // modal for every single item.
   const [stagedItems, setStagedItems] = useState([]);
 
   const selectedItem = items.find((it) => it.id === itemId);
@@ -1909,8 +1714,6 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
       itemId, itemName: selectedItem?.name || '', unit: selectedItem?.uom || '',
       qty: Number(qty), unitPrice: finalUnitPrice, total: totalPrice, note: note.trim(),
     }]);
-    // Reset just the item-entry fields so the next item can be typed straight
-    // away — date and payment mode stay as set, since they apply to the whole visit.
     setItemId(itemOptions[0]?.id || '');
     setQty(''); setUnitPrice(''); setTotalInput(''); setNote('');
   };
@@ -1941,31 +1744,29 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
   const isBackdated = date && date < today;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div style={{ background: '#fff', borderRadius: 18, padding: 28, width: 480, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 200 }}>
+      <div style={{ background: '#fff', borderRadius: '18px 18px 0 0', padding: '24px 20px 32px', width: '100%', maxWidth: 420, maxHeight: '88vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 17, color: INK }}>Add purchase</p>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>Add purchase</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, color: MUTED, cursor: 'pointer' }}>✕</button>
         </div>
-        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>For {vendor.name} — add as many items as this visit needs, then save them all together. Missed logging a purchase? Set the date to whichever day it actually happened.</p>
+        <div style={hint}>For {vendor.name} — add as many items as this visit needs, then save them together. Missed logging one? Set the date to whichever day it happened.</div>
 
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE (applies to this whole visit)</p>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={today} style={{ ...inputStyle, borderColor: isBackdated ? AMBER : LINE, fontWeight: 700 }} />
+        <div style={smallLabel}>DATE (applies to this whole visit)</div>
+        <Field type="date" value={date} onChange={(e) => setDate(e.target.value)} max={today} style={{ borderColor: isBackdated ? AMBER : LINE, fontWeight: 700 }} />
         {isBackdated && (
-          <p style={{ margin: '-6px 0 10px', fontSize: 11, color: AMBER, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <AlertCircle size={12} /> Backdated to {formatLedgerDate(date)}
-          </p>
+          <div style={{ margin: '-6px 0 10px', fontSize: 11, color: AMBER }}>⚠ Backdated to {formatLedgerDate(date)}</div>
         )}
 
         {stagedItems.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <p style={{ margin: '0 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>ADDED SO FAR ({stagedItems.length})</p>
+            <div style={smallLabel}>ADDED SO FAR ({stagedItems.length})</div>
             <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, overflow: 'hidden' }}>
               {stagedItems.map((line, i) => (
                 <div key={line.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', borderTop: i > 0 ? `1px solid ${LINE}` : 'none' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{line.itemName}</p>
-                    <p style={{ margin: 0, fontSize: 11, color: MUTED }}>{line.qty} {line.unit} × ₹{line.unitPrice} {line.note ? `· ${line.note}` : ''}</p>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{line.itemName}</div>
+                    <div style={{ fontSize: 11, color: MUTED }}>{line.qty} {line.unit} × ₹{line.unitPrice} {line.note ? `· ${line.note}` : ''}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                     <span style={{ fontWeight: 700, fontSize: 13 }}>₹{line.total.toLocaleString('en-IN')}</span>
@@ -1977,31 +1778,31 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
           </div>
         )}
 
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{stagedItems.length > 0 ? 'ADD ANOTHER ITEM' : 'ITEM'}</p>
-        <select value={itemId} onChange={(e) => setItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+        <div style={smallLabel}>{stagedItems.length > 0 ? 'ADD ANOTHER ITEM' : 'ITEM'}</div>
+        <select value={itemId} onChange={(e) => setItemId(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: RADIUS.md, border: `1px solid ${LINE}`, fontSize: 13, marginBottom: SPACE.sm }}>
           {itemOptions.length === 0 && <option value="">No items available</option>}
           {itemOptions.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
         </select>
         {vendorItems.length === 0 && items.length > 0 && (
-          <p style={{ margin: '-6px 0 10px', fontSize: 11, color: MUTED }}>No items linked to {vendor.name} yet — showing all items. Link items below to narrow this list next time.</p>
+          <div style={{ margin: '-6px 0 10px', fontSize: 11, color: MUTED }}>No items linked to {vendor.name} yet — showing all items.</div>
         )}
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <div style={{ flex: 1 }}>
-            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>QTY ({selectedItem?.uom || 'unit'})</p>
-            <input type="number" placeholder="0" value={qty} onChange={(e) => setQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+            <div style={smallLabel}>QTY ({selectedItem?.uom || 'unit'})</div>
+            <Field type="number" placeholder="0" value={qty} onChange={(e) => setQty(e.target.value)} style={{ marginBottom: 0 }} />
           </div>
           <div style={{ flex: 1 }}>
-            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>UNIT PRICE (₹)</p>
-            <input placeholder={derivedUnitPrice ? String(derivedUnitPrice) : '0'} type="number" value={unitPrice} onChange={(e) => handleUnitPriceChange(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+            <div style={smallLabel}>UNIT PRICE (₹)</div>
+            <Field placeholder={derivedUnitPrice ? String(derivedUnitPrice) : '0'} type="number" value={unitPrice} onChange={(e) => handleUnitPriceChange(e.target.value)} style={{ marginBottom: 0 }} />
           </div>
           <div style={{ flex: 1 }}>
-            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>OR TOTAL (₹)</p>
-            <input placeholder={derivedTotal ? String(derivedTotal) : '0'} type="number" value={totalInput} onChange={(e) => handleTotalChange(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+            <div style={smallLabel}>OR TOTAL (₹)</div>
+            <Field placeholder={derivedTotal ? String(derivedTotal) : '0'} type="number" value={totalInput} onChange={(e) => handleTotalChange(e.target.value)} style={{ marginBottom: 0 }} />
           </div>
         </div>
 
-        <input placeholder="Note for this item (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...inputStyle }} />
+        <Field placeholder="Note for this item (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
 
         <button
           onClick={addLine}
@@ -2011,26 +1812,319 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
           <Plus size={14} /> Add this item{totalPrice > 0 ? ` — ₹${totalPrice.toLocaleString('en-IN')}` : ''} to the list
         </button>
 
-        <p style={{ margin: '0 0 6px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PAYMENT MODE (applies to this whole visit)</p>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <div style={smallLabel}>PAYMENT MODE (applies to this whole visit)</div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
           {[{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank' }, { key: 'credit', label: '📒 Credit' }].map((m) => (
-            <button key={m.key} onClick={() => setPaymentMode(m.key)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `1px solid ${paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF) : LINE}`, background: paymentMode === m.key ? (m.key === 'credit' ? '#FBEFDC' : '#EAF3DE') : '#fff', color: paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF_DARK) : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            <button key={m.key} onClick={() => setPaymentMode(m.key)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `1.5px solid ${paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF) : LINE}`, background: paymentMode === m.key ? (m.key === 'credit' ? '#FBEFDC' : '#EAF3DE') : '#fff', color: paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF_DARK) : INK, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
               {m.label}
             </button>
           ))}
         </div>
 
-        <button onClick={submitAll} disabled={!stagedItems.length} style={{ width: '100%', background: !stagedItems.length ? '#C9C2AE' : (paymentMode === 'credit' ? AMBER : LEAF), color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 14, cursor: !stagedItems.length ? 'default' : 'pointer' }}>
+        <PrimaryBtn onClick={submitAll} disabled={!stagedItems.length} color={paymentMode === 'credit' ? AMBER : LEAF}>
           {stagedItems.length === 0
             ? 'Add at least one item above'
             : (paymentMode === 'credit' ? `Add ${stagedItems.length} item${stagedItems.length === 1 ? '' : 's'} on credit — ₹${batchTotal.toLocaleString('en-IN')}` : `Add ${stagedItems.length} item${stagedItems.length === 1 ? '' : 's'} — ₹${batchTotal.toLocaleString('en-IN')}`)}
-        </button>
+        </PrimaryBtn>
       </div>
     </div>
   );
 }
 
-function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, onAdd, onDelete, onToggleItem, onSettle, onAddLedgerEntry, onUpdatePlacedOrder, onDeletePlacedOrder }) {
+// The Ledger above only carries CREDIT purchases (those are what create a due).
+// Cash/UPI/bank purchases settle instantly and never land there, so this reads
+// the purchases collection directly instead, which holds every purchase from
+// this vendor whatever the payment mode.
+function VendorPurchaseHistoryMobile({ vendorName, purchases }) {
+  const [openDate, setOpenDate] = useState(null);
+  const byDate = useMemo(() => {
+    const groups = {};
+    purchases
+      .filter((p) => (p.supplier || '').trim().toLowerCase() === (vendorName || '').trim().toLowerCase())
+      .forEach((p) => {
+        const d = p.date || '—';
+        if (!groups[d]) groups[d] = { date: d, rows: [], total: 0 };
+        groups[d].rows.push(p);
+        groups[d].total += Number(p.cost) || 0;
+      });
+    return Object.values(groups).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [purchases, vendorName]);
+
+  return (
+    <Card style={{ marginBottom: 12 }}>
+      <div style={sectionTitle}>Purchase history — date wise</div>
+      <div style={hint}>Every purchase from this vendor, in any payment mode. Tap a date for that day's items.</div>
+      {byDate.length === 0 && <div style={{ fontSize: 12, color: MUTED }}>No purchases recorded from this vendor yet.</div>}
+      {byDate.map((g) => {
+        const isOpen = openDate === g.date;
+        return (
+          <div key={g.date} style={{ border: `1px solid ${LINE}`, borderRadius: 8, marginBottom: 6, overflow: 'hidden' }}>
+            <button
+              onClick={() => setOpenDate(isOpen ? null : g.date)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: isOpen ? '#F4F6F1' : '#fff', border: 'none', padding: '8px 10px' }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ChevronRight size={12} style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', color: MUTED }} />
+                <span style={{ fontWeight: 700, fontSize: 12 }}>{g.date}</span>
+                <span style={{ fontSize: 10, color: MUTED }}>{g.rows.length} item{g.rows.length === 1 ? '' : 's'}</span>
+              </span>
+              <span style={{ fontWeight: 800, fontSize: 12, color: LEAF }}>{money(g.total)}</span>
+            </button>
+            {isOpen && (
+              <div style={{ borderTop: `1px solid ${LINE}`, padding: '6px 10px' }}>
+                {g.rows.map((r) => (
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 11 }}>
+                    <span>{r.item} · {r.qty} {r.unit}</span>
+                    <span style={{ fontWeight: 700 }}>{money(r.cost)} <span style={{ color: MUTED, fontWeight: 400 }}>({r.source || '—'})</span></span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
+function VendorItemLinkerMobile({ vendorId, vendorItemIds, items, onToggle }) {
+  const [search, setSearch] = useState('');
+  const linkedItems = items.filter((it) => vendorItemIds.includes(it.id));
+  const suggestions = search.trim().length > 0
+    ? items.filter((it) => !vendorItemIds.includes(it.id) && it.name.toLowerCase().includes(search.toLowerCase())).slice(0, 6)
+    : [];
+
+  return (
+    <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+        {linkedItems.map((it) => (
+          <span key={it.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#EAF3DE', color: LEAF_DARK, fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 999 }}>
+            {it.name}
+            <button onClick={() => onToggle(vendorId, it.id)} style={{ background: 'none', border: 'none', color: LEAF_DARK, cursor: 'pointer', lineHeight: 1, padding: 0, fontSize: 14, fontWeight: 900 }}>×</button>
+          </span>
+        ))}
+        {linkedItems.length === 0 && <span style={{ fontSize: 11, color: MUTED }}>No items linked yet</span>}
+      </div>
+      <div style={{ position: 'relative' }}>
+        <Field
+          placeholder="Search and add item..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ marginBottom: 0, fontSize: 12 }}
+        />
+        {suggestions.length > 0 && (
+          <div style={{ position: 'absolute', left: 0, right: 0, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.12)', zIndex: 99, maxHeight: 200, overflowY: 'auto' }}>
+            {suggestions.map((it) => (
+              <div
+                key={it.id}
+                onClick={() => { onToggle(vendorId, it.id); setSearch(''); }}
+                style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${LINE}` }}
+              >
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{it.name}</span>
+                <span style={{ fontSize: 11, color: MUTED }}>{it.category} · {it.uom}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const COMPANY_NAME = 'NILGIRI FNV SUPPLIER COMPANY';
+
+// Role permissions were previously editable in the Users & Roles UI but never
+// actually enforced anywhere — every section was visible regardless. This is the
+// single gate now used everywhere access is checked. A missing role, or a section
+// a role has simply never been asked about yet (e.g. one added after the role was
+// created), defaults to allowed — only an explicit `false` actually hides it, so
+// existing roles never lose access to something they were silently already using.
+function hasPermission(permissions, key) {
+  return !permissions || permissions[key] !== false;
+}
+// Sensitive, admin-only features (staff pay/payroll, committing to advance
+// purchases) must be explicitly granted — the opposite default from every
+// other permission. Otherwise a role saved before this permission existed
+// would fail OPEN (missing key = allowed) and suddenly gain access the
+// moment this ships, instead of needing an admin to turn it on.
+function hasSensitivePermission(permissions, key) {
+  return !!permissions && permissions[key] === true;
+}
+
+// Downloads a vendor's ledger as CSV via a direct Blob download — reliable
+// inside the app's Android WebView, unlike a print-window approach.
+function downloadVendorLedgerCsv(vendorName, groups, onlyOutstanding) {
+  const rows = [];
+  groups.forEach((g) => {
+    (onlyOutstanding ? g.due : g.entries).forEach((e) => {
+      const status = e.payment === 'credit' ? (e.settled ? 'Paid (was credit)' : 'Outstanding') : `Paid (${e.payment})`;
+      rows.push([e.date || '', e.itemName || '', e.qty ?? '', e.unit || '', e.unitPrice ?? '', e.total ?? '', status]);
+    });
+  });
+  const header = ['Date', 'Item', 'Qty', 'Unit', 'Unit Price', 'Total', 'Status'];
+  const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeName = vendorName.replace(/[^a-z0-9]+/gi, '_');
+  a.download = `${safeName}_ledger_${onlyOutstanding ? 'outstanding' : 'complete'}_${todayLocalDate()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function generateOrderImage(order) {
+  const canvas = document.createElement('canvas');
+  const ROW_H = 44, HEADER_H = 72, TITLE_H = 52, PAD = 24;
+  const cols = [60, 260, 100, 100]; // NO, ITEM NAME, UOM, QTY
+  const totalW = cols.reduce((s, c) => s + c, 0) + PAD * 2;
+  canvas.width = totalW;
+  canvas.height = TITLE_H + HEADER_H + ROW_H * (order.items.length + 1) + PAD;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Company name header
+  ctx.fillStyle = '#1B2E1D';
+  ctx.fillRect(0, 0, canvas.width, TITLE_H);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 18px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(COMPANY_NAME, canvas.width / 2, 22);
+  ctx.font = '13px Arial';
+  ctx.fillStyle = '#B7C2B2';
+  ctx.fillText(`${order.name}  ·  ${order.date}`, canvas.width / 2, 42);
+
+  // Column headers
+  let x = PAD, y = TITLE_H;
+  ctx.fillStyle = '#F0EDE4';
+  ctx.fillRect(0, y, canvas.width, HEADER_H);
+  const headers = ['NO.', 'ITEM NAME', 'UOM', 'QTY'];
+  ctx.fillStyle = '#2F5233';
+  ctx.font = 'bold 13px Arial';
+  ctx.textAlign = 'left';
+  headers.forEach((h, i) => {
+    ctx.fillText(h, x + 6, y + 28);
+    x += cols[i];
+  });
+
+  // Divider
+  ctx.strokeStyle = '#D0CBB8';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, y + HEADER_H - 1); ctx.lineTo(canvas.width, y + HEADER_H - 1); ctx.stroke();
+
+  // Rows
+  order.items.forEach((it, idx) => {
+    const rowY = TITLE_H + HEADER_H + idx * ROW_H;
+    ctx.fillStyle = idx % 2 === 0 ? '#FFFFFF' : '#F9F7F0';
+    ctx.fillRect(0, rowY, canvas.width, ROW_H);
+
+    ctx.strokeStyle = '#E3DECF';
+    ctx.beginPath(); ctx.moveTo(0, rowY + ROW_H); ctx.lineTo(canvas.width, rowY + ROW_H); ctx.stroke();
+
+    let cx = PAD;
+    const vals = [String(it.no), it.itemName.toUpperCase(), it.uom, String(it.qty)];
+    ctx.fillStyle = '#20241E';
+    ctx.font = idx === 0 ? 'bold 13px Arial' : '13px Arial';
+    vals.forEach((v, i) => {
+      ctx.fillText(v, cx + 6, rowY + ROW_H / 2 + 5);
+      cx += cols[i];
+    });
+  });
+
+  // Column dividers
+  ctx.strokeStyle = '#D0CBB8';
+  let dx = PAD;
+  cols.slice(0, -1).forEach((w) => {
+    dx += w;
+    ctx.beginPath(); ctx.moveTo(dx, TITLE_H); ctx.lineTo(dx, canvas.height); ctx.stroke();
+  });
+
+  return canvas.toDataURL('image/png');
+}
+
+function PlacedOrderCard({ order, onUpdate, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const [editItems, setEditItems] = useState(order.items);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const updateRow = (idx, field, val) => {
+    const updated = editItems.map((it, i) => i === idx ? { ...it, [field]: val } : it);
+    setEditItems(updated);
+    onUpdate(order.id, updated);
+  };
+
+  const downloadImage = () => {
+    const dataUrl = generateOrderImage({ ...order, items: editItems });
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `${order.name.replace(/\s+/g, '_')}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  return (
+    <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 12, marginBottom: 4 }}>
+      <div onClick={() => setExpanded((x) => !x)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: expanded ? 10 : 0 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{order.name}</div>
+          <div style={{ fontSize: 11, color: MUTED }}>{order.date} · {editItems.length} items · {expanded ? '▲' : '▼'}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={(e) => { e.stopPropagation(); downloadImage(); }} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+            ↓ Image
+          </button>
+          {confirmDel ? (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); onDelete(order.id); }} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
+              <button onClick={(e) => { e.stopPropagation(); setConfirmDel(false); }} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '7px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>No</button>
+            </>
+          ) : (
+            <button onClick={(e) => { e.stopPropagation(); setConfirmDel(true); }} style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 8, padding: '7px 10px', fontSize: 11, color: TOMATO, fontWeight: 700, cursor: 'pointer' }}>Delete</button>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ background: '#F6F3EA', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 56px 60px', gap: 6, marginBottom: 6 }}>
+            {['#', 'ITEM', 'UOM', 'QTY'].map((h) => <div key={h} style={{ fontSize: 9, fontWeight: 700, color: MUTED }}>{h}</div>)}
+          </div>
+          {editItems.map((it, idx) => (
+            <div key={it.itemId || idx} style={{ display: 'grid', gridTemplateColumns: '24px 1fr 56px 60px', gap: 6, alignItems: 'center', borderTop: `1px solid ${LINE}`, paddingTop: 6, marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: MUTED, fontWeight: 700 }}>{it.no}</div>
+              <input value={it.itemName} onChange={(e) => updateRow(idx, 'itemName', e.target.value)} style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
+              <input value={it.uom} onChange={(e) => updateRow(idx, 'uom', e.target.value)} style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
+              <input type="number" value={it.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
+            </div>
+          ))}
+          <button onClick={downloadImage} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 9, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginTop: 12 }}>
+            Download order image
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatLedgerDate(d, short) {
+  if (!d) return 'No date';
+  const dt = new Date(`${d}T00:00:00`);
+  if (isNaN(dt.getTime())) return String(d);
+  return short
+    ? dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+    : dt.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+}
+const isDueEntry = (e) => e.payment === 'credit' && !e.settled;
+const money = (n) => `₹${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-IN')}`;
+
+function VendorsTab({ items, vendors, vendorLedger, placedOrders, purchases, onAdd, onDelete, onToggleItem, onSettle, onUpdatePlacedOrder, onDeletePlacedOrder, onAddLedgerEntry }) {
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
   const [vendorSearch, setVendorSearch] = useState('');
@@ -2038,20 +2132,20 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
   const [ledgerFilter, setLedgerFilter] = useState('due'); // 'due' | 'all'
   const [showLedgerDownload, setShowLedgerDownload] = useState(false);
   const [selectedDates, setSelectedDates] = useState([]);
+  const [showItems, setShowItems] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [payModal, setPayModal] = useState(null);
   const [payMode, setPayMode] = useState('cash');
   const [payRef, setPayRef] = useState('');
   const [payNote, setPayNote] = useState('');
-  const [expandedGroup, setExpandedGroup] = useState(null); // key = vendorId-date
-  const [draftEdits, setDraftEdits] = useState({}); // { [entryId]: { qty, unitPrice, total } }
-  const [addPurchaseModal, setAddPurchaseModal] = useState(null); // { vendor, defaultDate } | null — lets a missed purchase be logged against any date, not just today
+  const [expandedGroup, setExpandedGroup] = useState(null);
+  const [draftEdits, setDraftEdits] = useState({});
+  const [addPurchaseModal, setAddPurchaseModal] = useState(null); // { vendor, defaultDate } | null
 
   const submit = () => {
     if (!name.trim()) return;
     onAdd({ id: `VEN-${Date.now().toString(36).toUpperCase().slice(-5)}`, name: name.trim(), contact: contact.trim(), itemIds: [] });
-    setName('');
-    setContact('');
+    setName(''); setContact('');
   };
 
   const updateDraft = (entryId, field, value) => {
@@ -2114,289 +2208,272 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
 
   const openLedger = (id) => {
     setOpenVendorId(id); setLedgerFilter('due'); setSelectedDates([]);
-    setExpandedGroup(null); setConfirmDeleteId(null);
+    setExpandedGroup(null); setShowItems(false); setConfirmDeleteId(null);
   };
-  const closeLedger = () => { setOpenVendorId(null); setSelectedDates([]); setExpandedGroup(null); setConfirmDeleteId(null); };
+  const closeLedger = () => { setOpenVendorId(null); setSelectedDates([]); setExpandedGroup(null); setConfirmDeleteId(null); setAddPurchaseModal(null); };
   const toggleDate = (d) => setSelectedDates((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 
-  // ---- Payment modal — shared by the list and the ledger drilldown
+  // ---- Payment modal (bottom sheet) shared by the list and the ledger view
   const payModalEl = payModal && (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div style={{ background: '#fff', borderRadius: 18, padding: 30, width: 500, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: INK }}>Record payment</p>
-          <button onClick={() => setPayModal(null)} style={{ background: 'none', border: 'none', fontSize: 22, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 200 }}>
+      <div style={{ background: '#fff', borderRadius: '18px 18px 0 0', padding: '24px 20px 32px', width: '100%', maxWidth: 420, maxHeight: '88vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>Record payment</div>
+          <button onClick={() => setPayModal(null)} style={{ background: 'none', border: 'none', fontSize: 20, color: MUTED, cursor: 'pointer' }}>✕</button>
         </div>
 
-        <div style={{ background: '#F6F3EA', borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
-          <p style={{ margin: '0 0 2px', fontWeight: 800, fontSize: 14, color: INK }}>{payModal.vendorName}</p>
-          <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>{payModal.date}</p>
+        {/* Breakdown */}
+        <div style={{ background: '#F6F3EA', borderRadius: 12, padding: '14px 14px', marginBottom: 18 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 2 }}>{payModal.vendorName}</div>
+          <div style={{ fontSize: 11, color: MUTED, marginBottom: 10 }}>{payModal.date}</div>
           {payModal.entries.map((e) => {
             const eff = getEffective(e);
             const changed = draftEdits[e.id] !== undefined;
             return (
-              <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderTop: `1px solid ${LINE}` }}>
-                <div>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{payModal.multi ? `${formatLedgerDate(e.date, true)} · ` : ''}{e.itemName}</span>
-                  <span style={{ fontSize: 12, color: changed ? AMBER : MUTED, marginLeft: 8 }}>
-                    {eff.qty} {e.unit} @ ₹{eff.unitPrice}/{e.unit}
-                    {changed && <span style={{ marginLeft: 4, fontWeight: 700 }}>✏️</span>}
-                  </span>
-                </div>
-                <span style={{ fontWeight: 700, fontSize: 13, color: changed ? AMBER : INK }}>₹{eff.total.toLocaleString('en-IN')}</span>
+              <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '5px 0', borderTop: `1px solid ${LINE}`, fontSize: 12 }}>
+                <span style={{ color: changed ? AMBER : MUTED }}>{payModal.multi ? `${formatLedgerDate(e.date, true)} · ` : ''}{e.itemName} · {eff.qty} {e.unit} @ ₹{eff.unitPrice}/{e.unit}{changed ? ' ✏️' : ''}</span>
+                <span style={{ fontWeight: 700, color: changed ? AMBER : INK, flexShrink: 0 }}>₹{eff.total.toLocaleString('en-IN')}</span>
               </div>
             );
           })}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `2px solid ${LINE}`, marginTop: 8, paddingTop: 10 }}>
-            <span style={{ fontWeight: 700, fontSize: 14 }}>Total to pay</span>
-            <span style={{ fontWeight: 900, fontSize: 20, color: LEAF }}>₹{groupEffectiveTotal(payModal).toLocaleString('en-IN')}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: `2px solid ${LINE}`, marginTop: 8, paddingTop: 10 }}>
+            <span style={{ fontWeight: 700 }}>Total to pay</span>
+            <span style={{ fontWeight: 900, fontSize: 18, color: LEAF }}>₹{groupEffectiveTotal(payModal).toLocaleString('en-IN')}</span>
           </div>
         </div>
 
-        <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>PAYMENT MODE</p>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-          {[{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank Transfer' }, { key: 'cheque', label: '📄 Cheque' }].map((m) => (
-            <button key={m.key} onClick={() => setPayMode(m.key)} style={{ flex: 1, padding: '9px 6px', borderRadius: 9, border: `1.5px solid ${payMode === m.key ? LEAF : LINE}`, background: payMode === m.key ? '#EAF3DE' : '#fff', color: payMode === m.key ? LEAF_DARK : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+        {/* Payment mode */}
+        <div style={smallLabel}>PAYMENT MODE</div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+          {[{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank' }, { key: 'cheque', label: '📄 Cheque' }].map((m) => (
+            <button key={m.key} onClick={() => setPayMode(m.key)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `1.5px solid ${payMode === m.key ? LEAF : LINE}`, background: payMode === m.key ? '#EAF3DE' : '#fff', color: payMode === m.key ? LEAF_DARK : INK, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
               {m.label}
             </button>
           ))}
         </div>
 
         {payMode !== 'cash' && (
-          <div style={{ marginBottom: 14 }}>
-            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>
-              {payMode === 'upi' ? 'UPI / TRANSACTION ID' : payMode === 'bank' ? 'NEFT / RTGS REF NO.' : 'CHEQUE NO.'}
-            </p>
-            <input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder={payMode === 'cheque' ? 'e.g. 004521' : 'e.g. TXN1234567'} style={{ ...inputStyle, marginBottom: 0 }} />
-          </div>
+          <>
+            <div style={smallLabel}>{payMode === 'upi' ? 'UPI / TRANSACTION ID' : payMode === 'bank' ? 'NEFT / RTGS REF NO.' : 'CHEQUE NO.'}</div>
+            <Field placeholder={payMode === 'cheque' ? 'e.g. 004521' : 'e.g. TXN1234567'} value={payRef} onChange={(e) => setPayRef(e.target.value)} />
+          </>
         )}
+        <div style={smallLabel}>NOTE (OPTIONAL)</div>
+        <Field placeholder="e.g. Full settlement, partial pending..." value={payNote} onChange={(e) => setPayNote(e.target.value)} />
 
-        <div style={{ marginBottom: 22 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>NOTE (OPTIONAL)</p>
-          <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="e.g. Full settlement, partial pending..." style={{ ...inputStyle, marginBottom: 0 }} />
-        </div>
-
-        <button onClick={confirmPayment} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 11, padding: '13px 0', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+        <PrimaryBtn onClick={confirmPayment} color={LEAF}>
           Confirm payment — ₹{groupEffectiveTotal(payModal).toLocaleString('en-IN')}
-        </button>
+        </PrimaryBtn>
       </div>
     </div>
   );
 
-  // =====================  VENDOR LEDGER DRILLDOWN  =====================
+  // =====================  VENDOR LEDGER VIEW  =====================
   const openVendor = openVendorId ? vendors.find((v) => v.id === openVendorId) : null;
   if (openVendor) {
     const vendorDueEntries = dueEntriesOf(openVendor.id);
     const vendorDue = sumEffective(vendorDueEntries);
-    const allLedgerGroups = ledgerGroupsOf(openVendor.id); // unfiltered, for download — independent of the on-screen Outstanding/All toggle
+    const allLedgerGroups = ledgerGroupsOf(openVendor.id); // unfiltered, for download
     const groups = allLedgerGroups.filter((g) => ledgerFilter === 'all' || g.due.length > 0);
     const selectedEntries = groups.filter((g) => selectedDates.includes(g.date)).flatMap((g) => g.due);
     const selectedDays = groups.filter((g) => selectedDates.includes(g.date) && g.due.length > 0).length;
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <Panel>
-          <button onClick={closeLedger} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14 }}>
-            <ArrowLeft size={15} /> Back to vendors
-          </button>
+      <div style={{ padding: 16 }}>
+        <button onClick={closeLedger} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 12, padding: 0 }}>
+          <ArrowLeft size={15} /> Vendors
+        </button>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap', marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${LINE}` }}>
-            <div>
-              <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: INK }}>{openVendor.name}</p>
-              <p style={{ margin: '4px 0 0', fontSize: 13, color: MUTED }}>
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{openVendor.name}</div>
+              <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>
                 {openVendor.contact ? <a href={`tel:${openVendor.contact}`} style={{ color: LEAF, fontWeight: 600, textDecoration: 'none' }}>{openVendor.contact}</a> : 'No number'}
-              </p>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL OUTSTANDING</p>
-              <p style={{ margin: '0 0 10px', fontWeight: 800, fontSize: 22, color: vendorDue > 0 ? AMBER : LEAF }}>{money(vendorDue)}</p>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', position: 'relative' }}>
-                <button
-                  onClick={() => setShowLedgerDownload((x) => !x)}
-                  style={{ background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 9, padding: '10px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                  <Download size={14} /> Download ledger
-                </button>
-                {showLedgerDownload && (
-                  <div style={{ position: 'absolute', top: '110%', right: 0, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', padding: 6, zIndex: 20, minWidth: 240 }}>
-                    <button
-                      onClick={() => { downloadVendorLedgerCsv(openVendor.name, allLedgerGroups, false); setShowLedgerDownload(false); }}
-                      style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: 6, padding: '9px 10px', fontSize: 13, color: INK, cursor: 'pointer' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#F6F3EA'} onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-                    >
-                      <span style={{ fontWeight: 700 }}>Complete ledger</span><br /><span style={{ fontSize: 11, color: MUTED }}>Every entry, date-wise</span>
-                    </button>
-                    <button
-                      onClick={() => { downloadVendorLedgerCsv(openVendor.name, allLedgerGroups, true); setShowLedgerDownload(false); }}
-                      style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: 6, padding: '9px 10px', fontSize: 13, color: INK, cursor: 'pointer' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#F6F3EA'} onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-                    >
-                      <span style={{ fontWeight: 700 }}>Only unpaid entries</span><br /><span style={{ fontSize: 11, color: MUTED }}>Just what's still outstanding</span>
-                    </button>
-                  </div>
-                )}
-                <button
-                  onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: todayLocalDate() })}
-                  style={{ background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 9, padding: '10px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                  <Plus size={14} /> Add purchase
-                </button>
-                <button
-                  onClick={() => openPay(openVendor, vendorDueEntries)}
-                  disabled={vendorDueEntries.length === 0}
-                  style={{ background: vendorDueEntries.length === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 9, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: vendorDueEntries.length === 0 ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
-                >
-                  {vendorDueEntries.length === 0 ? 'Nothing due' : `Pay all outstanding — ${money(vendorDue)}`}
-                </button>
               </div>
             </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 10 }}>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Ledger — date wise</p>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={() => setLedgerFilter('due')} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${ledgerFilter === 'due' ? LEAF : LINE}`, background: ledgerFilter === 'due' ? LEAF : '#fff', color: ledgerFilter === 'due' ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Outstanding</button>
-              <button onClick={() => setLedgerFilter('all')} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${ledgerFilter === 'all' ? LEAF : LINE}`, background: ledgerFilter === 'all' ? LEAF : '#fff', color: ledgerFilter === 'all' ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>All entries</button>
+            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+              <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>TOTAL OUTSTANDING</div>
+              <div style={{ fontWeight: 800, fontSize: 20, color: vendorDue > 0 ? AMBER : LEAF }}>{money(vendorDue)}</div>
             </div>
           </div>
-          <p style={{ margin: '0 0 14px', fontSize: 11, color: MUTED }}>Tick the days you want to pay together, or click a day to view and edit its items.</p>
-
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {groups.map((g) => {
-              const gKey = `${openVendor.id}-${g.date}`;
-              const isOpen = expandedGroup === gKey;
-              const rows = ledgerFilter === 'due' ? g.due : g.entries;
-              const dueAmt = sumEffective(g.due);
-              const hasDue = g.due.length > 0;
-              const isSelected = selectedDates.includes(g.date);
-              return (
-                <div key={gKey} style={{ borderTop: `1px solid ${LINE}` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0' }}>
-                    {hasDue ? (
-                      <input type="checkbox" checked={isSelected} onChange={() => toggleDate(g.date)} style={{ flexShrink: 0, cursor: 'pointer' }} />
-                    ) : (
-                      <div style={{ width: 13, flexShrink: 0 }} />
-                    )}
-                    <div onClick={() => setExpandedGroup(isOpen ? null : gKey)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{formatLedgerDate(g.date)}</p>
-                      <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{g.entries.length} item{g.entries.length !== 1 ? 's' : ''} · {isOpen ? '▲ hide' : '▼ view & edit'}</p>
-                    </div>
-                    <div onClick={() => setExpandedGroup(isOpen ? null : gKey)} style={{ textAlign: 'right', cursor: 'pointer', minWidth: 90 }}>
-                      {hasDue ? (
-                        <p style={{ margin: 0, fontWeight: 800, fontSize: 15, color: AMBER }}>{money(dueAmt)}</p>
-                      ) : (
-                        <p style={{ margin: 0, fontWeight: 800, fontSize: 13, color: LEAF }}>Paid ✓</p>
-                      )}
-                    </div>
-                    {hasDue && (
-                      <button onClick={() => openPay(openVendor, g.due)} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
-                        Pay
-                      </button>
-                    )}
-                  </div>
-
-                  {isOpen && (
-                    <div style={{ background: '#F6F3EA', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 70px 100px', gap: 8, marginBottom: 6 }}>
-                        {['ITEM', 'QTY', 'UOM', 'RATE (₹)'].map((h) => <p key={h} style={{ margin: 0, fontSize: 10, fontWeight: 700, color: MUTED }}>{h}</p>)}
-                      </div>
-                      {rows.map((e) => {
-                        const due = isDueEntry(e);
-                        if (!due) {
-                          const modeLabel = String(e.settledPayment || e.payment || '').toUpperCase();
-                          return (
-                            <div key={e.id} style={{ borderTop: `1px solid ${LINE}`, paddingTop: 8, marginTop: 6 }}>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 70px 100px', gap: 8, alignItems: 'center', fontSize: 13 }}>
-                                <p style={{ margin: 0, fontWeight: 600 }}>{e.itemName}</p>
-                                <p style={{ margin: 0 }}>{e.qty}</p>
-                                <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: MUTED }}>{e.unit}</p>
-                                <p style={{ margin: 0 }}>{e.unitPrice}</p>
-                              </div>
-                              <p style={{ margin: '4px 0 0', textAlign: 'right', fontSize: 11, color: LEAF }}>
-                                {money(e.total)} · Paid{modeLabel ? ` (${modeLabel})` : ''}{e.settledDate ? ` on ${formatLedgerDate(e.settledDate, true)}` : ''}
-                              </p>
-                            </div>
-                          );
-                        }
-                        const d = draftEdits[e.id] || {};
-                        const effQty = d.qty !== undefined ? d.qty : String(e.qty);
-                        const effPrice = d.unitPrice !== undefined ? d.unitPrice : String(e.unitPrice);
-                        const eff = getEffective(e);
-                        const changed = d.qty !== undefined || d.unitPrice !== undefined;
-                        return (
-                          <div key={e.id} style={{ borderTop: `1px solid ${LINE}`, paddingTop: 8, marginTop: 6 }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 70px 100px', gap: 8, alignItems: 'center' }}>
-                              <p style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>{e.itemName}</p>
-                              <input type="number" value={effQty} onChange={(ev) => updateDraft(e.id, 'qty', ev.target.value)} style={{ border: `1px solid ${changed ? AMBER : LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, background: changed ? '#FFFBF3' : '#fff', width: '100%', boxSizing: 'border-box' }} />
-                              <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: MUTED }}>{e.unit}</p>
-                              <input type="number" value={effPrice} onChange={(ev) => updateDraft(e.id, 'unitPrice', ev.target.value)} style={{ border: `1px solid ${changed ? AMBER : LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, background: changed ? '#FFFBF3' : '#fff', width: '100%', boxSizing: 'border-box' }} />
-                            </div>
-                            <p style={{ margin: '4px 0 0', textAlign: 'right', fontSize: 11, color: changed ? AMBER : MUTED }}>
-                              Total: {money(eff.total)}{changed ? ' ✏️' : ''}
-                            </p>
-                          </div>
-                        );
-                      })}
-                      {hasDue && (
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
-                          <span style={{ fontWeight: 800, color: AMBER, fontSize: 13 }}>Revised: {money(dueAmt)}</span>
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                        <button
-                          onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: g.date })}
-                          style={{ background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}
-                        >
-                          <Plus size={11} /> Add another item for {formatLedgerDate(g.date, true)}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {groups.length === 0 && (
-              <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>
-                {ledgerFilter === 'due' ? 'Nothing outstanding for this vendor.' : 'No ledger entries yet.'}
-              </p>
-            )}
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              onClick={() => setAddPurchaseModal({ vendor: openVendor, defaultDate: todayLocalDate() })}
+              style={{ width: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.lg, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+            >
+              <Plus size={14} /> Add purchase
+            </button>
+            <PrimaryBtn onClick={() => openPay(openVendor, vendorDueEntries)} disabled={vendorDueEntries.length === 0}>
+              {vendorDueEntries.length === 0 ? 'Nothing due' : `Pay all outstanding — ${money(vendorDue)}`}
+            </PrimaryBtn>
           </div>
+        </Card>
 
-          {selectedDays > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14, paddingTop: 14, borderTop: `1px solid ${LINE}` }}>
-              <button onClick={() => openPay(openVendor, selectedEntries)} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 9, padding: '11px 20px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-                Pay {selectedDays} day{selectedDays !== 1 ? 's' : ''} together — {money(sumEffective(selectedEntries))}
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ ...sectionTitle, marginBottom: 6 }}>Ledger — date wise</div>
+          <div style={{ display: 'flex', marginBottom: 6 }}>
+            <Chip label="Outstanding" active={ledgerFilter === 'due'} onClick={() => setLedgerFilter('due')} />
+            <Chip label="All entries" active={ledgerFilter === 'all'} onClick={() => setLedgerFilter('all')} />
+          </div>
+          <div style={hint}>Tick the days you want to pay together, or tap a day to view and edit its items.</div>
+
+          <button
+            onClick={() => setShowLedgerDownload((x) => !x)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', boxSizing: 'border-box', background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700, marginTop: 8, marginBottom: showLedgerDownload ? 8 : 0 }}
+          >
+            <Download size={13} /> Download ledger
+          </button>
+          {showLedgerDownload && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button
+                onClick={() => { downloadVendorLedgerCsv(openVendor.name, allLedgerGroups, false); setShowLedgerDownload(false); }}
+                style={{ textAlign: 'left', background: '#F6F3EA', border: 'none', borderRadius: 8, padding: '9px 10px', fontSize: 12 }}
+              >
+                <span style={{ fontWeight: 700 }}>Complete ledger</span> — <span style={{ color: MUTED }}>every entry, date-wise</span>
+              </button>
+              <button
+                onClick={() => { downloadVendorLedgerCsv(openVendor.name, allLedgerGroups, true); setShowLedgerDownload(false); }}
+                style={{ textAlign: 'left', background: '#F6F3EA', border: 'none', borderRadius: 8, padding: '9px 10px', fontSize: 12 }}
+              >
+                <span style={{ fontWeight: 700 }}>Only unpaid</span> — <span style={{ color: MUTED }}>just what's outstanding</span>
               </button>
             </div>
           )}
-        </Panel>
 
-        <Panel>
-          <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Linked items ({openVendor.itemIds.length})</p>
-          <VendorItemLinker vendorId={openVendor.id} vendorItemIds={openVendor.itemIds} items={items} onToggle={onToggleItem} />
-        </Panel>
+          {groups.map((g) => {
+            const gKey = `${openVendor.id}-${g.date}`;
+            const isOpen = expandedGroup === gKey;
+            const rows = ledgerFilter === 'due' ? g.due : g.entries;
+            const dueAmt = sumEffective(g.due);
+            const hasDue = g.due.length > 0;
+            const isSelected = selectedDates.includes(g.date);
+            return (
+              <div key={gKey} style={{ borderTop: `1px solid ${LINE}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0' }}>
+                  {hasDue ? (
+                    <div onClick={() => toggleDate(g.date)} style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${isSelected ? LEAF : LINE}`, background: isSelected ? LEAF : '#fff', flexShrink: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {isSelected && <span style={{ color: '#fff', fontSize: 12, fontWeight: 900 }}>✓</span>}
+                    </div>
+                  ) : (
+                    <div style={{ width: 20, flexShrink: 0 }} />
+                  )}
+                  <div onClick={() => setExpandedGroup(isOpen ? null : gKey)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{formatLedgerDate(g.date)}</div>
+                    <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>{g.entries.length} item{g.entries.length !== 1 ? 's' : ''} · {isOpen ? '▲ hide' : '▼ view & edit'}</div>
+                  </div>
+                  <div onClick={() => setExpandedGroup(isOpen ? null : gKey)} style={{ textAlign: 'right', cursor: 'pointer' }}>
+                    {hasDue ? (
+                      <div style={{ fontWeight: 800, fontSize: 15, color: AMBER }}>{money(dueAmt)}</div>
+                    ) : (
+                      <div style={{ fontWeight: 800, fontSize: 13, color: LEAF }}>Paid ✓</div>
+                    )}
+                  </div>
+                  {hasDue && (
+                    <button onClick={() => openPay(openVendor, g.due)} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+                      Pay
+                    </button>
+                  )}
+                </div>
 
-        <VendorPurchaseHistory vendorName={openVendor.name} purchases={purchases} />
+                {isOpen && (
+                  <div style={{ background: '#F6F3EA', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 52px 72px', gap: 6, marginBottom: 6 }}>
+                      {['ITEM', 'QTY', 'UOM', 'RATE (₹)'].map((h) => <div key={h} style={{ fontSize: 9, fontWeight: 700, color: MUTED }}>{h}</div>)}
+                    </div>
+                    {rows.map((e) => {
+                      const due = isDueEntry(e);
+                      if (!due) {
+                        const modeLabel = String(e.settledPayment || e.payment || '').toUpperCase();
+                        return (
+                          <div key={e.id} style={{ borderTop: `1px solid ${LINE}`, paddingTop: 8, marginTop: 4 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 52px 72px', gap: 6, alignItems: 'center', fontSize: 12 }}>
+                              <div style={{ fontWeight: 600 }}>{e.itemName}</div>
+                              <div>{e.qty}</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, textAlign: 'center' }}>{e.unit}</div>
+                              <div>{e.unitPrice}</div>
+                            </div>
+                            <div style={{ textAlign: 'right', fontSize: 11, color: LEAF, marginTop: 2 }}>
+                              {money(e.total)} · Paid{modeLabel ? ` (${modeLabel})` : ''}{e.settledDate ? ` on ${formatLedgerDate(e.settledDate, true)}` : ''}
+                            </div>
+                          </div>
+                        );
+                      }
+                      const d = draftEdits[e.id] || {};
+                      const effQty = d.qty !== undefined ? d.qty : String(e.qty);
+                      const effPrice = d.unitPrice !== undefined ? d.unitPrice : String(e.unitPrice);
+                      const eff = getEffective(e);
+                      const changed = d.qty !== undefined || d.unitPrice !== undefined;
+                      return (
+                        <div key={e.id} style={{ borderTop: `1px solid ${LINE}`, paddingTop: 8, marginTop: 4 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 52px 72px', gap: 6, alignItems: 'center' }}>
+                            <div style={{ fontWeight: 600, fontSize: 12 }}>{e.itemName}</div>
+                            <input type="number" value={effQty} onChange={(ev) => updateDraft(e.id, 'qty', ev.target.value)} style={{ border: `1px solid ${changed ? AMBER : LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, background: changed ? '#FFFBF3' : '#fff', width: '100%', boxSizing: 'border-box' }} />
+                            <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, textAlign: 'center' }}>{e.unit}</div>
+                            <input type="number" value={effPrice} onChange={(ev) => updateDraft(e.id, 'unitPrice', ev.target.value)} style={{ border: `1px solid ${changed ? AMBER : LINE}`, borderRadius: 6, padding: '5px 6px', fontSize: 12, background: changed ? '#FFFBF3' : '#fff', width: '100%', boxSizing: 'border-box' }} />
+                          </div>
+                          <div style={{ textAlign: 'right', fontSize: 11, color: changed ? AMBER : MUTED, marginTop: 2 }}>
+                            Total: {money(eff.total)}{changed ? ' ✏️' : ''}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {hasDue && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
+                        <span style={{ fontWeight: 800, color: AMBER, fontSize: 13 }}>Revised: {money(dueAmt)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {groups.length === 0 && <div style={hint}>{ledgerFilter === 'due' ? 'Nothing outstanding for this vendor.' : 'No ledger entries yet.'}</div>}
+        </Card>
 
-        <Panel>
+        <Card style={{ marginBottom: 12 }}>
+          <div onClick={() => setShowItems((x) => !x)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+            <div style={{ ...sectionTitle, marginBottom: 0 }}>Linked items ({openVendor.itemIds.length})</div>
+            <ChevronRight size={16} color={MUTED} style={{ transform: showItems ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+          </div>
+          {showItems && (
+            <div style={{ marginTop: 10 }}>
+              <VendorItemLinkerMobile vendorId={openVendor.id} vendorItemIds={openVendor.itemIds} items={items} onToggle={onToggleItem} />
+            </div>
+          )}
+        </Card>
+
+        <VendorPurchaseHistoryMobile vendorName={openVendor.name} purchases={purchases} />
+
+        <div style={{ textAlign: 'center', marginBottom: 12 }}>
           {confirmDeleteId === openVendor.id ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 13, color: TOMATO }}>
+            <div>
+              <div style={{ fontSize: 12, color: TOMATO, marginBottom: 8 }}>
                 Delete {openVendor.name}?{vendorDue > 0 ? ` ${money(vendorDue)} is still unpaid.` : ''}
-              </span>
-              <button onClick={() => { onDelete(openVendor.id); closeLedger(); }} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Yes, delete</button>
-              <button onClick={() => setConfirmDeleteId(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                <button onClick={() => { onDelete(openVendor.id); closeLedger(); }} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Yes, delete</button>
+                <button onClick={() => setConfirmDeleteId(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+              </div>
             </div>
           ) : (
-            <button onClick={() => setConfirmDeleteId(openVendor.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Trash2 size={14} /> Delete vendor
+            <button onClick={() => setConfirmDeleteId(openVendor.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Trash2 size={13} /> Delete vendor
             </button>
           )}
-        </Panel>
+        </div>
+
+        {selectedDays > 0 && (
+          <div style={{ position: 'sticky', bottom: 0, background: BG, paddingTop: 10, marginLeft: -16, marginRight: -16, paddingLeft: 16, paddingRight: 16, paddingBottom: 8 }}>
+            <PrimaryBtn onClick={() => openPay(openVendor, selectedEntries)} color={TOMATO}>
+              Pay {selectedDays} day{selectedDays !== 1 ? 's' : ''} together — {money(sumEffective(selectedEntries))}
+            </PrimaryBtn>
+          </div>
+        )}
 
         {payModalEl}
         {addPurchaseModal && (
-          <AddPurchaseModal
+          <AddPurchaseModalMobile
             vendor={addPurchaseModal.vendor}
             items={items}
             defaultDate={addPurchaseModal.defaultDate}
@@ -2416,73 +2493,58 @@ function VendorsPanel({ items, vendors, vendorLedger, placedOrders, purchases, o
     .sort((a, b) => (Number(b.due > 0) - Number(a.due > 0)) || (b.due - a.due) || a.v.name.localeCompare(b.v.name));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18 }}>
-        <Panel style={{ alignSelf: 'start' }}>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Store size={14} /> Add vendor
-          </p>
-          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>You'll link which items each vendor supplies after adding them.</p>
-          <input placeholder="Vendor name" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
-          <input placeholder="Phone / contact" value={contact} onChange={(e) => setContact(e.target.value)} style={inputStyle} />
-          <button onClick={submit} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Add vendor
-          </button>
-        </Panel>
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 6 }}><Store size={14} /> Add vendor</div>
+        <div style={{ fontSize: 11, color: MUTED, marginBottom: 8 }}>You'll link items to each vendor after adding them.</div>
+        <Field placeholder="Vendor name" value={name} onChange={(e) => setName(e.target.value)} />
+        <Field placeholder="Phone / contact" value={contact} onChange={(e) => setContact(e.target.value)} />
+        <PrimaryBtn onClick={submit}>Add vendor</PrimaryBtn>
+      </Card>
 
-        <Panel>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Vendors ({vendors.length})</p>
-            {totalDue > 0 && <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: AMBER }}>Total due {money(totalDue)}</p>}
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+          <div style={{ ...sectionTitle, marginBottom: 0 }}>Vendors ({vendors.length})</div>
+          {totalDue > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: AMBER }}>Total due {money(totalDue)}</div>}
+        </div>
+        <Field placeholder="Search vendor…" value={vendorSearch} onChange={(e) => setVendorSearch(e.target.value)} style={{ marginBottom: 4 }} />
+        {shownVendors.map(({ v, due }) => (
+          <div key={v.id} onClick={() => openLedger(v.id)} style={{ borderTop: `1px solid ${LINE}`, padding: '12px 0', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
+              <div style={{ fontSize: 12, color: MUTED }}>{v.contact || '—'}</div>
+            </div>
+            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+              <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>OUTSTANDING</div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: due > 0 ? AMBER : MUTED }}>{money(due)}</div>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); openPay(v, dueEntriesOf(v.id)); }}
+              disabled={due <= 0}
+              style={{ background: due > 0 ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, fontSize: 12, cursor: due > 0 ? 'pointer' : 'default', flexShrink: 0 }}
+            >
+              Pay
+            </button>
+            <ChevronRight size={15} color={MUTED} style={{ flexShrink: 0 }} />
           </div>
-          <input placeholder="Search vendor..." value={vendorSearch} onChange={(e) => setVendorSearch(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Vendor</Th><Th>Contact</Th><Th>Outstanding</Th><Th /></tr></thead>
-            <tbody>
-              {shownVendors.map(({ v, due }) => (
-                <tr key={v.id} onClick={() => openLedger(v.id)} style={{ cursor: 'pointer' }}>
-                  <Td style={{ fontWeight: 700 }}>{v.name}</Td>
-                  <Td>{v.contact || <span style={{ color: MUTED }}>—</span>}</Td>
-                  <Td>
-                    {due > 0 ? (
-                      <span style={{ background: '#FBEFDC', color: AMBER, fontSize: 12, fontWeight: 800, padding: '3px 9px', borderRadius: 999 }}>
-                        {money(due)} due
-                      </span>
-                    ) : (
-                      <span style={{ color: MUTED, fontSize: 12 }}>—</span>
-                    )}
-                  </Td>
-                  <Td style={{ width: 30 }}>
-                    <ChevronRight size={16} color={MUTED} />
-                  </Td>
-                </tr>
-              ))}
-              {shownVendors.length === 0 && (
-                <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>{vendors.length === 0 ? 'No vendors yet.' : 'No vendor matches your search.'}</Td></tr>
-              )}
-            </tbody>
-          </table>
-          </div>
-        </Panel>
-      </div>
+        ))}
+        {shownVendors.length === 0 && <div style={hint}>{vendors.length === 0 ? 'No vendors yet.' : 'No vendor matches your search.'}</div>}
+      </Card>
 
+      {payModalEl}
+
+      {/* ---- Order Placed ---- */}
       {placedOrders.length > 0 && (
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Order Placed ({placedOrders.length})</p>
+        <Card style={{ marginTop: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Order Placed ({placedOrders.length})</div>
           {placedOrders.map((order) => (
             <PlacedOrderCard key={order.id} order={order} onUpdate={onUpdatePlacedOrder} onDelete={onDeletePlacedOrder} />
           ))}
-        </Panel>
+        </Card>
       )}
-
-      {payModalEl}
     </div>
   );
 }
-const UOM_OPTIONS = ['kg', 'dozen', 'bunch', 'piece', 'pack', 'box', 'crate'];
-const CATEGORY_OPTIONS = ['FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
-const label13 = { margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 };
 
 function AliasChip({ alias }) {
   return (
@@ -2492,25 +2554,27 @@ function AliasChip({ alias }) {
   );
 }
 
-function AliasRow({ alias, onChange, onRemove }) {
+function AliasRowMobile({ alias, onChange, onRemove }) {
   return (
-    <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-      <select value={alias.channel} onChange={(e) => onChange({ ...alias, channel: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
-        <option value="">Channel</option>
-        {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-      </select>
-      <input placeholder="Item code" value={alias.code} onChange={(e) => onChange({ ...alias, code: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
-      <input placeholder="EAN" value={alias.ean || ''} onChange={(e) => onChange({ ...alias, ean: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
-      <input placeholder="Pack size" type="number" value={alias.packSize} onChange={(e) => onChange({ ...alias, packSize: e.target.value })} style={{ width: 66, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }} />
-      <select value={alias.packUnit || 'kg'} onChange={(e) => onChange({ ...alias, packUnit: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
-        <option value="kg">kg</option>
-        <option value="g">g</option>
-        <option value="pieces">pieces</option>
-        <option value="pack">pack</option>
-      </select>
-      <button onClick={onRemove} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', padding: 2, flexShrink: 0 }}>
-        <Trash2 size={13} />
-      </button>
+    <div style={{ border: `1px solid ${LINE}`, borderRadius: 8, padding: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+        <select value={alias.channel} onChange={(e) => onChange({ ...alias, channel: e.target.value })} style={{ flex: 1, borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px' }}>
+          <option value="">Channel</option>
+          {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <button onClick={onRemove} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', padding: 4 }}><Trash2 size={14} /></button>
+      </div>
+      <Field placeholder="Item code" value={alias.code} onChange={(e) => onChange({ ...alias, code: e.target.value })} style={{ marginBottom: 6 }} />
+      <Field placeholder="EAN" value={alias.ean || ''} onChange={(e) => onChange({ ...alias, ean: e.target.value })} style={{ marginBottom: 6 }} />
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <Field placeholder="Pack size" type="number" value={alias.packSize} onChange={(e) => onChange({ ...alias, packSize: e.target.value })} style={{ flex: 1, marginBottom: 0 }} />
+        <select value={alias.packUnit || 'kg'} onChange={(e) => onChange({ ...alias, packUnit: e.target.value })} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px' }}>
+          <option value="kg">kg</option>
+          <option value="g">g</option>
+          <option value="pieces">pieces</option>
+          <option value="pack">pack</option>
+        </select>
+      </div>
     </div>
   );
 }
@@ -2528,7 +2592,6 @@ function ItemForm({ initial, onSave, onCancel }) {
   const removeAliasRow = (id) => setAliases((p) => p.filter((a) => a.id !== id));
 
   const canSave = name.trim();
-
   const submit = () => {
     if (!canSave) return;
     onSave({
@@ -2541,72 +2604,43 @@ function ItemForm({ initial, onSave, onCancel }) {
   };
 
   return (
-    <div>
-      <button onClick={onCancel} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 14, padding: 0 }}>
+    <div style={{ padding: 16 }}>
+      <button onClick={onCancel} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 12, padding: 0 }}>
         <ArrowLeft size={15} /> Back to items
       </button>
-      <Panel style={{ maxWidth: 640 }}>
-        <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 16, color: INK }}>{isEdit ? `Edit ${initial.name}` : 'Create item'}</p>
-        <p style={{ margin: '0 0 18px', fontSize: 12, color: MUTED }}>
+      <Card>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>{isEdit ? `Edit ${initial.name}` : 'Create item'}</div>
+        <div style={{ ...hint, marginTop: 4 }}>
           Items are generic — add an alias for each channel it's sold on (Blinkit, Flipkart, Zepto, etc.), with that channel's own item name/code and pack size.
-        </p>
-
-        <p style={label13}>ITEM NAME</p>
-        <input placeholder="e.g. Tomato" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
-
-        <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
-          <div style={{ flex: 1 }}>
-            <p style={label13}>UOM (unit it's purchased in)</p>
-            <select value={uom} onChange={(e) => setUom(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
-              {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
-            </select>
-          </div>
-          <div style={{ flex: 1 }}>
-            <p style={label13}>CATEGORY</p>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
-              {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
         </div>
 
-        <div style={{ marginBottom: 4 }}>
-          <p style={label13}>BUFFER STOCK ({uom})</p>
-          <input
-            type="number"
-            placeholder="0"
-            value={buffer}
-            onChange={(e) => setBuffer(e.target.value)}
-            style={inputStyle}
-          />
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>
-            A safety margin to always keep in hand. This item will keep showing in Purchases — with this much added to what's needed — until stock covers demand plus this buffer.
-          </p>
+        <div style={smallLabel}>ITEM NAME</div>
+        <Field placeholder="e.g. Tomato" value={name} onChange={(e) => setName(e.target.value)} />
+
+        <div style={smallLabel}>UOM (unit it's purchased in)</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 6 }}>{UOM_OPTIONS.map((u) => <Chip key={u} label={u} active={uom === u} onClick={() => setUom(u)} />)}</div>
+
+        <div style={smallLabel}>CATEGORY</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 10 }}>{CATEGORY_OPTIONS.map((c) => <Chip key={c} label={c} active={category === c} onClick={() => setCategory(c)} />)}</div>
+
+        <div style={smallLabel}>BUFFER STOCK ({uom})</div>
+        <Field type="number" placeholder="0" value={buffer} onChange={(e) => setBuffer(e.target.value)} />
+        <div style={{ ...hint, marginTop: -4, marginBottom: 10 }}>
+          A safety margin to always keep in hand — this item keeps showing in Purchases (with this much added to what's needed) until stock covers demand plus this buffer.
         </div>
 
-        <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14, marginTop: 8 }}>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Channel aliases</p>
-          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-            e.g. Blinkit's 1kg Tomato pack, Flipkart's 500g pack, Zepto's 350g pack — each with its own channel item code.
-          </p>
-          {aliases.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, marginBottom: 4, fontSize: 10, color: MUTED, fontWeight: 700 }}>
-              <div style={{ flex: 1 }}>CHANNEL</div>
-              <div style={{ flex: 1 }}>ITEM CODE / NAME</div>
-              <div style={{ flex: 1 }}>EAN</div>
-              <div style={{ width: 66 }}>PACK SIZE</div>
-              <div style={{ width: 62 }}>UNIT</div>
-              <div style={{ width: 19 }} />
-            </div>
-          )}
+        <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 12, marginTop: 4 }}>
+          <div style={sectionTitle}>Channel aliases</div>
+          <div style={hint}>e.g. Blinkit's 1kg Tomato pack, Flipkart's 500g pack, Zepto's 350g pack — each with its own channel item code.</div>
           {aliases.map((a) => (
-            <AliasRow key={a.id} alias={a} onChange={(next) => updateAliasRow(a.id, next)} onRemove={() => removeAliasRow(a.id)} />
+            <AliasRowMobile key={a.id} alias={a} onChange={(next) => updateAliasRow(a.id, next)} onRemove={() => removeAliasRow(a.id)} />
           ))}
-          <button onClick={addAliasRow} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: `1px dashed ${LINE}`, borderRadius: 8, padding: '7px 10px', fontSize: 12, color: MUTED, cursor: 'pointer', width: '100%', justifyContent: 'center', marginTop: 4 }}>
+          <button onClick={addAliasRow} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: `1px dashed ${LINE}`, borderRadius: 8, padding: '8px 10px', fontSize: 12, color: MUTED, cursor: 'pointer', width: '100%', justifyContent: 'center', marginTop: 4 }}>
             <Plus size={12} /> Add alias
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button
             onClick={submit}
             disabled={!canSave}
@@ -2614,18 +2648,18 @@ function ItemForm({ initial, onSave, onCancel }) {
           >
             {isEdit ? 'Save changes' : 'Create item'}
           </button>
-          <button onClick={onCancel} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 20px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          <button onClick={onCancel} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             Cancel
           </button>
         </div>
-      </Panel>
+      </Card>
     </div>
   );
 }
 
-function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete }) {
+function ItemsTab({ items, onAdd, onAddBulk, onUpdate, onDelete }) {
   const [view, setView] = useState('list'); // 'list' | 'form'
-  const [editingItem, setEditingItem] = useState(null); // null while creating
+  const [editingItem, setEditingItem] = useState(null);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -2658,18 +2692,13 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
   const openCreate = () => { setEditingItem(null); setView('form'); };
   const openEdit = (it) => { setEditingItem(it); setView('form'); };
   const closeForm = () => { setView('list'); setEditingItem(null); };
-
   const saveItem = (data) => {
-    if (editingItem) {
-      onUpdate(editingItem.id, data);
-    } else {
-      onAdd({ id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}`, ...data });
-    }
+    if (editingItem) onUpdate(editingItem.id, data);
+    else onAdd({ id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}`, ...data });
     closeForm();
   };
 
   const categoryChips = ['ALL', ...CATEGORY_OPTIONS];
-
   const filteredItems = items.filter((it) => {
     const matchesCategory = categoryFilter === 'ALL' || it.category === categoryFilter;
     const q = search.trim().toLowerCase();
@@ -2682,988 +2711,238 @@ function ItemsPanel({ items, onAdd, onAddBulk, onMapChannel, onUpdate, onDelete 
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 18 }}>
-      <div>
-        <Panel style={{ alignSelf: 'start' }}>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Bulk import</p>
-          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-            Add many items at once from a spreadsheet. Download the format first if you're not sure what columns to use.
-          </p>
-          <button
-            onClick={downloadItemsTemplate}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 8 }}
-          >
-            <Download size={14} /> Download format
-          </button>
-          <button
-            onClick={() => bulkFileRef.current?.click()}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-          >
-            <Upload size={14} /> Bulk import items
-          </button>
-          <input ref={bulkFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleBulkFile} style={{ display: 'none' }} />
-          {bulkSummary && (
-            <p style={{ margin: '10px 0 0', fontSize: 12, color: LEAF, fontWeight: 600 }}>
-              {bulkSummary.added} item{bulkSummary.added !== 1 ? 's' : ''} added{bulkSummary.skipped > 0 ? `, ${bulkSummary.skipped} skipped (missing name or product code)` : ''}.
-            </p>
-          )}
-          {bulkError && (
-            <p style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 0', fontSize: 12, color: TOMATO }}>
-              <AlertCircle size={13} /> {bulkError}
-            </p>
-          )}
-        </Panel>
-        <Panel style={{ alignSelf: 'start', marginTop: 14 }}>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Download item list</p>
-          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-            Every item, as a spreadsheet in the same layout Bulk Import expects — to copy into another city's Items section, or to bulk-edit and re-upload here.
-          </p>
-          <button
-            onClick={() => downloadAllItems(items)}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-          >
-            <Download size={14} /> Download {items.length} item{items.length === 1 ? '' : 's'}
-          </button>
-        </Panel>
-      </div>
-
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {categoryChips.map((c) => (
-              <button
-                key={c}
-                onClick={() => setCategoryFilter(c)}
-                style={{ padding: '6px 12px', borderRadius: 999, border: `1px solid ${categoryFilter === c ? LEAF : LINE}`, background: categoryFilter === c ? LEAF : '#fff', color: categoryFilter === c ? '#fff' : INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-              >
-                {c === 'ALL' ? 'All' : c}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: BG, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 10px', width: 200 }}>
-              <Search size={14} color={MUTED} />
-              <input placeholder="Search items..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12, width: '100%' }} />
-            </div>
-            <button
-              onClick={openCreate}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              <Plus size={14} /> Create item
-            </button>
-          </div>
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: BG, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 10px', marginBottom: 10 }}>
+          <Search size={14} color={MUTED} />
+          <input placeholder="Search items..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12, width: '100%' }} />
         </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 8 }}>
+          {categoryChips.map((c) => <Chip key={c} label={c === 'ALL' ? 'All' : c} active={categoryFilter === c} onClick={() => setCategoryFilter(c)} />)}
+        </div>
+        <PrimaryBtn onClick={openCreate}>+ Create item</PrimaryBtn>
+      </Card>
 
-        <Panel>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <Th>Item ID</Th><Th>Name</Th><Th>UOM</Th><Th>Category</Th><Th>Buffer</Th><Th>Aliases</Th><Th />
-              </tr>
-            </thead>
-            <tbody>
-              {filteredItems.map((it) => (
-                <tr key={it.id}>
-                  <Td>{it.id}</Td>
-                  <Td style={{ fontWeight: 700 }}>{it.name}</Td>
-                  <Td>{it.uom}</Td>
-                  <Td>{it.category}</Td>
-                  <Td>{it.buffer ? `${it.buffer} ${it.uom}` : '—'}</Td>
-                  <Td>
-                    {(it.aliases && it.aliases.length > 0) ? (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', maxWidth: 260 }}>
-                        {it.aliases.map((a) => <AliasChip key={a.id} alias={a} />)}
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: 11, color: MUTED }}>No aliases yet</span>
-                    )}
-                  </Td>
-                  <Td>
-                    {confirmDeleteId === it.id ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <button
-                          onClick={() => { onDelete(it.id); setConfirmDeleteId(null); }}
-                          style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          Yes, delete
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteId(null)}
-                          style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <button
-                          onClick={() => openEdit(it)}
-                          style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }}
-                          aria-label={`Edit ${it.name}`}
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteId(it.id)}
-                          style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }}
-                          aria-label={`Delete ${it.name}`}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    )}
-                  </Td>
-                </tr>
-              ))}
-              {filteredItems.length === 0 && (
-                <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No items match this filter/search.</Td></tr>
-              )}
-            </tbody>
-          </table>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={sectionTitle}>Bulk import</div>
+        <div style={hint}>Add many items at once from a spreadsheet. Download the format first if you're not sure what columns to use.</div>
+        <button
+          onClick={downloadItemsTemplate}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 8 }}
+        >
+          <Download size={14} /> Download format
+        </button>
+        <button
+          onClick={() => bulkFileRef.current?.click()}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+        >
+          <Upload size={14} /> Bulk import items
+        </button>
+        <input ref={bulkFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleBulkFile} style={{ display: 'none' }} />
+        {bulkSummary && (
+          <div style={{ marginTop: 10, fontSize: 12, color: LEAF, fontWeight: 600 }}>
+            {bulkSummary.added} item{bulkSummary.added !== 1 ? 's' : ''} added{bulkSummary.skipped > 0 ? `, ${bulkSummary.skipped} skipped (missing name)` : ''}.
           </div>
-        </Panel>
-      </div>
-    </div>
-  );
-}
-
-function normalizeIngredientQty(qty, unit) {
-  if (unit === 'g') return { value: qty / 1000, unit: 'kg' };
-  return { value: qty, unit };
-}
-
-function CutProcessPanel({ items, recipes, orders, onAddRecipe, onDeleteRecipe, onAddPurchaseRequirements }) {
-  const [name, setName] = useState('');
-  const [outputItemId, setOutputItemId] = useState('');
-  const [ingredients, setIngredients] = useState([{ key: 'row-0', itemId: '', qtyPerUnit: '', unit: 'g' }]);
-
-  const addIngredientRow = () =>
-    setIngredients((prev) => [...prev, { key: `row-${prev.length}-${Date.now()}`, itemId: '', qtyPerUnit: '', unit: 'g' }]);
-  const removeIngredientRow = (key) => setIngredients((prev) => prev.filter((r) => r.key !== key));
-  const updateIngredientRow = (key, field, value) =>
-    setIngredients((prev) => prev.map((r) => (r.key === key ? { ...r, [field]: value } : r)));
-
-  const saveRecipe = () => {
-    const validIngredients = ingredients.filter((r) => r.itemId && Number(r.qtyPerUnit) > 0);
-    if (!name.trim() || !outputItemId || validIngredients.length === 0) return;
-    onAddRecipe({
-      id: `RCP-${Date.now().toString(36).toUpperCase().slice(-5)}`,
-      name: name.trim(),
-      outputItemId,
-      ingredients: validIngredients.map((r, i) => ({ id: `ing-${i}-${r.key}`, itemId: r.itemId, qtyPerUnit: Number(r.qtyPerUnit), unit: r.unit })),
-    });
-    setName('');
-    setOutputItemId('');
-    setIngredients([{ key: 'row-0', itemId: '', qtyPerUnit: '', unit: 'g' }]);
-  };
-
-  const itemName = (id) => items.find((it) => it.id === id)?.name || 'Unknown item';
-
-  const requirementsByRecipe = useMemo(() => {
-    return recipes.map((recipe) => {
-      const outputItem = items.find((it) => it.id === recipe.outputItemId);
-      if (!outputItem) return { recipe, outputItem: null, totalQty: 0, rows: [] };
-      const totalQty = orders
-        .filter((o) => o.status !== 'dispatched' && o.product === outputItem.name)
-        .reduce((s, o) => s + o.qty, 0);
-      const rows = recipe.ingredients.map((ing) => {
-        const ingItem = items.find((it) => it.id === ing.itemId);
-        const rawTotal = ing.qtyPerUnit * totalQty;
-        const normalized = normalizeIngredientQty(rawTotal, ing.unit);
-        return { ingredientName: ingItem?.name || 'Unknown', ...normalized };
-      });
-      return { recipe, outputItem, totalQty, rows };
-    });
-  }, [recipes, items, orders]);
-
-  const pushToPurchaseList = (req) => {
-    if (!req.totalQty) return;
-    const rows = req.rows.map((r, i) => ({
-      id: `P-REQ-${Date.now().toString(36).toUpperCase().slice(-4)}-${i}`,
-      item: r.ingredientName,
-      supplier: '',
-      qty: r.value,
-      unit: r.unit,
-      cost: 0,
-      source: `Recipe: ${req.recipe.name}`,
-    }));
-    onAddPurchaseRequirements(rows);
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 18 }}>
-        <Panel style={{ alignSelf: 'start' }}>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Scissors size={14} /> Create recipe
-          </p>
-          <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-            Recipes describe how much of each item goes into one unit of a processed product.
-          </p>
-          <input placeholder="Recipe name (e.g. Pulao Veggie Mix)" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
-          <select value={outputItemId} onChange={(e) => setOutputItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
-            <option value="">Output item (finished product)</option>
-            {items.map((it) => (
-              <option key={it.id} value={it.id}>{it.name} ({it.uom})</option>
-            ))}
-          </select>
-
-          <p style={{ margin: '6px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>INGREDIENTS (per 1 output unit)</p>
-          {ingredients.map((row) => (
-            <div key={row.key} style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center' }}>
-              <select
-                value={row.itemId}
-                onChange={(e) => updateIngredientRow(row.key, 'itemId', e.target.value)}
-                style={{ flex: 1, borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}
-              >
-                <option value="">Item</option>
-                {items.filter((it) => it.id !== outputItemId).map((it) => (
-                  <option key={it.id} value={it.id}>{it.name}</option>
-                ))}
-              </select>
-              <input
-                placeholder="Qty"
-                type="number"
-                value={row.qtyPerUnit}
-                onChange={(e) => updateIngredientRow(row.key, 'qtyPerUnit', e.target.value)}
-                style={{ width: 52, boxSizing: 'border-box', padding: '6px 6px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12 }}
-              />
-              <select
-                value={row.unit}
-                onChange={(e) => updateIngredientRow(row.key, 'unit', e.target.value)}
-                style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 2px' }}
-              >
-                <option value="g">g</option>
-                <option value="kg">kg</option>
-                <option value="piece">piece</option>
-              </select>
-              {ingredients.length > 1 && (
-                <button onClick={() => removeIngredientRow(row.key)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', padding: 2 }}>
-                  <Trash2 size={13} />
-                </button>
-              )}
-            </div>
-          ))}
-          <button
-            onClick={addIngredientRow}
-            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: `1px dashed ${LINE}`, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: MUTED, cursor: 'pointer', marginBottom: 10, width: '100%', justifyContent: 'center' }}
-          >
-            <Plus size={12} /> Add ingredient
-          </button>
-
-          <button onClick={saveRecipe} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Save recipe
-          </button>
-        </Panel>
-
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Recipes ({recipes.length})</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Recipe</Th><Th>Output item</Th><Th>Ingredients</Th><Th /></tr></thead>
-            <tbody>
-              {recipes.map((r) => (
-                <tr key={r.id}>
-                  <Td style={{ fontWeight: 700 }}>{r.name}</Td>
-                  <Td>{itemName(r.outputItemId)}</Td>
-                  <Td style={{ fontSize: 12 }}>
-                    {r.ingredients.map((ing) => `${ing.qtyPerUnit}${ing.unit} ${itemName(ing.itemId)}`).join(', ')}
-                  </Td>
-                  <Td>
-                    <button onClick={() => onDeleteRecipe(r.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}>
-                      <Trash2 size={14} />
-                    </button>
-                  </Td>
-                </tr>
-              ))}
-              {recipes.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>No recipes yet.</Td></tr>}
-            </tbody>
-          </table>
+        )}
+        {bulkError && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12, color: TOMATO }}>
+            <AlertCircle size={13} /> {bulkError}
           </div>
-        </Panel>
-      </div>
+        )}
+      </Card>
 
-      <Panel>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Ingredient requirements from live orders</p>
-        <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>
-          Based on pending + packed orders for each recipe's output item.
-        </p>
-        {requirementsByRecipe.length === 0 && <p style={{ color: MUTED, fontSize: 13, textAlign: 'center' }}>Create a recipe to see requirements here.</p>}
-        {requirementsByRecipe.map((req) => (
-          <div key={req.recipe.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${LINE}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>
-                {req.recipe.name} — {req.totalQty} {req.outputItem?.uom || ''} ordered
-              </p>
-              <button
-                onClick={() => pushToPurchaseList(req)}
-                disabled={!req.totalQty}
-                style={{ background: !req.totalQty ? '#C9C2AE' : TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 12px', fontSize: 11, fontWeight: 700, cursor: !req.totalQty ? 'default' : 'pointer' }}
-              >
-                Add to purchase list
-              </button>
-            </div>
-            {req.totalQty === 0 ? (
-              <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>No open orders for this product right now.</p>
+      {filteredItems.map((it) => (
+        <Card key={it.id} style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontWeight: 800, fontSize: 15 }}>{it.name}</div>
+            {confirmDeleteId === it.id ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => { onDelete(it.id); setConfirmDeleteId(null); }} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Yes, delete</button>
+                <button onClick={() => setConfirmDeleteId(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+              </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><Th>Ingredient</Th><Th>Required qty</Th></tr></thead>
-                <tbody>
-                  {req.rows.map((r, i) => (
-                    <tr key={i}>
-                      <Td style={{ borderTop: 'none' }}>{r.ingredientName}</Td>
-                      <Td style={{ borderTop: 'none', color: LEAF, fontWeight: 700 }}>{r.value} {r.unit}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button onClick={() => openEdit(it)} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex' }}><Pencil size={15} /></button>
+                <button onClick={() => setConfirmDeleteId(it.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }}><Trash2 size={15} /></button>
               </div>
             )}
           </div>
-        ))}
-      </Panel>
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>{it.id} · {it.uom} · {it.category}{it.buffer ? ` · Buffer ${it.buffer} ${it.uom}` : ''}</div>
+          <div style={{ marginTop: 8 }}>
+            {(it.aliases && it.aliases.length > 0) ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap' }}>{it.aliases.map((a) => <AliasChip key={a.id} alias={a} />)}</div>
+            ) : (
+              <div style={{ fontSize: 11, color: MUTED }}>No aliases yet</div>
+            )}
+          </div>
+        </Card>
+      ))}
+      {filteredItems.length === 0 && <div style={hint}>No items match this filter/search.</div>}
     </div>
   );
 }
 
-function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, onAddRole, onDeleteRole, onToggleRolePermission }) {
+// ---------- Cut & Process ----------
+function normalizeIngredientQty(qty, unit) { if (unit === 'g') return { value: qty / 1000, unit: 'kg' }; return { value: qty, unit }; }
+const UNIT_OPTIONS = ['g', 'kg', 'piece'];
+
+function CutProcessTab({ items, recipes, orders, onAddRecipe, onDeleteRecipe, onAddPurchaseRequirements }) {
   const [name, setName] = useState('');
-  const [contact, setContact] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [city, setCity] = useState('All Cities');
-  const [roleId, setRoleId] = useState(roles[0]?.id || '');
-  const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-  const [newRoleName, setNewRoleName] = useState('');
-  const [visiblePasswordId, setVisiblePasswordId] = useState(null);
-  const [usernameError, setUsernameError] = useState('');
+  const [outputItemId, setOutputItemId] = useState('');
+  const [ingredients, setIngredients] = useState([{ key: 'r0', itemId: '', qtyPerUnit: '', unit: 'g' }]);
+  const itemName = (id) => items.find((it) => it.id === id)?.name || 'Unknown item';
 
-  const submitUser = () => {
-    if (!name.trim() || !roleId || !username.trim() || !password.trim()) return;
-    const uname = username.trim().toLowerCase();
-    if (users.some((u) => (u.username || '').toLowerCase() === uname)) {
-      setUsernameError('This username is already taken.');
-      return;
-    }
-    setUsernameError('');
-    onAddUser({
-      id: `U-${Date.now().toString(36).toUpperCase().slice(-5)}`,
-      name: name.trim(),
-      contact: contact.trim(),
-      roleId,
-      status: 'active',
-      username: uname,
-      password: password.trim(),
-      city,
+  const addRow = () => setIngredients((p) => [...p, { key: `r${p.length}-${Date.now()}`, itemId: '', qtyPerUnit: '', unit: 'g' }]);
+  const updateRow = (key, field, val) => setIngredients((p) => p.map((r) => (r.key === key ? { ...r, [field]: val } : r)));
+  const removeRow = (key) => setIngredients((p) => p.filter((r) => r.key !== key));
+
+  const saveRecipe = () => {
+    const valid = ingredients.filter((r) => r.itemId && Number(r.qtyPerUnit) > 0);
+    if (!name.trim() || !outputItemId || valid.length === 0) return;
+    onAddRecipe({ id: `RCP-${Date.now().toString(36).toUpperCase().slice(-5)}`, name: name.trim(), outputItemId, ingredients: valid.map((r, i) => ({ id: `ing-${i}-${r.key}`, itemId: r.itemId, qtyPerUnit: Number(r.qtyPerUnit), unit: r.unit })) });
+    setName(''); setOutputItemId(''); setIngredients([{ key: 'r0', itemId: '', qtyPerUnit: '', unit: 'g' }]);
+  };
+
+  const requirements = useMemo(() => recipes.map((recipe) => {
+    const outputItem = items.find((it) => it.id === recipe.outputItemId);
+    if (!outputItem) return { recipe, outputItem: null, totalQty: 0, rows: [] };
+    const totalQty = orders.filter((o) => o.status !== 'dispatched' && o.product === outputItem.name).reduce((s, o) => s + o.qty, 0);
+    const rows = recipe.ingredients.map((ing) => {
+      const ingItem = items.find((it) => it.id === ing.itemId);
+      const norm = normalizeIngredientQty(ing.qtyPerUnit * totalQty, ing.unit);
+      return { ingredientName: ingItem?.name || 'Unknown', ...norm };
     });
-    setName('');
-    setContact('');
-    setUsername('');
-    setPassword('');
-    setCity('All Cities');
-  };
+    return { recipe, outputItem, totalQty, rows };
+  }), [recipes, items, orders]);
 
-  const startEdit = (u) => {
-    setEditingId(u.id);
-    setDraft({ name: u.name, contact: u.contact, username: u.username || '', password: u.password || '', city: u.city || 'All Cities' });
-  };
-  const saveEdit = (id) => {
-    if (!draft.name.trim() || !draft.username.trim() || !draft.password.trim()) return;
-    onUpdateUser(id, { name: draft.name.trim(), contact: draft.contact.trim(), username: draft.username.trim().toLowerCase(), password: draft.password.trim(), city: draft.city });
-    setEditingId(null);
-    setDraft(null);
-  };
-
-  const addRole = () => {
-    if (!newRoleName.trim()) return;
-    const perms = {};
-    PERMISSION_SECTIONS.forEach((s) => { perms[s.key] = false; });
-    onAddRole({ id: `ROLE-${Date.now().toString(36).toUpperCase().slice(-5)}`, name: newRoleName.trim(), permissions: perms });
-    setNewRoleName('');
+  const pushToPurchase = (req) => {
+    if (!req.totalQty) return;
+    onAddPurchaseRequirements(req.rows.map((r, i) => ({ id: `P-REQ-${Date.now().toString(36).toUpperCase().slice(-4)}-${i}`, item: r.ingredientName, supplier: '', qty: r.value, unit: r.unit, cost: 0, source: `Recipe: ${req.recipe.name}` })));
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18 }}>
-        <Panel style={{ alignSelf: 'start' }}>
-          <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Users size={14} /> Add employee
-          </p>
-          <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
-          <input placeholder="Phone / email" value={contact} onChange={(e) => setContact(e.target.value)} style={inputStyle} />
-          <select value={roleId} onChange={(e) => setRoleId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
-          <p style={{ margin: '4px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>LOGIN CREDENTIALS</p>
-          <input placeholder="Username" value={username} onChange={(e) => { setUsername(e.target.value); setUsernameError(''); }} style={{ ...inputStyle, borderColor: usernameError ? TOMATO : LINE }} />
-          {usernameError && <p style={{ margin: '-4px 0 8px', fontSize: 11, color: TOMATO }}>{usernameError}</p>}
-          <input placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '4px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>CITY ACCESS</p>
-          <select value={city} onChange={(e) => setCity(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
-            <option value="All Cities">All Cities (Admin)</option>
-            {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <button onClick={submitUser} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Add employee
-          </button>
-        </Panel>
-
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Employees ({users.length})</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Name</Th><Th>Contact</Th><Th>Username</Th><Th>Password</Th><Th>City</Th><Th>Role</Th><Th>Status</Th><Th /></tr></thead>
-            <tbody>
-              {users.map((u) => {
-                const isEditing = editingId === u.id;
-                return (
-                  <tr key={u.id}>
-                    <Td style={{ fontWeight: 700 }}>
-                      {isEditing ? (
-                        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 110 }} />
-                      ) : (
-                        u.name
-                      )}
-                    </Td>
-                    <Td>
-                      {isEditing ? (
-                        <input value={draft.contact} onChange={(e) => setDraft({ ...draft, contact: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 110 }} />
-                      ) : (
-                        u.contact || <span style={{ color: MUTED }}>—</span>
-                      )}
-                    </Td>
-                    <Td>
-                      {isEditing ? (
-                        <input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 100 }} />
-                      ) : (
-                        u.username || <span style={{ color: MUTED }}>—</span>
-                      )}
-                    </Td>
-                    <Td>
-                      {isEditing ? (
-                        <input value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} style={{ ...inputStyle, marginBottom: 0, width: 100 }} />
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontFamily: 'monospace' }}>{visiblePasswordId === u.id ? (u.password || '—') : '••••••••'}</span>
-                          {u.password && (
-                            <button onClick={() => setVisiblePasswordId(visiblePasswordId === u.id ? null : u.id)} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
-                              {visiblePasswordId === u.id ? 'Hide' : 'Show'}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </Td>
-                    <Td>
-                      {isEditing ? (
-                        <select value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}>
-                          <option value="All Cities">All Cities</option>
-                          {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      ) : (
-                        <span style={{ fontWeight: u.city && u.city !== 'All Cities' ? 500 : 700, color: u.city && u.city !== 'All Cities' ? INK : LEAF_DARK }}>{u.city || 'All Cities'}</span>
-                      )}
-                    </Td>
-                    <Td>
-                      <select
-                        value={u.roleId}
-                        onChange={(e) => onUpdateUser(u.id, { roleId: e.target.value })}
-                        style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
-                      >
-                        {roles.map((r) => (
-                          <option key={r.id} value={r.id}>{r.name}</option>
-                        ))}
-                      </select>
-                    </Td>
-                    <Td>
-                      <button
-                        onClick={() => onUpdateUser(u.id, { status: u.status === 'active' ? 'inactive' : 'active' })}
-                        style={{
-                          background: u.status === 'active' ? '#EAF3DE' : '#F3E7E2',
-                          color: u.status === 'active' ? LEAF_DARK : TOMATO,
-                          border: 'none',
-                          borderRadius: 999,
-                          padding: '4px 10px',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {u.status === 'active' ? 'Active' : 'Inactive'}
-                      </button>
-                    </Td>
-                    <Td>
-                      {isEditing ? (
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={() => saveEdit(u.id)} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Save</button>
-                          <button onClick={() => { setEditingId(null); setDraft(null); }} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-                        </div>
-                      ) : confirmDeleteId === u.id ? (
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={() => { onDeleteUser(u.id); setConfirmDeleteId(null); }} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-                          <button onClick={() => setConfirmDeleteId(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>No</button>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button onClick={() => startEdit(u)} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex' }} aria-label={`Edit ${u.name}`}>
-                            <Pencil size={14} />
-                          </button>
-                          <button onClick={() => setConfirmDeleteId(u.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }} aria-label={`Remove ${u.name}`}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </Td>
-                  </tr>
-                );
-              })}
-              {users.length === 0 && <tr><Td colSpan={8} style={{ textAlign: 'center', color: MUTED }}>No employees added yet.</Td></tr>}
-            </tbody>
-          </table>
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={sectionTitle}>Create recipe</div>
+        <div style={hint}>How much of each item goes into one unit of a processed product.</div>
+        <Field placeholder="Recipe name (e.g. Pulao Veggie Mix)" value={name} onChange={(e) => setName(e.target.value)} />
+        <div style={smallLabel}>Output item (finished product)</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 8 }}>{items.map((it) => <Chip key={it.id} label={it.name} active={outputItemId === it.id} onClick={() => setOutputItemId(it.id)} />)}</div>
+        <div style={smallLabel}>Ingredients (per 1 output unit)</div>
+        {ingredients.map((row) => (
+          <div key={row.key} style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 6 }}>
+              {items.filter((it) => it.id !== outputItemId).map((it) => <Chip key={it.id} label={it.name} active={row.itemId === it.id} onClick={() => updateRow(row.key, 'itemId', it.id)} />)}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Field placeholder="Qty" type="number" value={row.qtyPerUnit} onChange={(e) => updateRow(row.key, 'qtyPerUnit', e.target.value)} style={{ flex: 1, marginBottom: 0 }} />
+              {UNIT_OPTIONS.map((u) => <Chip key={u} label={u} active={row.unit === u} onClick={() => updateRow(row.key, 'unit', u)} />)}
+              {ingredients.length > 1 && <button onClick={() => removeRow(row.key)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer' }}>✕</button>}
+            </div>
           </div>
-        </Panel>
-      </div>
+        ))}
+        <button onClick={addRow} style={{ width: '100%', border: `1px dashed ${LINE}`, background: 'none', borderRadius: 8, padding: '8px 0', color: MUTED, fontSize: 12, marginBottom: 10, cursor: 'pointer' }}>+ Add ingredient</button>
+        <PrimaryBtn onClick={saveRecipe}>Save recipe</PrimaryBtn>
+      </Card>
 
-      <Panel>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Shield size={15} /> Roles & permissions
-        </p>
-        <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>
-          Tick the sections each role is allowed to access. Employees inherit access from their assigned role.
-        </p>
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <Th>Role</Th>
-                {PERMISSION_SECTIONS.map((s) => (
-                  <Th key={s.key}>{s.label}</Th>
-                ))}
-                <Th />
-              </tr>
-            </thead>
-            <tbody>
-              {roles.map((r) => {
-                const inUse = users.some((u) => u.roleId === r.id);
-                return (
-                  <tr key={r.id}>
-                    <Td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{r.name}</Td>
-                    {PERMISSION_SECTIONS.map((s) => (
-                      <Td key={s.key} style={{ textAlign: 'center' }}>
-                        <input
-                          type="checkbox"
-                          checked={['staff', 'advanceindent'].includes(s.key) ? hasSensitivePermission(r.permissions, s.key) : hasPermission(r.permissions, s.key)}
-                          onChange={(e) => onToggleRolePermission(r.id, s.key, e.target.checked)}
-                        />
-                      </Td>
-                    ))}
-                    <Td>
-                      {!inUse && (
-                        <button onClick={() => onDeleteRole(r.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }} aria-label={`Delete role ${r.name}`}>
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={sectionTitle}>Recipes ({recipes.length})</div>
+        {recipes.map((r) => (
+          <div key={r.id} style={{ borderTop: `1px solid ${LINE}`, padding: '10px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{r.name} → {itemName(r.outputItemId)}</div>
+              <button onClick={() => onDeleteRecipe(r.id)} style={{ background: 'none', border: 'none', color: TOMATO, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Delete</button>
+            </div>
+            <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>{r.ingredients.map((ing) => `${ing.qtyPerUnit}${ing.unit} ${itemName(ing.itemId)}`).join(', ')}</div>
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-          <input placeholder="New role name (e.g. Delivery Partner)" value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-          <button onClick={addRole} style={{ display: 'flex', alignItems: 'center', gap: 4, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <Plus size={12} /> Add role
-          </button>
-        </div>
-      </Panel>
+        ))}
+        {recipes.length === 0 && <div style={hint}>No recipes yet.</div>}
+      </Card>
+
+      <Card>
+        <div style={sectionTitle}>Requirements from live orders</div>
+        <div style={hint}>Based on pending + packed orders for each recipe's output item.</div>
+        {requirements.map((req) => (
+          <div key={req.recipe.id} style={{ borderTop: `1px solid ${LINE}`, padding: '10px 0' }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{req.recipe.name} — {req.totalQty} {req.outputItem?.uom || ''} ordered</div>
+            {req.totalQty === 0 ? <div style={hint}>No open orders for this product right now.</div> : (
+              <>
+                {req.rows.map((r, i) => <div key={i} style={{ fontSize: 12 }}>{r.ingredientName}: <b style={{ color: LEAF }}>{r.value} {r.unit}</b></div>)}
+                <button onClick={() => pushToPurchase(req)} style={{ width: '100%', background: TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 0', fontWeight: 700, fontSize: 12, marginTop: 8, cursor: 'pointer' }}>Add to purchase list</button>
+              </>
+            )}
+          </div>
+        ))}
+      </Card>
     </div>
   );
 }
 
-// Keeps a filter's value in localStorage so it survives leaving the section (or the
-// whole page reloading) — it only ever changes when the person picks something new.
-function usePersistedState(key, defaultValue) {
-  const [state, setState] = useState(() => {
-    try {
-      const saved = window.localStorage.getItem(key);
-      return saved !== null ? JSON.parse(saved) : defaultValue;
-    } catch {
-      return defaultValue;
-    }
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(key, JSON.stringify(state));
-    } catch {}
-  }, [key, state]);
-  return [state, setState];
-}
-
-function pickField(rowObj, candidates) {
-  const keys = Object.keys(rowObj);
-  for (const c of candidates) {
-    const found = keys.find((k) => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(c));
-    if (found && String(rowObj[found]).trim() !== '') return rowObj[found];
-  }
-  return '';
-}
-
-const CATEGORY_MAP = {
-  fruit: 'FRUITS',
-  fruits: 'FRUITS',
-  veg: 'VEGETABLES',
-  vegetable: 'VEGETABLES',
-  vegetables: 'VEGETABLES',
-  'fresh vegetables': 'VEGETABLES',
-  exotic: 'EXOTIC',
-  exotics: 'EXOTIC',
-  flower: 'FLOWER',
-  flowers: 'FLOWER',
-  flowres: 'FLOWER',
-  grain: 'GRAINS',
-  grains: 'GRAINS',
-  cut: 'CUT',
-};
-function normalizeCategory(raw) {
-  const key = String(raw || '').toLowerCase().trim();
-  return CATEGORY_MAP[key] || 'VEGETABLES';
-}
-
-// Columns we recognize as metadata, not per-store demand quantities.
-const KNOWN_INDENT_HEADERS = new Set([
-  'fsn', 'title', 'category', 'type', 'umo', 'uom', 'unit',
-  'mrp', 'price', 't100t500fsn', 'eancode', 'shelflifedays', 'shelflife',
-  'temperaturezone', 'itemcode', 'articlecode', 'productcode', 'sku', 'code',
-  'productdescription', 'description', 'article', 'product', 'item', 'productname',
-  'indent', 'qty', 'quantity', 'orderedqty', 'finalindent',
-  // Zepto's indent format: one row per (article, dark store), plus a couple of
-  // internal helper columns that aren't store quantities.
-  'storename', 'storeid', 'subcategory', 'vendername', 'city', 'cc', 'bb', 'rr',
-]);
-
-// When there's no single qty column (e.g. Flipkart lists one column per dark
-// store), returns { "<store column header>": qty } for every leftover numeric
-// column with a positive value, or null when there is none.
-function sumUnknownNumericColumns(rowObj, headers) {
-  const stores = {};
-  headers.forEach((h) => {
-    if (!h) return;
-    const norm = h.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (KNOWN_INDENT_HEADERS.has(norm)) return;
-    const v = rowObj[h];
-    if (v === '' || v === null || v === undefined) return;
-    const num = Number(v);
-    if (!isNaN(num) && num > 0) stores[String(h).trim()] = num;
-  });
-  return Object.keys(stores).length > 0 ? stores : null;
-}
-
-function parseIndentRows(json, platform) {
-  const parsed = json
-    .map((r, idx) => {
-      const headers = Object.keys(r);
-      const rawName = String(pickField(r, ['productname', 'title', 'article', 'product', 'item', 'description']) || '').trim();
-      // The channel's own SKU/FSN code — kept as a fallback matching key and
-      // for tying together the PO/GRN chain, which still reference it.
-      const rawCode = String(pickField(r, ['fsn', 'itemcode', 'articlecode', 'productcode', 'sku', 'code']) || '').trim();
-      // The EAN is the article's permanent retail barcode — the primary key for
-      // matching an indent row to an item, since a channel's own FSN/SKU code can
-      // be reissued on a relisting (Flipkart) or is an internal UUID rather than
-      // a real article code (Zepto), even when the physical product hasn't changed.
-      const rawEan = String(pickField(r, ['eancode', 'ean']) || '').trim();
-      // "Final Indent" (Zepto) always wins over a plain "Indent" column when a
-      // sheet has both — checked before the generic 'indent' keyword.
-      let qty = Number(pickField(r, ['finalindent', 'indent', 'qty', 'quantity', 'orderedqty']) || 0);
-      let storeQtys = null;
-      if (!qty) {
-        const st = sumUnknownNumericColumns(r, headers);
-        if (st) { storeQtys = st; qty = Object.values(st).reduce((s, v) => s + v, 0); }
-      }
-      const unit = String(pickField(r, ['umo', 'uom', 'unit']) || '').trim();
-      const rawCategory = String(pickField(r, ['type', 'category']) || '').trim();
-      // Zepto lists one row per (article, dark store) rather than one row per
-      // article with a column per store — the store itself is a named column.
-      const rawStore = String(pickField(r, ['storename', 'store']) || '').trim();
-      return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawEan, qty, unit, rawCategory, storeQtys, rawStore };
-    })
-    .filter((r) => r.rawName && r.qty > 0);
-
-  // Fold "one row per (article, store)" back into "one row per article" with a
-  // per-store quantity map — matching the shape Flipkart's per-store-column
-  // format already produces — so the mapping table shows one line per article
-  // instead of one per store, and every store's demand still becomes its own
-  // order downstream.
-  const hasStoreRows = parsed.some((r) => r.rawStore && !r.storeQtys);
-  if (!hasStoreRows) return parsed;
-  const groups = {};
-  const order = [];
-  parsed.forEach((r) => {
-    if (!r.rawStore || r.storeQtys) { order.push(r); return; }
-    // Group by EAN when known (the stable identity); otherwise by name+code.
-    const groupKey = r.rawEan ? `ean:${r.rawEan.toLowerCase()}` : `name:${r.rawName.toLowerCase()}__${r.rawCode.toLowerCase()}`;
-    if (!groups[groupKey]) {
-      const merged = { ...r, storeQtys: {} };
-      groups[groupKey] = merged;
-      order.push(merged);
-    }
-    const g = groups[groupKey];
-    g.storeQtys[r.rawStore] = (g.storeQtys[r.rawStore] || 0) + r.qty;
-    g.qty = Object.values(g.storeQtys).reduce((s, v) => s + v, 0);
-  });
-  return order;
-}
-
-function ReleaseBatchRow({ batch: b, orders, onToggleReleaseBatch, onDeleteBatch }) {
+// ---------- Orders ----------
+function ReleaseBatchCard({ batch: b, orders, onToggleReleaseBatch, onDeleteBatch }) {
   const [purchaseDate, setPurchaseDate] = useState(b.purchaseDate || '');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const batchOrders = useMemo(() => orders.filter((o) => o.batchId === b.id), [orders, b.id]);
-  const articleCount = batchOrders.length;
+  const articleCount = new Set(batchOrders.map((o) => o.articleName || o.product)).size;
   const totalQty = batchOrders.reduce((s, o) => s + (Number(o.packQty) || 0), 0);
   const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
 
   return (
-    <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: '12px 14px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
-        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>
-          {b.platform} indent — {b.fileName}
-        </p>
+    <div style={{ borderTop: `1px solid ${LINE}`, padding: '10px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>{b.platform} indent — {b.fileName}</div>
         {!confirmingDelete ? (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: TOMATO, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0, padding: 2 }}
-          >
-            <Trash2 size={12} /> Delete order
+          <button onClick={() => setConfirmingDelete(true)} style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: TOMATO, fontSize: 10, fontWeight: 700, flexShrink: 0, padding: 2 }}>
+            <Trash2 size={11} /> Delete
           </button>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: TOMATO, fontWeight: 700 }}>Delete for good?</span>
-            <button onClick={() => onDeleteBatch(b.id)} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-            <button onClick={() => setConfirmingDelete(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>No</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            <button onClick={() => onDeleteBatch(b.id)} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '3px 6px', fontSize: 10, fontWeight: 700 }}>Yes</button>
+            <button onClick={() => setConfirmingDelete(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '3px 6px', fontSize: 10, fontWeight: 700 }}>No</button>
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
         <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ARTICLE QTY</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{articleCount}</p>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>ARTICLE QTY</div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{articleCount}</div>
         </div>
         <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TOTAL QUANTITY</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{totalQty}</p>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>TOTAL QTY</div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{totalQty}</div>
         </div>
         <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{fulfilmentDate || '—'}</p>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{fulfilmentDate || '—'}</div>
         </div>
-        {b.released && b.purchaseDate && (
-          <div>
-            <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>PURCHASE DATE</p>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: LEAF }}>{b.purchaseDate}</p>
-          </div>
-        )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {!b.released && (
-          <div>
-            <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>RELEASE DATE</p>
-            <input
-              type="date"
-              value={purchaseDate}
-              onChange={(e) => setPurchaseDate(e.target.value)}
-              style={{ borderRadius: 8, border: `1px solid ${purchaseDate ? LINE : AMBER}`, fontSize: 12, padding: '7px 8px' }}
-            />
-          </div>
-        )}
-        <button
-          onClick={() => onToggleReleaseBatch(b.id, purchaseDate)}
-          disabled={!b.released && !purchaseDate}
-          title={!b.released && !purchaseDate ? 'Pick a release date first — some articles need buying a day or more before the fulfilment date.' : ''}
-          style={{
-            background: b.released ? '#fff' : (!purchaseDate ? '#C9C2AE' : TOMATO),
-            color: b.released ? TOMATO : '#fff',
-            border: b.released ? `1px solid ${TOMATO}` : 'none',
-            borderRadius: 8,
-            padding: '8px 14px',
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: (!b.released && !purchaseDate) ? 'default' : 'pointer',
-            whiteSpace: 'nowrap',
-            alignSelf: 'flex-end',
-          }}
-        >
-          {b.released ? 'Withdraw from Purchase Manager' : 'Release to Purchase Manager'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete, defaultOpen }) {
-  const [open, setOpen] = useState(!!defaultOpen);
-  const [openArticles, setOpenArticles] = useState(() => new Set());
-
-  // A channel indent lists one quantity per dark store, so the same article
-  // legitimately becomes several orders. Showing each of those as its own top
-  // level row buried the article list (85 articles turned into 171 rows), so
-  // articles are grouped here and the per-store orders sit inside.
-  const articleGroups = useMemo(() => {
-    const map = {};
-    groupOrders.forEach((o) => {
-      const name = o.articleName || o.product;
-      const key = `${name}__${o.unit}`;
-      if (!map[key]) map[key] = { key, name, unit: o.unit, rows: [], qty: 0, fulfilmentDate: o.fulfilmentDate || '' };
-      map[key].rows.push(o);
-      map[key].qty = Math.round((map[key].qty + (Number(o.qty) || 0)) * 100) / 100;
-    });
-    return Object.values(map).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [groupOrders]);
-
-  const toggleArticle = (key) => setOpenArticles((s) => {
-    const n = new Set(s);
-    if (n.has(key)) n.delete(key); else n.add(key);
-    return n;
-  });
-
-  return (
-    <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
-      <div
-        onClick={() => setOpen((x) => !x)}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', cursor: 'pointer', background: open ? '#F6F3EA' : '#fff' }}
+      {b.released && b.purchaseDate && (
+        <div style={{ fontSize: 11, color: LEAF, fontWeight: 700, marginBottom: 6 }}>Purchase date: {b.purchaseDate}</div>
+      )}
+      {!b.released && (
+        <>
+          <div style={smallLabel}>Release date (required)</div>
+          <Field type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} style={{ marginBottom: 8 }} />
+        </>
+      )}
+      <button
+        onClick={() => onToggleReleaseBatch(b.id, purchaseDate)}
+        disabled={!b.released && !purchaseDate}
+        style={{ width: '100%', background: b.released ? '#fff' : (!purchaseDate ? '#C9C2AE' : TOMATO), color: b.released ? TOMATO : '#fff', border: b.released ? `1px solid ${TOMATO}` : 'none', borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700, cursor: (!b.released && !purchaseDate) ? 'default' : 'pointer' }}
       >
-        <div>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{label}</p>
-          {subtitle && <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{subtitle}</p>}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {badge}
-          <span style={{ background: '#EAF3DE', color: LEAF_DARK, fontWeight: 800, fontSize: 12, padding: '3px 10px', borderRadius: 999 }}>
-            {articleGroups.length} article{articleGroups.length === 1 ? '' : 's'}
-          </span>
-          <ChevronRight size={16} color={MUTED} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
-        </div>
-      </div>
-      {open && (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr><Th>Product</Th><Th>Total qty</Th><Th>UOM</Th><Th>Stores</Th><Th>Fulfilment date</Th><Th>Status</Th><Th /></tr>
-          </thead>
-          <tbody>
-            {articleGroups.map((g) => {
-              const isOpen = openArticles.has(g.key);
-              const statuses = Array.from(new Set(g.rows.map((r) => r.status)));
-              return (
-                <React.Fragment key={g.key}>
-                  <tr onClick={() => g.rows.length > 1 && toggleArticle(g.key)} style={{ cursor: g.rows.length > 1 ? 'pointer' : 'default', background: isOpen ? '#FAFAF7' : 'transparent' }}>
-                    <Td style={{ fontWeight: 700 }}>
-                      {g.rows.length > 1 && (
-                        <ChevronRight size={12} color={MUTED} style={{ marginRight: 6, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
-                      )}
-                      {g.name}
-                    </Td>
-                    <Td style={{ fontWeight: 700 }}>{g.qty}</Td>
-                    <Td>{g.unit}</Td>
-                    <Td style={{ fontSize: 12, color: MUTED }}>
-                      {g.rows.length === 1
-                        ? (orderStore(g.rows[0]) ? storeLabel(orderStore(g.rows[0])) : '—')
-                        : `${g.rows.length} stores`}
-                    </Td>
-                    <Td>{g.fulfilmentDate || <span style={{ color: MUTED }}>—</span>}</Td>
-                    <Td>{statuses.length === 1 ? <StatusPill status={statuses[0]} /> : <span style={{ fontSize: 11, color: MUTED }}>Mixed</span>}</Td>
-                    <Td>
-                      {g.rows.length === 1 && (
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <ConfirmDeleteButton onConfirm={() => onDelete(g.rows[0].id)} title={`Delete order ${g.rows[0].id}`} />
-                        </span>
-                      )}
-                    </Td>
-                  </tr>
-                  {isOpen && g.rows.map((o) => (
-                    <tr key={o.id} style={{ background: '#FAFAF7' }}>
-                      <Td style={{ paddingLeft: 34, fontSize: 12, color: MUTED }}>{o.id}</Td>
-                      <Td style={{ fontSize: 12 }}>{o.qty}</Td>
-                      <Td style={{ fontSize: 12, color: MUTED }}>{o.unit}</Td>
-                      <Td style={{ fontSize: 12 }}>{o.platform}{orderStore(o) ? ` · ${storeLabel(orderStore(o))}` : ''}</Td>
-                      <Td style={{ fontSize: 12, color: MUTED }}>{o.fulfilmentDate || '—'}</Td>
-                      <Td><StatusPill status={o.status} /></Td>
-                      <Td>
-                        <ConfirmDeleteButton onConfirm={() => onDelete(o.id)} title={`Delete order ${o.id}`} />
-                      </Td>
-                    </tr>
-                  ))}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-      )}
+        {b.released ? 'Withdraw from Purchase Manager' : 'Release to Purchase Manager'}
+      </button>
     </div>
   );
 }
 
-function OrdersListPanel({ orders, indentBatches, onDelete }) {
-  const grouped = useMemo(() => {
-    const byBatch = {};
-    const manual = [];
-    orders.forEach((o) => {
-      if (o.batchId) {
-        byBatch[o.batchId] = byBatch[o.batchId] || [];
-        byBatch[o.batchId].push(o);
-      } else {
-        manual.push(o);
-      }
-    });
-    const batchGroups = indentBatches
-      .filter((b) => byBatch[b.id]?.length)
-      .map((b) => ({ batch: b, orders: byBatch[b.id] }));
-    // any orders whose batch record no longer exists still need to be shown somewhere
-    const knownBatchIds = new Set(indentBatches.map((b) => b.id));
-    const orphaned = Object.entries(byBatch).filter(([id]) => !knownBatchIds.has(id)).flatMap(([, os]) => os);
-    return { batchGroups, manual: [...manual, ...orphaned] };
-  }, [orders, indentBatches]);
-
-  return (
-    <Panel>
-      <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>All orders ({orders.length})</p>
-      {grouped.batchGroups.map(({ batch, orders: groupOrders }) => (
-        <OrderBatchGroup
-          key={batch.id}
-          label={`${batch.platform} indent — ${batch.fileName}`}
-          subtitle={batch.released ? `Released${batch.purchaseDate ? ` · purchase date ${batch.purchaseDate}` : ''}` : 'Not yet released'}
-          badge={
-            <span style={{ background: batch.released ? '#E6F1FB' : '#FBEFDC', color: batch.released ? '#1B5E8C' : AMBER, fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999 }}>
-              {batch.released ? 'Released' : 'Not released'}
-            </span>
-          }
-          orders={groupOrders}
-          onDelete={onDelete}
-        />
-      ))}
-      {grouped.manual.length > 0 && (
-        <OrderBatchGroup label="Manually added orders" orders={grouped.manual} onDelete={onDelete} defaultOpen={grouped.batchGroups.length === 0} />
-      )}
-      {orders.length === 0 && <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No orders yet.</p>}
-    </Panel>
-  );
-}
-
-function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch, onExcludeOldFromPurchase, onResetOldOrders }) {
+function OrdersTab({ orders, items, indentBatches, onImport, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch, canAdvanceIndent, onExcludeOldFromPurchase, onResetOldOrders }) {
   const [platform, setPlatform] = useState('Blinkit');
   const [product, setProduct] = useState('');
   const [qty, setQty] = useState('');
   const [unit, setUnit] = useState('kg');
   const [fulfilmentDate, setFulfilmentDate] = useState('');
-
   const [indentPlatform, setIndentPlatform] = useState('Blinkit');
   const [indentFulfilmentDate, setIndentFulfilmentDate] = useState('');
   const [pendingIndent, setPendingIndent] = useState(null); // { platform, fileName, rows, fulfilmentDate, isAdvance }
@@ -3677,9 +2956,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
   const submit = () => {
     if (!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate) return;
     onImport({ id: `${platform.slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`, platform, product: product.trim(), qty: Number(qty), unit, status: 'pending', fulfilmentDate });
-    setProduct('');
-    setQty('');
-    setFulfilmentDate('');
+    setProduct(''); setQty(''); setFulfilmentDate('');
   };
 
   const handleFile = (e, isAdvance = false) => {
@@ -3700,33 +2977,24 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
         const rawRows = parseIndentRows(json, indentPlatform);
-        if (rawRows.length === 0) {
-          setFileError('No article rows with a valid name and quantity were found in this file.');
-          return;
-        }
+        if (rawRows.length === 0) { setFileError('No article rows with a valid name and quantity were found.'); return; }
         const rows = rawRows.map((r) => {
-          const rawNameStripped = stripQtyUom(r.rawName).toLowerCase();
           const rawEanLower = r.rawEan ? r.rawEan.toLowerCase() : '';
           // Flipkart reissues its own FSN/SKU "code" on a relisting even when the
-          // physical product hasn't changed, and Zepto's "code" is an internal
-          // UUID, not a real article code — so for both, the code is never used
-          // to auto-match an indent row; only the EAN (the item's permanent
-          // retail barcode) and, failing that, the article name are used.
+          // physical product hasn't changed, so — per instruction — Flipkart's code
+          // is never used to auto-match an indent row; only the EAN (the item's
+          // permanent retail barcode) and, failing that, the article name are used.
           // Blinkit is unaffected and still matches on its code as before.
           const useCodeMatch = !EAN_ONLY_PLATFORMS.has(indentPlatform);
-          const match = items.find(
-            (it) =>
-              (rawEanLower && (it.aliases || []).some((a) => a.channel === indentPlatform && a.ean && String(a.ean).toLowerCase() === rawEanLower)) ||
-              (useCodeMatch && r.rawCode && (it.aliases || []).some((a) => a.channel === indentPlatform && a.code && a.code.toLowerCase() === r.rawCode.toLowerCase())) ||
-              // Some items were previously imported (an item export re-imported via Bulk
-              // Import into another city) with their EAN sitting in the "code" field
-              // instead of "ean" — matching the incoming EAN against "code" too keeps
-              // those older items working without needing to be re-mapped by hand.
-              // (This checks EAN-against-code, never Flipkart's actual FSN, so it
-              // doesn't reintroduce FSN-based matching.)
-              (rawEanLower && (it.aliases || []).some((a) => a.channel === indentPlatform && a.code && a.code.toLowerCase() === rawEanLower)) ||
-              it.name.toLowerCase() === r.rawName.toLowerCase() ||
-              (rawNameStripped && it.name.toLowerCase() === rawNameStripped)
+          const match = items.find((it) =>
+            (rawEanLower && (it.aliases || []).some((a) => a.channel === indentPlatform && a.ean && String(a.ean).toLowerCase() === rawEanLower)) ||
+            (useCodeMatch && r.rawCode && (it.aliases || []).some((a) => a.channel === indentPlatform && a.code && a.code.toLowerCase() === r.rawCode.toLowerCase())) ||
+            // Some items were previously imported (an item export re-imported via Bulk
+            // Import into another city) with their EAN sitting in the "code" field
+            // instead of "ean" — matching the incoming EAN against "code" too keeps
+            // those older items working without needing to be re-mapped by hand.
+            (rawEanLower && (it.aliases || []).some((a) => a.channel === indentPlatform && a.code && a.code.toLowerCase() === rawEanLower)) ||
+            it.name.toLowerCase() === r.rawName.toLowerCase()
           );
           // Each distinct article code gets its own alias — even when it shares a base
           // item with another article on the same channel (e.g. two different pack sizes).
@@ -3760,13 +3028,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
       rows: prev.rows.map((r) => {
         if (r.key !== key) return r;
         if (value === '__new__') {
-          const newItem = {
-            id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}`,
-            name: r.rawName,
-            uom: r.unit || 'kg',
-            category: normalizeCategory(r.rawCategory),
-            aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', ean: r.rawEan || '', packSize: '', packUnit: 'kg' }],
-          };
+          const newItem = { id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}`, name: r.rawName, uom: r.unit || 'kg', category: normalizeCategory(r.rawCategory), aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', ean: r.rawEan || '', packSize: '', packUnit: 'kg' }] };
           onAddItem(newItem);
           return { ...r, mappedItemId: newItem.id };
         }
@@ -3776,7 +3038,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     }));
   };
 
-  const getMappedItem = (itemId) => items.find((it) => it.id === itemId);
+  const getMappedItem = (id) => items.find((it) => it.id === id);
   // Two different articles (different codes) can map to the same item on the same
   // channel with different pack sizes — so pack size is looked up per-row, matched by
   // this row's own article code, not just by item+channel.
@@ -3784,15 +3046,13 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     const item = getMappedItem(r.mappedItemId);
     if (!item) return null;
     const byEan = r.rawEan && (item.aliases || []).find((a) => a.channel === pendingIndent?.platform && a.ean && a.ean.toLowerCase() === r.rawEan.toLowerCase());
-    // For EAN_ONLY_PLATFORMS, the code isn't a reliable article identifier (see
-    // indent matching above), so it's never used to pick which pack-size alias
-    // a row belongs to.
+    // Flipkart's code isn't a reliable article identifier (see indent matching
+    // above), so it's never used to pick which pack-size alias a row belongs to.
     const byCode = !EAN_ONLY_PLATFORMS.has(pendingIndent?.platform) && (item.aliases || []).find((a) => a.channel === pendingIndent?.platform && a.code && r.rawCode && a.code.toLowerCase() === r.rawCode.toLowerCase());
     return byEan || byCode || (item.aliases || []).find((a) => a.channel === pendingIndent?.platform) || null;
   };
   const getPackSize = (r) => getRowAlias(r)?.packSize || '';
   const isRowReady = (r) => !!r.mappedItemId && Number(getPackSize(r)) > 0;
-
   const readyCount = pendingIndent ? pendingIndent.rows.filter(isRowReady).length : 0;
   const importCount = pendingIndent ? pendingIndent.rows.filter((r) => isRowReady(r) && selectedRowKeys.has(r.key)).length : 0;
 
@@ -3804,15 +3064,9 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     const orderIdBase = Date.now().toString(36).toUpperCase().slice(-5);
     let orderSeq = 0;
     pendingIndent.rows.forEach((r) => {
-      if (!isRowReady(r) || !selectedRowKeys.has(r.key)) {
-        remaining.push(r);
-        return;
-      }
+      if (!isRowReady(r) || !selectedRowKeys.has(r.key)) { remaining.push(r); return; }
       const item = items.find((it) => it.id === r.mappedItemId);
-      if (!item) {
-        remaining.push(r);
-        return;
-      }
+      if (!item) { remaining.push(r); return; }
       const alias = getRowAlias(r);
       const packSize = Number(alias?.packSize) || 1;
       const packUnit = alias?.packUnit || item.uom;
@@ -3852,25 +3106,13 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     });
     const compiled = Object.values(compiledMap);
     if (compiled.length > 0) {
-      onCreateIndentBatch({
-        id: batchId,
-        platform: pendingIndent.platform,
-        fileName: pendingIndent.fileName,
-        compiled,
-        released: false,
-        purchaseRowIds: [],
-        isAdvance: !!pendingIndent.isAdvance,
-      });
-      // A regular (non-advance) indent means today's real requirement for THIS
-      // PLATFORM has arrived — clear old, still-open orders of the SAME
-      // platform out of the purchase list, so a mandi-unavailable item from a
-      // past indent doesn't linger forever. This must stay scoped to the same
-      // platform: Blinkit and Flipkart run independent indent cycles, so a
-      // Flipkart upload must never clear Blinkit's still-open needs (and
-      // vice versa) — doing so would silently hide a genuine, unfulfilled
-      // purchase need.
-      // Advance indents don't trigger this: they're a future heads-up, not a
-      // fresh day's requirement, so today's purchase list should stay as is.
+      onCreateIndentBatch({ id: batchId, platform: pendingIndent.platform, fileName: pendingIndent.fileName, compiled, released: false, purchaseRowIds: [], isAdvance: !!pendingIndent.isAdvance });
+      // A regular (non-advance) indent means today's real requirement has
+      // arrived — clear old, still-open orders out of the purchase list so a
+      // mandi-unavailable item from a past indent doesn't linger forever.
+      // Must stay scoped to the same platform — Blinkit and Flipkart run
+      // independent indent cycles, so one platform's upload must never clear
+      // the other's still-open needs.
       if (!pendingIndent.isAdvance) {
         const staleIds = orders
           .filter((o) => o.batchId && o.batchId !== batchId && o.platform === pendingIndent.platform && o.status !== 'dispatched' && !o.isAdvance && !o.excludeFromPurchase)
@@ -3883,9 +3125,6 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     setSelectedRowKeys(new Set(remaining.filter((r) => selectedRowKeys.has(r.key)).map((r) => r.key)));
   };
 
-  // Only batches with a known purchase date are eligible — a batch that's
-  // never been released has no reliable date to judge as "old", so it's left
-  // out rather than guessed at.
   const batchesToReset = resetBeforeDate ? indentBatches.filter((b) => b.purchaseDate && b.purchaseDate < resetBeforeDate) : [];
   const resetBatchIds = batchesToReset.map((b) => b.id);
   const ordersToReset = resetBeforeDate ? orders.filter((o) => resetBatchIds.includes(o.batchId)) : [];
@@ -3896,628 +3135,303 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ padding: 16 }}>
       {indentBatches.length > 0 && (
-        <Panel>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Release to Purchase Manager</p>
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ ...sectionTitle, marginBottom: 0 }}>Release to Purchase Manager</div>
             <button
               onClick={() => setConfirmingOrdersReset((x) => !x)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700 }}
             >
-              <RotateCcw size={13} /> Reset orders
+              <RotateCcw size={12} /> Reset
             </button>
           </div>
           {confirmingOrdersReset && (
-            <div style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', borderRadius: 10, padding: 14, marginBottom: 14 }}>
-              <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13, color: INK }}>Delete old orders and indents</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: MUTED }}>Delete everything with a purchase date before</span>
-                <input type="date" value={resetBeforeDate} onChange={(e) => setResetBeforeDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 170 }} />
-              </div>
+            <div style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6 }}>Delete old orders and indents</div>
+              <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>Delete everything with a purchase date before:</div>
+              <Field type="date" value={resetBeforeDate} onChange={(e) => setResetBeforeDate(e.target.value)} style={{ marginBottom: 8 }} />
               {resetBeforeDate && (
-                <p style={{ margin: '0 0 10px', fontSize: 12, color: batchesToReset.length ? INK : MUTED }}>
+                <div style={{ fontSize: 11, color: batchesToReset.length ? INK : MUTED, marginBottom: 8 }}>
                   {batchesToReset.length === 0
-                    ? 'No indents match this — nothing would be deleted. (An indent that has never been released has no purchase date to judge by, so it never matches.)'
-                    : `This will permanently delete ${batchesToReset.length} indent(s) and ${ordersToReset.length} order(s).`}
-                </p>
+                    ? 'No indents match this — nothing would be deleted.'
+                    : `Will permanently delete ${batchesToReset.length} indent(s) and ${ordersToReset.length} order(s).`}
+                </div>
               )}
-              <p style={{ margin: '0 0 12px', fontSize: 11, color: MUTED, lineHeight: 1.5 }}>
-                This removes the orders and their indent — including its PO data — for good. Any of them not yet packed or dispatched disappear from Packaging/Dispatch and stop counting toward "needs purchase" (permanently, unlike Reset in Purchases, which can bring an item back on a new indent). It also removes that indent from Sales → Indents &amp; P&amp;L, so its cost/PO/profit history is gone; any GRN report already uploaded against it stays in the system but won't be visible anywhere once its indent is gone. It does <strong>not</strong> touch Purchases, Vendor Ledger, or Stock Count — those are separate records.
-              </p>
+              <div style={{ fontSize: 10.5, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
+                Removes the orders and their indent (PO data included) for good. Anything not yet packed/dispatched drops out of Packaging/Dispatch and stops counting toward "needs purchase" — permanently. Also removes it from Sales → Indents &amp; P&amp;L. Doesn't touch Purchases, Vendor Ledger, or Stock Count.
+              </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   onClick={() => { if (batchesToReset.length) confirmOrdersReset(); }}
                   disabled={!batchesToReset.length}
-                  style={{ background: batchesToReset.length ? TOMATO : '#E5E1D4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: batchesToReset.length ? 'pointer' : 'default' }}
+                  style={{ flex: 1, background: batchesToReset.length ? TOMATO : '#E5E1D4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}
                 >
-                  Delete {batchesToReset.length > 0 ? `${batchesToReset.length} indent${batchesToReset.length === 1 ? '' : 's'}` : ''}
+                  Delete {batchesToReset.length > 0 ? batchesToReset.length : ''}
                 </button>
-                <button onClick={() => { setConfirmingOrdersReset(false); setResetBeforeDate(''); }} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={() => { setConfirmingOrdersReset(false); setResetBeforeDate(''); }} style={{ flex: 1, background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}>Cancel</button>
               </div>
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {indentBatches.map((b) => (
-              <ReleaseBatchRow
-                key={b.id}
-                batch={b}
-                orders={orders}
-                onToggleReleaseBatch={onToggleReleaseBatch}
-                onDeleteBatch={(batchId) => onResetOldOrders(orders.filter((o) => o.batchId === batchId).map((o) => o.id), [batchId])}
-              />
-            ))}
-          </div>
-        </Panel>
-      )}
-      <Panel>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <FileSpreadsheet size={14} /> Import indent (Excel)
-        </p>
-        <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-          Upload the Blinkit or Flipkart indent file — we'll read it and ask you to map each article to an item. You can upload another indent (e.g. for a different date) even while one is still being mapped below — uploading replaces whatever's currently unfinished in the table.
-        </p>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {PLATFORMS.map((p) => (
-              <button
-                key={p}
-                onClick={() => setIndentPlatform(p)}
-                style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${indentPlatform === p ? LEAF : LINE}`, background: indentPlatform === p ? LEAF : '#fff', color: indentPlatform === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!indentFulfilmentDate}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, background: !indentFulfilmentDate ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: !indentFulfilmentDate ? 'default' : 'pointer' }}
-          >
-            <Upload size={13} /> Upload {indentPlatform} indent
-          </button>
-          <div>
-            <input
-              type="date"
-              value={indentFulfilmentDate}
-              onChange={(e) => setIndentFulfilmentDate(e.target.value)}
-              title="Fulfilment date for this indent (required)"
-              style={{ borderRadius: 8, border: `1px solid ${indentFulfilmentDate ? LINE : AMBER}`, fontSize: 12, padding: '7px 8px' }}
+          {indentBatches.map((b) => (
+            <ReleaseBatchCard
+              key={b.id}
+              batch={b}
+              orders={orders}
+              onToggleReleaseBatch={onToggleReleaseBatch}
+              onDeleteBatch={(batchId) => onResetOldOrders(orders.filter((o) => o.batchId === batchId).map((o) => o.id), [batchId])}
             />
-          </div>
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFile(e, false)} style={{ display: 'none' }} />
-          <button
-            onClick={() => advanceFileRef.current?.click()}
-            title="For articles that take days to arrive — buying heads-up only, no fulfilment date"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-          >
-            <Upload size={13} /> Upload advance indent
-          </button>
-          <input ref={advanceFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFile(e, true)} style={{ display: 'none' }} />
-        </div>
-        <p style={{ margin: '10px 0 0', fontSize: 11, color: MUTED }}>
-          An <strong>advance indent</strong> is the channel telling you early about articles that take a few days to source. It needs no fulfilment date — just pick the articles and release them to the purchase manager. Advance indents are never counted in Sales, P&amp;L or any accounting.
-        </p>
-        {!indentFulfilmentDate && (
-          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '10px 0 0' }}>
-            <AlertCircle size={13} /> Fulfilment date is required before you can upload an indent.
-          </p>
+          ))}
+        </Card>
+      )}
+
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 6 }}><FileSpreadsheet size={14} /> Import indent (Excel)</div>
+        <div style={hint}>Upload the Blinkit or Flipkart indent file. You can upload another one (e.g. a different date) even while one is still being mapped below — it replaces whatever's unfinished in the table.</div>
+        <div style={{ display: 'flex', marginBottom: 8 }}>{PLATFORMS.map((p) => <Chip key={p} label={p} active={indentPlatform === p} onClick={() => setIndentPlatform(p)} />)}</div>
+        <div style={smallLabel}>Fulfilment date (required)</div>
+        <Field type="date" value={indentFulfilmentDate} onChange={(e) => setIndentFulfilmentDate(e.target.value)} />
+        <PrimaryBtn onClick={() => fileInputRef.current?.click()} disabled={!indentFulfilmentDate}>Upload {indentPlatform} indent</PrimaryBtn>
+        <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFile(e, false)} style={{ display: 'none' }} />
+        {!indentFulfilmentDate && <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, marginTop: 8 }}><AlertCircle size={12} /> Fulfilment date is required before you can upload.</div>}
+        {canAdvanceIndent && (
+          <>
+            <button
+              onClick={() => advanceFileRef.current?.click()}
+              style={{ width: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.lg, padding: '10px 0', fontWeight: 700, fontSize: 12, marginTop: 8 }}
+            >
+              <Upload size={13} /> Upload advance indent
+            </button>
+            <input ref={advanceFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFile(e, true)} style={{ display: 'none' }} />
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>For articles that take a few days to arrive — no fulfilment date needed, and never counted in Sales or accounting.</div>
+          </>
         )}
-        {fileError && (
-          <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, margin: '10px 0 0' }}>
-            <AlertCircle size={13} /> {fileError}
-          </p>
-        )}
+        {fileError && <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TOMATO, marginTop: 8 }}><AlertCircle size={13} /> {fileError}</div>}
 
         {pendingIndent && (
-          <div style={{ borderTop: `1px solid ${LINE}`, marginTop: 16, paddingTop: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <p style={{ margin: 0, fontSize: 12, color: MUTED }}>
-                <strong style={{ color: INK }}>{pendingIndent.fileName}</strong> · {pendingIndent.platform} · {pendingIndent.rows.length} article{pendingIndent.rows.length !== 1 ? 's' : ''} found, {readyCount} ready, {selectedRowKeys.size} selected
-                {pendingIndent.isAdvance && (
-                  <span style={{ marginLeft: 8, background: '#FFF4E5', color: AMBER, border: `1px solid ${AMBER}`, borderRadius: 999, padding: '2px 10px', fontSize: 10, fontWeight: 800 }}>
-                    ADVANCE INDENT — no fulfilment date, purchase only
-                  </span>
-                )}
-                {pendingIndent.fulfilmentDate ? ` · Fulfilment: ${pendingIndent.fulfilmentDate}` : ''}
-              </p>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={selectAllRows} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
-                <button onClick={clearAllRows} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
-                <button onClick={() => setPendingIndent(null)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  Cancel
-                </button>
-              </div>
+          <div style={{ borderTop: `1px solid ${LINE}`, marginTop: 14, paddingTop: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: MUTED, flex: 1 }}>{pendingIndent.fileName} · {pendingIndent.platform} · {pendingIndent.rows.length} found, {readyCount} ready{pendingIndent.fulfilmentDate ? ` · ${pendingIndent.fulfilmentDate}` : ''}</div>
+              <button onClick={() => setPendingIndent(null)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
-              <thead>
-                <tr><Th /><Th>Article (from file)</Th><Th>{EAN_ONLY_PLATFORMS.has(pendingIndent.platform) ? 'EAN' : 'Code'}</Th><Th>Qty</Th><Th>UOM</Th><Th>Type</Th><Th>Map to item</Th><Th>Pack size</Th></tr>
-              </thead>
-              <tbody>
-                {pendingIndent.rows.map((r) => {
-                  const mappedItem = getMappedItem(r.mappedItemId);
-                  const rowAlias = getRowAlias(r);
-                  const packSize = rowAlias?.packSize || '';
-                  return (
-                    <tr key={r.key} style={{ background: selectedRowKeys.has(r.key) ? '#F6F3EA' : 'transparent' }}>
-                      <Td>
-                        <input type="checkbox" checked={selectedRowKeys.has(r.key)} onChange={() => toggleRowSelected(r.key)} />
-                      </Td>
-                      <Td>{r.rawName}</Td>
-                      <Td>{(EAN_ONLY_PLATFORMS.has(pendingIndent.platform) ? r.rawEan : r.rawCode) || <span style={{ color: MUTED }}>—</span>}</Td>
-                      <Td>{r.qty}</Td>
-                      <Td>{r.unit || <span style={{ color: MUTED }}>—</span>}</Td>
-                      <Td>{r.rawCategory || <span style={{ color: MUTED }}>—</span>}</Td>
-                      <Td>
-                        <select
-                          value={r.mappedItemId}
-                          onChange={(e) => setRowMapping(r.key, e.target.value)}
-                          style={{ borderRadius: 6, border: `1px solid ${r.mappedItemId ? LINE : AMBER}`, fontSize: 12, padding: '5px 6px', minWidth: 160 }}
-                        >
-                          <option value="">Not mapped</option>
-                          {items.map((it) => (
-                            <option key={it.id} value={it.id}>{it.name} ({it.id})</option>
-                          ))}
-                          <option value="__new__">+ Create new item "{r.rawName}"</option>
-                        </select>
-                      </Td>
-                      <Td>
-                        {mappedItem && rowAlias ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <input
-                              placeholder="e.g. 0.5"
-                              type="number"
-                              value={packSize}
-                              onChange={(e) => onUpdateAlias(mappedItem.id, rowAlias.id, { packSize: e.target.value })}
-                              style={{ width: 58, boxSizing: 'border-box', padding: '5px 6px', borderRadius: 6, border: `1px solid ${packSize ? LINE : AMBER}`, fontSize: 12 }}
-                            />
-                            <select
-                              value={rowAlias.packUnit || 'kg'}
-                              onChange={(e) => onUpdateAlias(mappedItem.id, rowAlias.id, { packUnit: e.target.value })}
-                              style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 4px' }}
-                            >
-                              <option value="kg">kg</option>
-                              <option value="pieces">pieces</option>
-                              <option value="pack">pack</option>
-                            </select>
-                          </div>
-                        ) : (
-                          <span style={{ color: MUTED, fontSize: 11 }}>Map an item first</span>
-                        )}
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div style={{ display: 'flex', gap: 14, marginBottom: 8 }}>
+              <button onClick={selectAllRows} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Select all</button>
+              <button onClick={clearAllRows} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Clear</button>
+              <span style={{ fontSize: 12, color: MUTED }}>{selectedRowKeys.size} selected</span>
             </div>
-            {readyCount < pendingIndent.rows.length && (
-              <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '0 0 10px' }}>
-                <AlertCircle size={13} /> {pendingIndent.rows.length - readyCount} article(s) still need an item mapping and/or a pack size before they can be imported.
-              </p>
-            )}
-            <button
-              onClick={importMapped}
-              disabled={importCount === 0}
-              style={{ background: importCount === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: importCount === 0 ? 'default' : 'pointer' }}
-            >
-              Import {importCount} selected &amp; ready order{importCount !== 1 ? 's' : ''}
-            </button>
+            {pendingIndent.rows.map((r) => {
+              const mappedItem = getMappedItem(r.mappedItemId);
+              const rowAlias = getRowAlias(r);
+              const packSize = rowAlias?.packSize || '';
+              return (
+                <div key={r.key} style={{ borderTop: `1px solid ${LINE}`, padding: '10px 0', background: selectedRowKeys.has(r.key) ? '#F6F3EA' : 'transparent' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <input type="checkbox" checked={selectedRowKeys.has(r.key)} onChange={() => toggleRowSelected(r.key)} style={{ marginTop: 3 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{r.rawName}</div>
+                      <div style={{ fontSize: 11, color: MUTED, margin: '2px 0 6px' }}>Qty {r.qty} · UOM {r.unit || '—'} · {EAN_ONLY_PLATFORMS.has(pendingIndent.platform) ? 'EAN' : 'Code'} {(EAN_ONLY_PLATFORMS.has(pendingIndent.platform) ? r.rawEan : r.rawCode) || '—'} · {r.rawCategory || '—'}</div>
+                      <div style={smallLabel}>Map to item</div>
+                      <select
+                        value={r.mappedItemId || ''}
+                        onChange={(e) => setRowMapping(r.key, e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box', borderRadius: RADIUS.md, border: `1px solid ${LINE}`, padding: '10px 8px', fontSize: 13, marginBottom: 8, background: '#fff' }}
+                      >
+                        <option value="">Not mapped</option>
+                        {items.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
+                        <option value="__new__">{`+ New "${r.rawName}"`}</option>
+                      </select>
+                      {mappedItem && rowAlias && (
+                        <>
+                          <div style={smallLabel}>Pack size ({mappedItem.uom} per pack)</div>
+                          <Field placeholder="e.g. 0.5" type="number" value={packSize} onChange={(e) => onUpdateAlias(mappedItem.id, rowAlias.id, { packSize: e.target.value })} style={{ width: 120 }} />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {readyCount < pendingIndent.rows.length && <div style={{ fontSize: 11, color: AMBER, marginTop: 10, marginBottom: 10 }}>{pendingIndent.rows.length - readyCount} article(s) still need mapping and/or pack size.</div>}
+            <PrimaryBtn onClick={importMapped} disabled={importCount === 0}>Import {importCount} selected &amp; ready order{importCount !== 1 ? 's' : ''}</PrimaryBtn>
           </div>
         )}
-      </Panel>
+      </Card>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18 }}>
-        <Panel style={{ alignSelf: 'start' }}>
-          <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Upload size={14} /> Add order manually
-          </p>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-            {PLATFORMS.map((p) => (
-              <button key={p} onClick={() => setPlatform(p)} style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: `1px solid ${platform === p ? LEAF : LINE}`, background: platform === p ? LEAF : '#fff', color: platform === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                {p}
-              </button>
-            ))}
-          </div>
-          <input placeholder="Product" value={product} onChange={(e) => setProduct(e.target.value)} style={inputStyle} />
-          <input type="date" value={fulfilmentDate} onChange={(e) => setFulfilmentDate(e.target.value)} title="Fulfilment date (required)" style={{ ...inputStyle, border: `1px solid ${fulfilmentDate ? LINE : AMBER}` }} />
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            <input placeholder="Quantity" type="number" value={qty} onChange={(e) => setQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-            <select value={unit} onChange={(e) => setUnit(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px' }}>
-              <option value="kg">kg</option>
-              <option value="dozen">dozen</option>
-              <option value="bunch">bunch</option>
-              <option value="crate">crate</option>
-            </select>
-          </div>
-          {!fulfilmentDate && (
-            <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '0 0 8px' }}>
-              <AlertCircle size={12} /> Fulfilment date is required.
-            </p>
-          )}
-          <button
-            onClick={submit}
-            disabled={!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate}
-            style={{ width: '100%', background: (!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate) ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: (!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate) ? 'default' : 'pointer' }}
-          >
-            Add order
-          </button>
-        </Panel>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={sectionTitle}>Add order manually</div>
+        <div style={{ display: 'flex', marginBottom: 8 }}>{PLATFORMS.map((p) => <Chip key={p} label={p} active={platform === p} onClick={() => setPlatform(p)} />)}</div>
+        <Field placeholder="Product" value={product} onChange={(e) => setProduct(e.target.value)} />
+        <div style={smallLabel}>Fulfilment date (required)</div>
+        <Field type="date" value={fulfilmentDate} onChange={(e) => setFulfilmentDate(e.target.value)} />
+        <Field placeholder="Quantity" type="number" value={qty} onChange={(e) => setQty(e.target.value)} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 10 }}>{['kg', 'dozen', 'bunch', 'crate'].map((u) => <Chip key={u} label={u} active={unit === u} onClick={() => setUnit(u)} />)}</div>
+        {!fulfilmentDate && <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, marginBottom: 8 }}><AlertCircle size={12} /> Fulfilment date is required.</div>}
+        <PrimaryBtn onClick={submit} disabled={!product.trim() || !qty || Number(qty) <= 0 || !fulfilmentDate}>Add order</PrimaryBtn>
+      </Card>
 
-        <OrdersListPanel orders={orders} indentBatches={indentBatches} onDelete={onDelete} />
-      </div>
+      <OrdersListCard orders={orders} indentBatches={indentBatches} />
     </div>
   );
 }
 
-const PURCHASE_CATEGORY_OPTIONS = ['ALL', 'FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS', 'CUT'];
+function OrderBatchGroupMobile({ label, subtitle, badgeText, badgeColor, orders: groupOrders, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const [openArticleKey, setOpenArticleKey] = useState(null);
 
-// Downloads a vendor's ledger as CSV — using a direct Blob download (not a print
-// window) since that's the pattern that reliably works from inside the app's
-// Android WebView, where window.open()/print() can silently fail to show anything.
-function downloadVendorLedgerCsv(vendorName, groups, onlyOutstanding) {
-  const rows = [];
-  groups.forEach((g) => {
-    (onlyOutstanding ? g.due : g.entries).forEach((e) => {
-      const status = e.payment === 'credit' ? (e.settled ? 'Paid (was credit)' : 'Outstanding') : `Paid (${e.payment})`;
-      rows.push([e.date || '', e.itemName || '', e.qty ?? '', e.unit || '', e.unitPrice ?? '', e.total ?? '', status]);
+  // A channel indent lists one quantity per dark store, so the same article
+  // legitimately becomes several orders. Grouping by article here keeps the
+  // list short; the per-store orders sit inside, one tap away.
+  const articleGroups = useMemo(() => {
+    const map = {};
+    groupOrders.forEach((o) => {
+      const name = o.articleName || o.product;
+      const key = `${name}__${o.unit}`;
+      if (!map[key]) map[key] = { key, name, unit: o.unit, rows: [], qty: 0 };
+      map[key].rows.push(o);
+      map[key].qty = Math.round((map[key].qty + (Number(o.qty) || 0)) * 100) / 100;
     });
-  });
-  const header = ['Date', 'Item', 'Qty', 'Unit', 'Unit Price', 'Total', 'Status'];
-  const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-  const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
-  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' }); // BOM so Excel opens ₹/non-ASCII text correctly
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  const safeName = vendorName.replace(/[^a-z0-9]+/gi, '_');
-  a.download = `${safeName}_ledger_${onlyOutstanding ? 'outstanding' : 'complete'}_${todayLocalDate()}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+    return Object.values(map).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [groupOrders]);
 
-function downloadPurchasePdf(rows) {
-  const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-  const rowsHtml = rows.map((it) => `
-    <tr>
-      <td>${it.name}</td>
-      <td>${it.category}</td>
-      <td>${it.stock} ${it.unit}</td>
-      <td style="font-weight:700;">${it.toBuy} ${it.unit}</td>
-    </tr>
-  `).join('');
-  const html = `<!DOCTYPE html>
-    <html>
-      <head>
-        <title>Purchase List — ${dateStr}</title>
-        <meta charset="utf-8" />
-        <style>
-          body { font-family: -apple-system, Arial, sans-serif; padding: 24px; color: #20241E; }
-          h1 { font-size: 18px; margin-bottom: 4px; }
-          p.sub { color: #6b7a63; font-size: 12px; margin-top: 0; margin-bottom: 20px; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 13px; }
-          th { background: #F6F3EA; font-size: 11px; text-transform: uppercase; color: #6b7a63; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <h1>Purchase List</h1>
-        <p class="sub">Generated on ${dateStr} · ${rows.length} item(s)</p>
-        <table>
-          <thead><tr><th>Item</th><th>Category</th><th>Stock</th><th>To buy</th></tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-      </body>
-    </html>`;
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) return;
-  printWindow.document.write(html);
-  printWindow.document.close();
-  printWindow.onload = () => {
-    printWindow.focus();
-    printWindow.print();
-  };
-}
-
-function openHtmlInPrintWindow(html) {
-  const w = window.open('', '_blank');
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
-  w.onload = () => { w.focus(); w.print(); };
-}
-
-const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const money2 = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-// Printed invoices list articles A→Z by name, regardless of the order the PO
-// happened to list them in — a copy sorted alphabetically instead of a copy
-// (localeCompare so it sorts the way a person reading the names would).
-const sortRowsByName = (rows) => [...(rows || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
-// Both channels' own invoices, and the date <input>, each use a different
-// date shape (ISO yyyy-mm-dd, or Flipkart's own dd/mm/yyyy) — this always
-// prints dd/mm/yy on the invoice, whichever shape it came in as.
-function formatDateDMY(v) {
-  const s = String(v == null ? '' : v).trim();
-  if (!s) return '';
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) return `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3].slice(2)}`;
-  const d = new Date(s);
-  if (!isNaN(d)) return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
-  return s;
-}
-
-// Zepto's buyer block (as captured off the PO/invoice) reads as one run of
-// text: "<legal name> <DC-CODE style name> (<code>) <street address>" — e.g.
-// "Hridya 1 Trade Enterprise Private Limited JBP-Janki Nagar (JBP001S) J/53,
-// ...". Their own invoice shows the name and the delivery-centre name+code
-// together on the "To," line, and the centre name alone (no code) in its own
-// "Delivery Center" row — both are pulled back out of that one string here
-// rather than asked for separately, since the source data only has the one.
-function splitZeptoBuyerBlock(block) {
-  const m = String(block || '').match(/^(.*?)\s*([A-Za-z]{2,5}-[^()]+?)\s*\(([A-Za-z0-9]+)\)\s*(.*)$/);
-  if (!m) return { buyerName: block || '', deliveryCenter: '', deliveryCenterFull: '', street: '' };
-  return { buyerName: m[1].trim(), deliveryCenter: m[2].trim(), deliveryCenterFull: `${m[2].trim()} (${m[3].trim()})`, street: m[4].trim() };
-}
-
-// Matches the plain bordered "INVOICE" layout the business's Zepto-facing
-// vendor (e.g. "Axis solutions") issues — see the sample the business shared.
-function zeptoInvoiceHtml(inv) {
-  const rows = sortRowsByName(inv.rows);
-  const { buyerName, deliveryCenter, deliveryCenterFull } = splitZeptoBuyerBlock(inv.buyerAddress);
-  const rowsHtml = rows.map((r, i) => `
-    <tr>
-      <td style="text-align:center;">${i + 1}</td>
-      <td style="text-align:center;">${esc(r.code)}</td>
-      <td>${esc(r.name)}</td>
-      <td style="text-align:center;">${r.qty}</td>
-      <td style="text-align:center;">${Number(r.price || 0).toFixed(2)}</td>
-      <td style="text-align:center;">${Number(r.total || 0).toFixed(2)}</td>
-    </tr>
-  `).join('');
-  return `<!DOCTYPE html>
-    <html>
-      <head>
-        <title>Invoice ${esc(inv.invoiceNumber)}</title>
-        <meta charset="utf-8" />
-        <style>
-          body { font-family: Georgia, 'Times New Roman', serif; padding: 20px; color: #000; }
-          table { width: 100%; border-collapse: collapse; }
-          td, th { border: 1px solid #000; padding: 4px 8px; font-size: 12.5px; }
-          .title { text-align: center; font-weight: 700; font-size: 15px; padding: 6px; }
-          .sub { text-align: center; font-weight: 700; padding: 2px; font-size: 12px; }
-          .label { font-weight: 700; width: 90px; }
-          .center { text-align: center; font-weight: 700; }
-          th { text-align: center; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <table>
-          <tr><td colspan="6" class="title">INVOICE</td></tr>
-          <tr><td colspan="6" class="sub">${esc(inv.vendorName || '')}</td></tr>
-          <tr><td colspan="6" style="text-align:center; font-size:11px;">Address: Plot No. 48, Cooperative Society, Deendayal, Jabalpur (482002)</td></tr>
-          <tr><td colspan="6" style="text-align:center; font-size:11px;">Email - Nilgiri790@gmail.com&nbsp;&nbsp;&nbsp;9981324558, 8269584143</td></tr>
-          <tr>
-            <td class="label" colspan="2">Invoice No.:</td>
-            <td colspan="2" style="text-align:center;">${esc(inv.invoiceNumber)}</td>
-            <td class="label">P.O. No</td>
-            <td>${esc(inv.poNumber)}</td>
-          </tr>
-          <tr>
-            <td class="label" colspan="2">Invoice Date:</td>
-            <td colspan="2" style="text-align:center;">${formatDateDMY(inv.invoiceDate)}</td>
-            <td class="label">P.O Date</td>
-            <td>${formatDateDMY(inv.poDate)}</td>
-          </tr>
-          ${deliveryCenter ? `<tr><td colspan="4"></td><td class="label">Delivery Center</td><td>${esc(deliveryCenter)}</td></tr>` : ''}
-          <tr><td colspan="6" class="center">Detail of Buyer</td></tr>
-          <tr><td class="label">To,</td><td colspan="5" style="font-weight:700;">${esc(buyerName)} ${esc(deliveryCenterFull)}</td></tr>
-          <tr>
-            <th>Sr.</th><th>Material Code</th><th>Item Description</th><th>Quantity</th><th>Unit Rate</th><th>Total(INR)</th>
-          </tr>
-          ${rowsHtml}
-          <tr><td></td><td></td><td></td><td></td><td class="center">Total</td><td class="center">${money2(inv.amount)}</td></tr>
-        </table>
-      </body>
-    </html>`;
-}
-
-// Matches Flipkart's own "TAX INVOICE" layout (Vendor/Ship-To/Bill-To panels,
-// then a line-item table with EAN/HSN/FSN and GST columns) — see the sample
-// the business shared (RMP10200132).
-function flipkartInvoiceHtml(inv) {
-  const rows = sortRowsByName(inv.rows);
-  const qtyTotal = rows.reduce((s, r) => s + (Number(r.qty) || 0), 0);
-  const rowsHtml = rows.map((r, i) => `
-    <tr>
-      <td style="text-align:center;">${i + 1}</td>
-      <td>${esc(r.name)}</td>
-      <td>${esc(r.ean)}</td>
-      <td>${esc(r.hsn)}</td>
-      <td>${esc(r.code)}</td>
-      <td style="text-align:center;">${esc(r.uom) || 'pcs'}</td>
-      <td style="text-align:center;">${r.qty}</td>
-      <td style="text-align:center;">${r.qty}</td>
-      <td style="text-align:center;">0.00 %</td>
-      <td style="text-align:center;">0.00 %</td>
-      <td style="text-align:right;">${Number(r.price || 0).toFixed(2)} (INR)</td>
-      <td style="text-align:right;">${Number(r.total || 0).toFixed(2)} (INR)</td>
-      <td style="text-align:right;">${Number(r.total || 0).toFixed(2)} (INR)</td>
-    </tr>
-  `).join('');
-  const partyBlock = (title, name, address, gstin, extra) => `
-    <td style="width:33.33%; vertical-align:top;">
-      <div class="panel-h">${title}</div>
-      <div class="panel-b">
-        ${name ? `<div><b>${esc(name)}</b></div>` : ''}
-        ${address ? `<div>${esc(address)}</div>` : ''}
-        ${extra || ''}
-        ${gstin ? `<div>GSTIN: ${esc(gstin)}</div>` : ''}
-      </div>
-    </td>`;
-  return `<!DOCTYPE html>
-    <html>
-      <head>
-        <title>Invoice ${esc(inv.invoiceNumber)}</title>
-        <meta charset="utf-8" />
-        <style>
-          body { font-family: Arial, sans-serif; padding: 16px; color: #000; font-size: 11px; }
-          table.frame { width: 100%; border-collapse: collapse; }
-          table.frame > tbody > tr > td { border: 1px solid #999; padding: 4px 8px; vertical-align: top; }
-          .banner { background: #1F3864; color: #fff; text-align: center; font-weight: 700; font-size: 15px; padding: 8px; }
-          .meta-label { font-weight: 700; width: 100px; background: #F2F2F2; }
-          .panel-h { background: #1F3864; color: #fff; font-weight: 700; padding: 4px 6px; margin: -1px -1px 4px; }
-          .panel-b { line-height: 1.4; }
-          table.items { width: 100%; border-collapse: collapse; margin-top: 10px; }
-          table.items th, table.items td { border: 1px solid #999; padding: 4px 6px; font-size: 10.5px; }
-          table.items th { background: #F2F2F2; text-align: center; }
-          .total-row td { font-weight: 700; background: #F2F2F2; text-align: center; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <table class="frame">
-          <tr><td colspan="2" class="banner">TAX INVOICE</td></tr>
-          <tr><td class="meta-label">Invoice No</td><td>${esc(inv.invoiceNumber)}</td></tr>
-          <tr><td class="meta-label">Invoice Date</td><td>${formatDateDMY(inv.invoiceDate)}</td></tr>
-          <tr><td class="meta-label">PO No</td><td>${esc(inv.poNumber)}</td></tr>
-          <tr><td class="meta-label">PO Date</td><td>${formatDateDMY(inv.poDate)}</td></tr>
-        </table>
-        <table class="frame" style="margin-top:-1px;">
-          <tr>
-            ${partyBlock('VENDOR DETAILS', inv.vendorName, inv.vendorAddress, inv.vendorGstin, `${inv.vendorEmail ? `<div>Email: ${esc(inv.vendorEmail)}</div>` : ''}${inv.vendorPhone ? `<div>Phone: ${esc(inv.vendorPhone)}</div>` : ''}`)}
-            ${partyBlock('SHIP TO', `Company Name : ${inv.buyerName || ''}`, inv.buyerAddress, inv.buyerGstin)}
-            ${partyBlock('BILL TO', `Company Name : ${inv.buyerName || ''}`, inv.buyerAddress, inv.buyerGstin)}
-          </tr>
-        </table>
-        <table class="items">
-          <thead>
-            <tr>
-              <th>S.No</th><th>Description</th><th>EAN</th><th>HSN</th><th>FSN</th><th>UOM</th><th>PO Qty</th><th>Dispatch Qty</th><th>SGST %</th><th>CGST %</th><th>Unit Price</th><th>Taxable</th><th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml}
-            <tr class="total-row">
-              <td colspan="6">TOTAL</td><td>${qtyTotal}</td><td>${qtyTotal}</td><td colspan="2"></td><td>TOTAL</td><td>${money2(inv.amount)} (INR)</td><td>${money2(inv.amount)} (INR)</td>
-            </tr>
-          </tbody>
-        </table>
-      </body>
-    </html>`;
-}
-
-// Generic fallback — used for a manual (non-PO) invoice, or any channel
-// without a matching template, where there's no channel-specific layout to
-// copy and no itemised rows to lay out in one anyway.
-function genericInvoiceHtml(inv) {
-  const rows = sortRowsByName(inv.rows);
-  const rowsHtml = rows.map((r, i) => `
-    <tr>
-      <td>${i + 1}</td>
-      <td>${esc(r.name) || '-'}</td>
-      <td style="text-align:right;">${r.qty}</td>
-      <td style="text-align:right;">${Number(r.price || 0).toFixed(2)}</td>
-      <td style="text-align:right;">${Number(r.total || 0).toFixed(2)}</td>
-    </tr>
-  `).join('');
-  return `<!DOCTYPE html>
-    <html>
-      <head>
-        <title>Invoice ${esc(inv.invoiceNumber)}</title>
-        <meta charset="utf-8" />
-        <style>
-          body { font-family: -apple-system, Arial, sans-serif; padding: 28px; color: #20241E; }
-          h1 { font-size: 20px; margin: 0 0 2px; }
-          p.sub { color: #6b7a63; font-size: 12px; margin: 0 0 20px; }
-          .meta { border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; font-size: 12px; margin-bottom: 18px; }
-          .meta b { color: #20241E; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-          th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #ddd; font-size: 12.5px; }
-          th { background: #F6F3EA; font-size: 11px; text-transform: uppercase; color: #6b7a63; }
-          .total-row td { border-top: 2px solid #20241E; border-bottom: none; font-weight: 800; font-size: 14px; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <h1>Tax Invoice</h1>
-        <p class="sub">${esc(inv.platform || '')}</p>
-        <div class="meta">
-          <span><b>Invoice #:</b> ${esc(inv.invoiceNumber) || '-'}</span> &nbsp;&nbsp;
-          <span><b>Invoice date:</b> ${formatDateDMY(inv.invoiceDate) || '-'}</span> &nbsp;&nbsp;
-          <span><b>PO #:</b> ${esc(inv.poNumber) || '-'}</span>
+  return (
+    <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
+      <div onClick={() => setOpen((x) => !x)} style={{ padding: '10px 12px', cursor: 'pointer', background: open ? '#F6F3EA' : '#fff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
+            {subtitle && <div style={{ fontSize: 10.5, color: MUTED, marginTop: 1 }}>{subtitle}</div>}
+          </div>
+          <ChevronRight size={15} color={MUTED} style={{ transform: open ? 'rotate(90deg)' : 'none', flexShrink: 0, marginTop: 2 }} />
         </div>
-        <table>
-          <thead><tr><th>Sr</th><th>Article</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Rate (₹)</th><th style="text-align:right;">Amount (₹)</th></tr></thead>
-          <tbody>
-            ${rowsHtml}
-            <tr class="total-row"><td colspan="4" style="text-align:right;">Grand Total</td><td style="text-align:right;">₹${money2(inv.amount)}</td></tr>
-          </tbody>
-        </table>
-      </body>
-    </html>`;
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {badgeText && <span style={{ background: badgeColor === 'blue' ? '#E6F1FB' : '#FBEFDC', color: badgeColor === 'blue' ? '#1B5E8C' : AMBER, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>{badgeText}</span>}
+          <span style={{ background: '#EAF3DE', color: LEAF_DARK, fontWeight: 800, fontSize: 10, padding: '2px 8px', borderRadius: 999 }}>{articleGroups.length} article{articleGroups.length !== 1 ? 's' : ''}</span>
+        </div>
+      </div>
+      {open && articleGroups.map((g) => {
+        const isOpen = openArticleKey === g.key;
+        const statuses = Array.from(new Set(g.rows.map((r) => r.status)));
+        return (
+          <div key={g.key} style={{ borderTop: `1px solid ${LINE}` }}>
+            <div
+              onClick={() => g.rows.length > 1 && setOpenArticleKey(isOpen ? null : g.key)}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', cursor: g.rows.length > 1 ? 'pointer' : 'default', background: isOpen ? '#FAFAF7' : 'transparent' }}
+            >
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {g.rows.length > 1 && <ChevronRight size={11} color={MUTED} style={{ transform: isOpen ? 'rotate(90deg)' : 'none', flexShrink: 0 }} />}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{g.name}</div>
+                  <div style={{ fontSize: 11, color: MUTED }}>{g.qty} {g.unit}{g.rows.length > 1 ? ` · ${g.rows.length} stores` : (orderStore(g.rows[0]) ? ` · ${storeLabel(orderStore(g.rows[0]))}` : '')}</div>
+                </div>
+              </div>
+              {statuses.length === 1 ? <StatusPill status={statuses[0]} /> : <span style={{ fontSize: 10, color: MUTED }}>Mixed</span>}
+            </div>
+            {isOpen && g.rows.map((o) => (
+              <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px 6px 30px', background: '#FAFAF7', borderTop: `1px solid ${LINE}` }}>
+                <div>
+                  <div style={{ fontSize: 11, color: MUTED }}>{o.id}{orderStore(o) ? ` · ${storeLabel(orderStore(o))}` : ''}</div>
+                  <div style={{ fontSize: 11 }}>{o.qty} {o.unit}</div>
+                </div>
+                <StatusPill status={o.status} />
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
-// Builds and opens the printable tax invoice for a PO-generated invoice
-// record (see parseFlipkartPoHeader / parseZeptoPoText). The channel's own PO
-// terms require its number on the invoice, so it's always shown. Each
-// channel gets the layout its own invoice actually uses — Zepto's plain
-// bordered "INVOICE" table or Flipkart's "TAX INVOICE" panels — rather than
-// one generic template, since that's what the business asked to match.
-function printInvoice(inv) {
-  const hasRows = (inv.rows || []).length > 0;
-  let html;
-  if (hasRows && inv.platform === 'Zepto') html = zeptoInvoiceHtml(inv);
-  else if (hasRows && inv.platform === 'Flipkart') html = flipkartInvoiceHtml(inv);
-  else html = genericInvoiceHtml(inv);
-  openHtmlInPrintWindow(html);
+function OrdersListCard({ orders, indentBatches }) {
+  const grouped = useMemo(() => {
+    const byBatch = {};
+    const manual = [];
+    orders.forEach((o) => {
+      if (o.batchId) {
+        byBatch[o.batchId] = byBatch[o.batchId] || [];
+        byBatch[o.batchId].push(o);
+      } else {
+        manual.push(o);
+      }
+    });
+    const batchGroups = indentBatches
+      .filter((b) => byBatch[b.id]?.length)
+      .map((b) => ({ batch: b, orders: byBatch[b.id] }));
+    const knownBatchIds = new Set(indentBatches.map((b) => b.id));
+    const orphaned = Object.entries(byBatch).filter(([id]) => !knownBatchIds.has(id)).flatMap(([, os]) => os);
+    return { batchGroups, manual: [...manual, ...orphaned] };
+  }, [orders, indentBatches]);
+
+  return (
+    <Card>
+      <div style={sectionTitle}>All orders ({orders.length})</div>
+      {grouped.batchGroups.map(({ batch, orders: groupOrders }) => (
+        <OrderBatchGroupMobile
+          key={batch.id}
+          label={`${batch.platform} indent — ${batch.fileName}`}
+          subtitle={batch.released ? `Released${batch.purchaseDate ? ` · ${batch.purchaseDate}` : ''}` : 'Not yet released'}
+          badgeText={batch.released ? 'Released' : 'Not released'}
+          badgeColor={batch.released ? 'blue' : 'amber'}
+          orders={groupOrders}
+        />
+      ))}
+      {grouped.manual.length > 0 && (
+        <OrderBatchGroupMobile label="Manually added orders" orders={grouped.manual} defaultOpen={grouped.batchGroups.length === 0} />
+      )}
+      {orders.length === 0 && <div style={hint}>No orders yet.</div>}
+    </Card>
+  );
 }
 
-function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, indentBatches, onAdd, onAddLedgerEntry, onSavePlacedOrder, onDeleteOldPurchases, onResetPurchaseNeeds, onRestoreExcluded }) {
+// ---------- Purchases ----------
+// CUT is intentionally not listed: processed (CUT) items are never bought directly — only their raw ingredients are.
+const PURCHASE_CATEGORY_OPTIONS = ['ALL', 'FRUITS', 'VEGETABLES', 'FLOWER', 'EXOTIC', 'GRAINS'];
+
+function PurchasesTab({ purchases, orders, items, allItems, recipes, vendors, vendorLedger, stockCounts, onAddLedgerEntry, onSavePlacedOrder, indentBatches, onDeleteOldPurchases, onResetPurchaseNeeds, onRestoreExcluded }) {
   const [categoryFilter, setCategoryFilter] = usePersistedState('fnv_purchase_category', 'ALL');
   const [vendorFilterId, setVendorFilterId] = usePersistedState('fnv_purchase_vendor', '');
   const [qtySort, setQtySort] = usePersistedState('fnv_purchase_qtysort', 'none'); // 'none' | 'asc' | 'desc'
   const [fulfilmentDateFilter, setFulfilmentDateFilter] = usePersistedState('fnv_purchase_fulfilmentdate', 'ALL'); // 'ALL' = All Purchase
-  const [confirmingPurchaseReset, setConfirmingPurchaseReset] = useState(false);
   const [itemSearch, setItemSearch] = useState('');
-  const [view, setView] = useState('list'); // 'list' | 'purchased'
-  const [selectedItemId, setSelectedItemId] = useState(null);
-  const [selectedVendorId, setSelectedVendorId] = useState('');
-  const [showAllVendorItems, setShowAllVendorItems] = useState(false);
-  const [showAllVendorsInDropdown, setShowAllVendorsInDropdown] = useState(false);
   const [purchasedDate, setPurchasedDate] = useState('');
+  const [confirmingPurchaseReset, setConfirmingPurchaseReset] = useState(false);
   const [deleteBeforeDate, setDeleteBeforeDate] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [selectedVendorId, setSelectedVendorId] = useState('');
+  const [view, setView] = useState('list'); // 'list' | 'purchased'
 
-  // Multi-select / order sharing (save a requirement list to Vendors → Order Placed)
+  // Multi-select / order sharing
   const [selectMode, setSelectMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState([]);
   const [orderNameDraft, setOrderNameDraft] = useState('');
   const [showOrderNameModal, setShowOrderNameModal] = useState(false);
-  const toggleSelectItem = (id) => setSelectedItemIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const toggleSelectItem = (id) => setSelectedItemIds((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   const exitSelectMode = () => { setSelectMode(false); setSelectedItemIds([]); };
 
-  // Purchase form
+  // Purchase form state
   const [purchaseQty, setPurchaseQty] = useState('');
   const [unitPrice, setUnitPrice] = useState('');
   const [totalInput, setTotalInput] = useState('');
   const [paymentMode, setPaymentMode] = useState('credit');
   const [purchaseNote, setPurchaseNote] = useState('');
+  const [purchaseDate] = useState(() => todayLocalDate());
   const [purchaseSuccess, setPurchaseSuccess] = useState(false);
 
+  const [showAllVendorItems, setShowAllVendorItems] = useState(false);
+  const [showAllVendorsInDropdown, setShowAllVendorsInDropdown] = useState(false);
   const openItem = (id, keepVendor = false) => {
     setSelectedItemId(id);
     if (!keepVendor) setSelectedVendorId('');
     setShowAllVendorItems(false);
     setShowAllVendorsInDropdown(false);
-    setPurchaseQty(''); setUnitPrice(''); setTotalInput('');
-    setPaymentMode('cash'); setPurchaseNote('');
+    setPurchaseQty('');
+    setUnitPrice('');
+    setTotalInput('');
+    setPaymentMode('cash');
+    setPurchaseNote('');
     setPurchaseSuccess(false);
   };
 
@@ -4525,10 +3439,12 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
   const derivedUnitPrice = purchaseQty && totalInput && !unitPrice ? Math.round(Number(totalInput) / Number(purchaseQty) * 100) / 100 : null;
   const totalPrice = derivedTotal ?? (totalInput ? Number(totalInput) : 0);
   const finalUnitPrice = unitPrice ? Number(unitPrice) : (derivedUnitPrice ?? 0);
-  const canSubmit = purchaseQty && (unitPrice || (totalInput && purchaseQty)) && selectedVendorId;
 
+  const handleQtyChange = (v) => { setPurchaseQty(v); };
   const handleUnitPriceChange = (v) => { setUnitPrice(v); if (v && purchaseQty) setTotalInput(''); };
   const handleTotalChange = (v) => { setTotalInput(v); if (v && purchaseQty) setUnitPrice(''); };
+
+  const canSubmit = purchaseQty && (unitPrice || (totalInput && purchaseQty)) && selectedVendorId;
 
   const submitPurchase = () => {
     if (!canSubmit) return;
@@ -4546,7 +3462,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       unitPrice: finalUnitPrice,
       total: totalPrice,
       payment: paymentMode,
-      date: todayLocalDate(),
+      date: purchaseDate,
       note: purchaseNote.trim(),
       settled: paymentMode !== 'credit',
     };
@@ -4556,30 +3472,10 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     setTimeout(() => setPurchaseSuccess(false), 3000);
   };
 
-  const stockByItem = useMemo(() => {
-    const map = {};
-    // Latest closing-stock count per item (from a nightly stock count) becomes the baseline.
-    const latestCount = {};
-    (stockCounts || []).forEach((sc) => {
-      if (!latestCount[sc.itemName] || sc.date > latestCount[sc.itemName].date) {
-        latestCount[sc.itemName] = { date: sc.date, qty: sc.closingQty };
-      }
-    });
-    Object.entries(latestCount).forEach(([name, c]) => { map[name] = c.qty; });
-    // Only actual completed purchases count toward stock — "requirement" rows (from
-    // released indents / recipe pushes) are just a to-buy queue, not stock on hand.
-    // Purchases made after the latest count date add on top of that baseline.
-    purchases
-      .filter((p) => p.type !== 'requirement')
-      .forEach((p) => {
-        const lc = latestCount[p.item];
-        if (!lc || !p.date || p.date > lc.date) {
-          map[p.item] = (map[p.item] || 0) + p.qty;
-        }
-      });
-    return map;
-  }, [purchases, stockCounts]);
-
+  // Output items (Cut & Process finished products) never get purchased
+  // directly — their recipe's raw ingredients do. Demand for an output
+  // item is expanded into ingredient demand, compiled across every
+  // recipe/order that needs that same ingredient.
   const availableFulfilmentDates = useMemo(() => {
     const releasedBatchIds = new Set(indentBatches.filter((b) => b.released).map((b) => b.id));
     const dates = new Set();
@@ -4591,9 +3487,62 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     return Array.from(dates).sort();
   }, [orders, indentBatches]);
 
-  const neededByProduct = useMemo(() => {
+  // Demand per raw/buyable item. Orders for a processed (CUT) item are never added directly:
+  // they are broken down into their recipe ingredients (recursively, so a recipe can use
+  // another CUT item). CUT items that have no recipe yet are collected in `cutWithoutRecipe`
+  // so they can be flagged instead of silently landing in the purchase list.
+  const neededData = useMemo(() => {
     const map = {};
-    const addDemand = (name, qty, unit) => { map[name] = map[name] || { needed: 0, unit }; map[name].needed += qty; };
+    const missing = {};
+    const nrm = (s) => String(s || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    const cityIds = new Set(items.map((it) => it.id));
+    // Items are per-city but recipes are shared, so resolve recipe items across ALL cities.
+    const itemById = {};
+    const catByName = {};
+    (allItems || []).forEach((it) => { itemById[it.id] = it; catByName[nrm(it.name)] = it.category; });
+    items.forEach((it) => { itemById[it.id] = it; catByName[nrm(it.name)] = it.category; });
+
+    const recipesByOutput = {};
+    recipes.forEach((r) => {
+      const out = itemById[r.outputItemId];
+      if (!out) return;
+      const k = nrm(out.name);
+      (recipesByOutput[k] = recipesByOutput[k] || []).push(r);
+    });
+    const pickRecipes = (name) => {
+      const all = recipesByOutput[nrm(name)] || [];
+      if (all.length === 0) return [];
+      // Prefer recipes made for this city's own item; otherwise reuse one other city's recipe (never sum duplicates across cities).
+      const local = all.filter((r) => cityIds.has(r.outputItemId));
+      if (local.length > 0) return local;
+      return all.filter((r) => r.outputItemId === all[0].outputItemId);
+    };
+
+    const addDemand = (name, qty, unit) => {
+      map[name] = map[name] || { needed: 0, unit };
+      map[name].needed += qty;
+    };
+    const explode = (name, qty, unit, depth) => {
+      const recs = depth < 5 ? pickRecipes(name) : [];
+      if (recs.length > 0) {
+        recs.forEach((recipe) => {
+          (recipe.ingredients || []).forEach((ing) => {
+            const ingItem = itemById[ing.itemId];
+            if (!ingItem) return;
+            const norm = normalizeIngredientQty(ing.qtyPerUnit * qty, ing.unit);
+            explode(ingItem.name, norm.value, norm.unit, depth + 1);
+          });
+        });
+        return;
+      }
+      if (catByName[nrm(name)] === 'CUT') {
+        missing[name] = missing[name] || { qty: 0, unit };
+        missing[name].qty += qty;
+        return;
+      }
+      addDemand(name, qty, unit);
+    };
+
     // An order counts toward "needing purchase" once it's actually been released to
     // Purchase Manager — orders with no batch (added manually) always count, since
     // there's no release step for those.
@@ -4603,27 +3552,12 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       .filter((o) => !o.excludeFromPurchase)
       .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
       .filter((o) => fulfilmentDateFilter === 'ALL' || o.fulfilmentDate === fulfilmentDateFilter)
-      .forEach((o) => {
-        const matchingRecipes = recipes.filter((r) => items.find((it) => it.id === r.outputItemId)?.name === o.product);
-        if (matchingRecipes.length > 0) {
-          matchingRecipes.forEach((recipe) => {
-            recipe.ingredients.forEach((ing) => {
-              const ingItem = items.find((it) => it.id === ing.itemId);
-              if (!ingItem) return;
-              const norm = normalizeIngredientQty(ing.qtyPerUnit * o.qty, ing.unit);
-              addDemand(ingItem.name, norm.value, norm.unit);
-            });
-          });
-        } else {
-          addDemand(o.product, o.qty, o.unit);
-        }
-      });
-    return map;
-  }, [orders, recipes, items, indentBatches, fulfilmentDateFilter]);
+      .forEach((o) => explode(o.product, o.qty, o.unit, 0));
+    return { map, missing };
+  }, [orders, recipes, items, allItems, indentBatches, fulfilmentDateFilter]);
+  const neededByProduct = neededData.map;
+  const cutWithoutRecipe = neededData.missing;
 
-  // Every order still counted as "needing purchase", regardless of the date
-  // filter currently on screen — Reset clears the whole list, not just what's
-  // visible right now, matching the same rule as Reset Stock.
   const allPurchaseNeedOrderIds = useMemo(() => {
     const releasedBatchIds = new Set(indentBatches.filter((b) => b.released).map((b) => b.id));
     return orders
@@ -4632,17 +3566,37 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
       .map((o) => o.id);
   }, [orders, indentBatches]);
-  // Orders currently hidden from the purchase list — whether from a manual
-  // Reset or the auto-exclude on a new indent upload. Restoring is safe: a
-  // truly-fulfilled item won't reappear (stock already covers it), only a
-  // still-unmet need does.
   const excludedOrderIds = useMemo(() => orders.filter((o) => o.excludeFromPurchase && o.status !== 'dispatched').map((o) => o.id), [orders]);
+
+  // "Available stock" = latest nightly stock count (if any) as baseline, plus every
+  // actual completed purchase made since — "requirement" rows (from released indents /
+  // recipe pushes) are just a to-buy queue, not stock on hand.
+  const stockByItem = useMemo(() => {
+    const map = {};
+    const latestCount = {};
+    (stockCounts || []).forEach((sc) => {
+      if (!latestCount[sc.itemName] || sc.date > latestCount[sc.itemName].date) {
+        latestCount[sc.itemName] = { date: sc.date, qty: sc.closingQty };
+      }
+    });
+    Object.entries(latestCount).forEach(([name, c]) => { map[name] = c.qty; });
+    purchases
+      .filter((p) => p.type !== 'requirement')
+      .forEach((p) => {
+        const lc = latestCount[p.item];
+        if (!lc || !p.date || p.date > lc.date) {
+          map[p.item] = (map[p.item] || 0) + p.qty;
+        }
+      });
+    return map;
+  }, [purchases, stockCounts]);
 
   const filteredItems = useMemo(() => {
     const vendorItemIds = vendorFilterId ? new Set(vendors.find((v) => v.id === vendorFilterId)?.itemIds || []) : null;
     let result = items
       .filter((it) => neededByProduct[it.name])
-      .filter((it) => categoryFilter === 'ALL' || it.category === categoryFilter)
+      .filter((it) => it.category !== 'CUT')
+      .filter((it) => categoryFilter === 'ALL' || categoryFilter === 'CUT' || it.category === categoryFilter)
       .filter((it) => !vendorItemIds || vendorItemIds.has(it.id))
       .filter((it) => !itemSearch.trim() || it.name.toLowerCase().includes(itemSearch.trim().toLowerCase()))
       .map((it) => {
@@ -4663,7 +3617,234 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     return result;
   }, [items, neededByProduct, categoryFilter, vendorFilterId, vendors, stockByItem, itemSearch, qtySort]);
 
-  const hasActiveFilters = categoryFilter !== 'ALL' || !!itemSearch.trim() || !!vendorFilterId || qtySort !== 'none' || fulfilmentDateFilter !== 'ALL';
+  const purchasedList = useMemo(() => {
+    return purchases
+      .filter((p) => p.type !== 'requirement')
+      .filter((p) => !purchasedDate || p.date === purchasedDate)
+      .slice()
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [purchases, purchasedDate]);
+
+  if (selectedItemId) {
+    const it = items.find((x) => x.id === selectedItemId);
+    const needed = neededByProduct[it?.name]?.needed || 0;
+    const unit = neededByProduct[it?.name]?.unit || it?.uom;
+    const stock = stockByItem[it?.name] || 0;
+    const buffer = Number(it?.buffer) || 0;
+    const toBuy = Math.max(0, Math.round((needed + buffer - stock) * 100) / 100);
+    const mappedVendors = vendors.filter((v) => (v.itemIds || []).includes(it?.id));
+    const dropdownVendors = mappedVendors.length === 0 || showAllVendorsInDropdown ? vendors : mappedVendors;
+    return (
+      <div style={{ padding: 16 }}>
+        <button onClick={() => setSelectedItemId(null)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 12, padding: 0 }}>
+          <ArrowLeft size={15} /> Back to items
+        </button>
+        <Card>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>{it?.name}</div>
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>{it?.category} · {it?.id}</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>NEEDED</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>{needed}</div>
+              <div style={{ fontSize: 10, color: MUTED, marginTop: 1 }}>{unit}</div>
+            </div>
+            <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>STOCK</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>{stock}</div>
+              <div style={{ fontSize: 10, color: MUTED, marginTop: 1 }}>{unit}</div>
+            </div>
+            {buffer > 0 && (
+              <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
+                <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>BUFFER</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>{buffer}</div>
+                <div style={{ fontSize: 10, color: MUTED, marginTop: 1 }}>{unit}</div>
+              </div>
+            )}
+            <div style={{ flex: 1, border: `1px solid ${TOMATO}`, background: '#FBEAE3', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 10, color: TOMATO, fontWeight: 700 }}>TO BUY</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: TOMATO }}>{toBuy}</div>
+              <div style={{ fontSize: 10, color: TOMATO, marginTop: 1 }}>{unit}</div>
+            </div>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <div style={smallLabel}>Select vendor</div>
+            <select
+              value={selectedVendorId}
+              onChange={(e) => { setSelectedVendorId(e.target.value); setShowAllVendorItems(false); }}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '9px 8px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, color: INK, background: '#fff' }}
+            >
+              <option value="">Choose a vendor</option>
+              {dropdownVendors.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+            {mappedVendors.length === 0 ? (
+              <div style={{ fontSize: 11, color: AMBER, marginTop: 4 }}>No vendor is linked to {it?.name} yet — showing every vendor. Link one in Vendors to shorten this list next time.</div>
+            ) : !showAllVendorsInDropdown && (
+              <button onClick={() => setShowAllVendorsInDropdown(true)} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0, marginTop: 4 }}>
+                Not listed? Show all vendors
+              </button>
+            )}
+          </div>
+
+          {selectedVendorId ? (
+            (() => {
+              const vendor = vendors.find((v) => v.id === selectedVendorId);
+              const allVendorItems = vendor ? items.filter((x) => vendor.itemIds.includes(x.id)) : [];
+              // Sort by purchase frequency for this vendor (most purchases first), exclude current item
+              const purchaseCount = (itemName) => vendorLedger.filter((e) => e.vendorId === selectedVendorId && e.itemName === itemName).length;
+              const sorted = [...allVendorItems].sort((a, b) => {
+                if (a.id === it?.id) return -1;
+                if (b.id === it?.id) return 1;
+                return purchaseCount(b.name) - purchaseCount(a.name);
+              });
+              const SHOW_DEFAULT = 3;
+              const showMore = sorted.length > SHOW_DEFAULT;
+              const displayed = showAllVendorItems ? sorted : sorted.slice(0, SHOW_DEFAULT);
+              return (
+                <div style={{ marginTop: 14 }}>
+                  <div style={smallLabel}>{vendor?.name} also supplies</div>
+                  {allVendorItems.length === 0 && <div style={hint}>No items linked to this vendor yet — link some in the Vendors section.</div>}
+                  {displayed.map((vi) => {
+                    const viNeeded = neededByProduct[vi.name]?.needed;
+                    const viCount = purchaseCount(vi.name);
+                    return (
+                      <div key={vi.id} onClick={() => openItem(vi.id, true)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${LINE}`, padding: '8px 0', cursor: 'pointer' }}>
+                        <div>
+                          <div style={{ fontWeight: vi.id === it?.id ? 800 : 600, fontSize: 13, color: vi.id === it?.id ? LEAF : INK }}>{vi.name}{vi.id === it?.id ? ' (current)' : ''}</div>
+                          {viCount > 0 && <div style={{ fontSize: 10, color: MUTED }}>{viCount} purchase{viCount !== 1 ? 's' : ''}</div>}
+                        </div>
+                        <div style={{ fontSize: 11, color: viNeeded ? TOMATO : MUTED, fontWeight: 700, textAlign: 'right' }}>
+                          {viNeeded ? `${viNeeded} ${neededByProduct[vi.name].unit} needed` : 'No demand'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {showMore && (
+                    <button
+                      onClick={() => setShowAllVendorItems((e) => !e)}
+                      style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, padding: '6px 0', cursor: 'pointer', width: '100%', textAlign: 'center', borderTop: `1px solid ${LINE}` }}
+                    >
+                      {showAllVendorItems ? 'Show less ▲' : `Show ${sorted.length - SHOW_DEFAULT} more ▼`}
+                    </button>
+                  )}
+                </div>
+              );
+            })()
+          ) : null}
+
+          {selectedVendorId && (
+            <div style={{ marginTop: 16, borderTop: `1px solid ${LINE}`, paddingTop: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: INK, marginBottom: 10 }}>Record purchase</div>
+
+              {purchaseSuccess && (
+                <div style={{ background: '#EAF3DE', color: LEAF_DARK, borderRadius: 8, padding: '9px 12px', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
+                  ✓ Purchase recorded successfully
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={smallLabel}>QTY ({neededByProduct[it?.name]?.unit || it?.uom})</div>
+                  <Field placeholder="e.g. 50" type="number" value={purchaseQty} onChange={(e) => handleQtyChange(e.target.value)} style={{ marginBottom: 0 }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ ...smallLabel, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>UNIT PRICE (₹)</span>
+                    {derivedUnitPrice !== null && !unitPrice && <span style={{ color: LEAF, fontSize: 10 }}>auto</span>}
+                  </div>
+                  <Field
+                    placeholder={derivedUnitPrice !== null && !unitPrice ? String(derivedUnitPrice) : 'e.g. 30'}
+                    type="number"
+                    value={unitPrice}
+                    onChange={(e) => handleUnitPriceChange(e.target.value)}
+                    style={{ marginBottom: 0, borderColor: derivedUnitPrice !== null && !unitPrice ? LEAF : LINE }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ ...smallLabel, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>TOTAL AMOUNT (₹)</span>
+                  {derivedTotal !== null && !totalInput && <span style={{ color: LEAF, fontSize: 10 }}>auto</span>}
+                </div>
+                <Field
+                  placeholder={derivedTotal !== null ? String(derivedTotal) : 'Enter total or fill unit price'}
+                  type="number"
+                  value={totalInput}
+                  onChange={(e) => handleTotalChange(e.target.value)}
+                  style={{ marginBottom: 0, fontWeight: 700, fontSize: 15, borderColor: derivedTotal !== null && !totalInput ? LEAF : LINE }}
+                />
+                {totalPrice > 0 && (
+                  <div style={{ background: BG, borderRadius: 8, padding: '8px 12px', marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: MUTED }}>Confirmed total</span>
+                    <span style={{ fontWeight: 800, fontSize: 15, color: INK }}>₹{totalPrice.toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={smallLabel}>PAYMENT MODE</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                {[{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank' }, { key: 'credit', label: '📒 Credit' }].map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => setPaymentMode(m.key)}
+                    style={{ flex: 1, padding: '7px 4px', borderRadius: 8, border: `1px solid ${paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF) : LINE}`, background: paymentMode === m.key ? (m.key === 'credit' ? '#FBEFDC' : '#EAF3DE') : '#fff', color: paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF_DARK) : INK, fontSize: 10, fontWeight: 700, cursor: 'pointer', textAlign: 'center' }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {paymentMode === 'credit' && (
+                <div style={{ background: '#FBEFDC', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: AMBER, marginBottom: 4 }}>📒 Credit entry</div>
+                  <div style={{ fontSize: 11, color: AMBER }}>₹{totalPrice.toLocaleString('en-IN')} will be added to {vendors.find((v) => v.id === selectedVendorId)?.name || 'vendor'}'s account as outstanding credit.</div>
+                </div>
+              )}
+
+              <Field placeholder="Note (optional)" value={purchaseNote} onChange={(e) => setPurchaseNote(e.target.value)} />
+
+              <PrimaryBtn
+                onClick={submitPurchase}
+                disabled={!canSubmit}
+                color={paymentMode === 'credit' ? AMBER : LEAF}
+              >
+                {paymentMode === 'credit' ? 'Record on credit' : 'Record purchase'}
+              </PrimaryBtn>
+            </div>
+          )}
+
+          {/* Vendor credit ledger for this item's vendor */}
+          {selectedVendorId && (() => {
+            const creditEntries = vendorLedger.filter((e) => e.vendorId === selectedVendorId && e.payment === 'credit' && !e.settled);
+            const creditTotal = creditEntries.reduce((s, e) => s + e.total, 0);
+            if (creditEntries.length === 0) return null;
+            return (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: AMBER }}>Outstanding credit</div>
+                  <div style={{ fontWeight: 800, color: AMBER }}>₹{creditTotal.toLocaleString('en-IN')}</div>
+                </div>
+                {creditEntries.slice(0, 5).map((e) => (
+                  <div key={e.id} style={{ borderTop: `1px solid ${LINE}`, padding: '6px 0', fontSize: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 600 }}>{e.itemName} · {e.qty} {e.unit}</span>
+                      <span style={{ color: AMBER, fontWeight: 700 }}>₹{e.total.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div style={{ color: MUTED, fontSize: 11 }}>{e.date}{e.note ? ` · ${e.note}` : ''}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+        </Card>
+      </div>
+    );
+  }
+
+  const hasActiveFilters = (categoryFilter !== 'ALL' && categoryFilter !== 'CUT') || !!itemSearch.trim() || !!vendorFilterId || qtySort !== 'none' || fulfilmentDateFilter !== 'ALL';
   const clearFilters = () => { setCategoryFilter('ALL'); setItemSearch(''); setVendorFilterId(''); setQtySort('none'); setFulfilmentDateFilter('ALL'); };
 
   const confirmShareOrder = () => {
@@ -4676,21 +3857,10 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     exitSelectMode();
   };
 
-  const purchasedList = useMemo(() => {
-    return purchases
-      .filter((p) => p.type !== 'requirement')
-      .filter((p) => !purchasedDate || p.date === purchasedDate)
-      .slice()
-      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [purchases, purchasedDate]);
-  const allPurchasedCount = useMemo(() => purchases.filter((p) => p.type !== 'requirement').length, [purchases]);
-  // Only actual completed purchases are ever eligible here — "requirement" rows
-  // are just placeholders from a saved shopping list, not something that was
-  // ever bought, so deleting them wouldn't mean anything.
-  const purchasesToDelete = useMemo(() => {
-    if (!deleteBeforeDate) return [];
-    return purchases.filter((p) => p.type !== 'requirement' && p.date && p.date < deleteBeforeDate);
-  }, [purchases, deleteBeforeDate]);
+  const allPurchasedCount = purchases.filter((p) => p.type !== 'requirement').length;
+  const purchasesToDelete = deleteBeforeDate
+    ? purchases.filter((p) => p.type !== 'requirement' && p.date && p.date < deleteBeforeDate)
+    : [];
   const deleteTotal = Math.round(purchasesToDelete.reduce((s, p) => s + (Number(p.cost) || 0), 0) * 100) / 100;
   const confirmDelete = () => {
     onDeleteOldPurchases(purchasesToDelete.map((p) => p.id));
@@ -4698,422 +3868,216 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     setDeleteBeforeDate('');
   };
 
-  // Item detail side-panel
-  const selectedItemData = selectedItemId ? filteredItems.find((x) => x.id === selectedItemId) : null;
-
-  const purchaseCount = (vendorId, itemName) => vendorLedger.filter((e) => e.vendorId === vendorId && e.itemName === itemName).length;
-
-  const ItemDetailPanel = () => {
-    if (!selectedItemId) return (
-      <Panel style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 200 }}>
-        <p style={{ margin: 0, color: MUTED, fontSize: 13 }}>Select an item from the list to record a purchase.</p>
-      </Panel>
-    );
-    const it = items.find((x) => x.id === selectedItemId);
-    const data = selectedItemData || { needed: 0, stock: 0, buffer: Number(it?.buffer) || 0, toBuy: 0, unit: it?.uom };
-    const vendor = vendors.find((v) => v.id === selectedVendorId);
-    const mappedVendors = vendors.filter((v) => (v.itemIds || []).includes(it?.id));
-    const dropdownVendors = mappedVendors.length === 0 || showAllVendorsInDropdown ? vendors : mappedVendors;
-    const allVendorItems = vendor ? items.filter((x) => vendor.itemIds.includes(x.id)) : [];
-    const sorted = [...allVendorItems].sort((a, b) => {
-      if (a.id === it?.id) return -1;
-      if (b.id === it?.id) return 1;
-      return purchaseCount(selectedVendorId, b.name) - purchaseCount(selectedVendorId, a.name);
-    });
-    const SHOW_DEFAULT = 3;
-    const displayed = showAllVendorItems ? sorted : sorted.slice(0, SHOW_DEFAULT);
-    const creditEntries = vendorLedger.filter((e) => e.vendorId === selectedVendorId && e.payment === 'credit' && !e.settled);
-    const creditTotal = creditEntries.reduce((s, e) => s + e.total, 0);
-
+  if (view === 'purchased') {
     return (
-      <Panel>
-        {/* Item header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div>
-            <p style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>{it?.name}</p>
-            <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>{it?.category} · {it?.id}</p>
-          </div>
-          <button onClick={() => setSelectedItemId(null)} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer', fontSize: 18 }}>✕</button>
-        </div>
-
-        {/* Metrics */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
-            <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>NEEDED</p>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>{data.needed} {data.unit}</p>
-          </div>
-          <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
-            <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>STOCK</p>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>{data.stock} {data.unit}</p>
-          </div>
-          {data.buffer > 0 && (
-            <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
-              <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>BUFFER</p>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>{data.buffer} {data.unit}</p>
-            </div>
-          )}
-          <div style={{ flex: 1, border: `1px solid ${TOMATO}`, background: '#FBEAE3', borderRadius: 8, padding: '8px 10px' }}>
-            <p style={{ margin: '0 0 4px', fontSize: 10, color: TOMATO, fontWeight: 700 }}>TO BUY</p>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 800, color: TOMATO }}>{data.toBuy} {data.unit}</p>
-          </div>
-        </div>
-
-        {/* Vendor selector */}
-        <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SELECT VENDOR</p>
-        <select
-          value={selectedVendorId}
-          onChange={(e) => { setSelectedVendorId(e.target.value); setShowAllVendorItems(false); }}
-          style={{ ...inputStyle, marginBottom: mappedVendors.length === 0 ? 4 : 10 }}
-        >
-          <option value="">Choose a vendor</option>
-          {dropdownVendors.map((v) => (
-            <option key={v.id} value={v.id}>{v.name}</option>
-          ))}
-        </select>
-        {mappedVendors.length === 0 ? (
-          <p style={{ margin: '0 0 10px', fontSize: 11, color: AMBER }}>No vendor is linked to {it?.name} yet — showing every vendor. Link one in the Vendors section to shorten this list next time.</p>
-        ) : !showAllVendorsInDropdown && (
-          <button onClick={() => setShowAllVendorsInDropdown(true)} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0, marginBottom: 10 }}>
-            Not listed? Show all vendors
-          </button>
-        )}
-
-        {/* Vendor supplies list */}
-        {selectedVendorId && (
-          <div style={{ marginBottom: 14 }}>
-            <p style={{ margin: '0 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>{vendor?.name} also supplies</p>
-            {allVendorItems.length === 0 && <p style={{ margin: 0, fontSize: 12, color: MUTED }}>No items linked yet.</p>}
-            {displayed.map((vi) => {
-              const viNeeded = neededByProduct[vi.name]?.needed;
-              const viCount = purchaseCount(selectedVendorId, vi.name);
-              return (
-                <div key={vi.id} onClick={() => vi.id !== it?.id && openItem(vi.id, true)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${LINE}`, padding: '7px 0', cursor: vi.id !== it?.id ? 'pointer' : 'default' }}>
-                  <div>
-                    <span style={{ fontWeight: vi.id === it?.id ? 800 : 600, fontSize: 13, color: vi.id === it?.id ? LEAF : INK }}>{vi.name}{vi.id === it?.id ? ' (current)' : ''}</span>
-                    {viCount > 0 && <span style={{ marginLeft: 8, fontSize: 11, color: MUTED }}>{viCount} purchase{viCount !== 1 ? 's' : ''}</span>}
-                  </div>
-                  <span style={{ fontSize: 11, color: viNeeded ? TOMATO : MUTED, fontWeight: 700 }}>
-                    {viNeeded ? `${viNeeded} ${neededByProduct[vi.name].unit} needed` : 'No demand'}
-                  </span>
-                </div>
-              );
-            })}
-            {sorted.length > SHOW_DEFAULT && (
-              <button onClick={() => setShowAllVendorItems((x) => !x)} style={{ width: '100%', background: 'none', border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 0', fontSize: 12, color: LEAF, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
-                {showAllVendorItems ? '▲ Show less' : `▼ Show ${sorted.length - SHOW_DEFAULT} more`}
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Purchase form */}
-        {selectedVendorId && (
-          <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14 }}>
-            <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13 }}>Record purchase</p>
-
-            {purchaseSuccess && (
-              <div style={{ background: '#EAF3DE', color: LEAF_DARK, borderRadius: 8, padding: '8px 12px', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
-                ✓ Purchase recorded successfully
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>QTY ({data.unit})</p>
-                <input placeholder="e.g. 50" type="number" value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>UNIT PRICE (₹){derivedUnitPrice && !unitPrice ? <span style={{ color: LEAF }}> — auto</span> : ''}</p>
-                <input placeholder={derivedUnitPrice && !unitPrice ? String(derivedUnitPrice) : 'e.g. 30'} type="number" value={unitPrice} onChange={(e) => handleUnitPriceChange(e.target.value)} style={{ ...inputStyle, marginBottom: 0, borderColor: derivedUnitPrice && !unitPrice ? LEAF : LINE }} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>TOTAL (₹){derivedTotal && !totalInput ? <span style={{ color: LEAF }}> — auto</span> : ''}</p>
-                <input placeholder={derivedTotal ? String(derivedTotal) : 'or fill total'} type="number" value={totalInput} onChange={(e) => handleTotalChange(e.target.value)} style={{ ...inputStyle, marginBottom: 0, fontWeight: 700, borderColor: derivedTotal && !totalInput ? LEAF : LINE }} />
-              </div>
-            </div>
-
-            {totalPrice > 0 && (
-              <div style={{ background: BG, borderRadius: 8, padding: '8px 12px', marginBottom: 10, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, color: MUTED }}>Confirmed total</span>
-                <span style={{ fontWeight: 800, fontSize: 15 }}>₹{totalPrice.toLocaleString('en-IN')}</span>
-              </div>
-            )}
-
-            <p style={{ margin: '0 0 6px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PAYMENT MODE</p>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-              {[{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank' }, { key: 'credit', label: '📒 Credit' }].map((m) => (
-                <button
-                  key={m.key}
-                  onClick={() => setPaymentMode(m.key)}
-                  style={{ flex: 1, padding: '7px 4px', borderRadius: 8, border: `1px solid ${paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF) : LINE}`, background: paymentMode === m.key ? (m.key === 'credit' ? '#FBEFDC' : '#EAF3DE') : '#fff', color: paymentMode === m.key ? (m.key === 'credit' ? AMBER : LEAF_DARK) : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-
-            {paymentMode === 'credit' && (
-              <div style={{ background: '#FBEFDC', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
-                <p style={{ margin: '0 0 2px', fontWeight: 700, fontSize: 12, color: AMBER }}>📒 Credit entry</p>
-                <p style={{ margin: 0, fontSize: 11, color: AMBER }}>₹{totalPrice.toLocaleString('en-IN')} will be added to {vendor?.name}'s outstanding account.</p>
-              </div>
-            )}
-
-            {/* Outstanding credit for this vendor */}
-            {creditTotal > 0 && (
-              <div style={{ background: BG, borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
-                <p style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 700, color: AMBER }}>Outstanding credit — {vendor?.name}: ₹{creditTotal.toLocaleString('en-IN')}</p>
-                {creditEntries.slice(0, 3).map((e) => (
-                  <p key={e.id} style={{ margin: '2px 0', fontSize: 11, color: MUTED }}>{e.itemName} · {e.qty} {e.unit} · ₹{e.total.toLocaleString('en-IN')} · {e.date}</p>
-                ))}
-              </div>
-            )}
-
-            <input placeholder="Note (optional)" value={purchaseNote} onChange={(e) => setPurchaseNote(e.target.value)} style={{ ...inputStyle }} />
-
-            <button
-              onClick={submitPurchase}
-              disabled={!canSubmit}
-              style={{ width: '100%', background: !canSubmit ? '#C9C2AE' : (paymentMode === 'credit' ? AMBER : LEAF), color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: !canSubmit ? 'default' : 'pointer' }}
-            >
-              {paymentMode === 'credit' ? 'Record on credit' : 'Record purchase'}
-            </button>
-          </div>
-        )}
-      </Panel>
-    );
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <Panel>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-          <div>
-            <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>VENDOR</p>
-            <select value={vendorFilterId} onChange={(e) => setVendorFilterId(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
-              <option value="">All vendors</option>
-              {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
-              {PURCHASE_CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div>
-            <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SORT BY QUANTITY</p>
-            <select value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
-              <option value="none">Default</option>
-              <option value="asc">Low to high</option>
-              <option value="desc">High to low</option>
-            </select>
-          </div>
-          <div>
-            <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
-            <select value={fulfilmentDateFilter} onChange={(e) => setFulfilmentDateFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
-              <option value="ALL">All Purchase</option>
-              {availableFulfilmentDates.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div>
-            <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SEARCH ITEM</p>
-            <input
-              placeholder="Search..."
-              value={itemSearch}
-              onChange={(e) => setItemSearch(e.target.value)}
-              style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}
-            />
-          </div>
-          {hasActiveFilters && (
-            <button onClick={clearFilters} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer', paddingBottom: 8 }}>Clear filters</button>
-          )}
-          <div style={{ flex: 1 }} />
-          {excludedOrderIds.length > 0 && (
-            <button
-              onClick={() => onRestoreExcluded(excludedOrderIds)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              title="Bring back orders currently hidden from this list (from a Reset, or a different-platform indent upload)"
-            >
-              Restore {excludedOrderIds.length} hidden
-            </button>
-          )}
-          <button
-            onClick={() => setConfirmingPurchaseReset((x) => !x)}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-          >
-            <RotateCcw size={13} /> Reset
-          </button>
-          <button
-            onClick={() => setView('purchased')}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-          >
-            Purchased ({allPurchasedCount})
-          </button>
-        </div>
-        {confirmingPurchaseReset && (
-          <div style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', borderRadius: 10, padding: 14, marginTop: 12 }}>
-            <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13, color: INK }}>Reset "Items needing purchase"?</p>
-            <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED, lineHeight: 1.5 }}>
-              This marks every item currently on this list as handled — <strong>all {allPurchaseNeedOrderIds.length} pending order(s)</strong>, not just the ones your filters are showing. It doesn't touch what was already bought or dispatched; it only stops these from asking to be bought again. If a new indent later needs the same item, it'll reappear on its own. Anything you forgot can still be logged directly from Vendors.
-            </p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                onClick={() => { onResetPurchaseNeeds(allPurchaseNeedOrderIds); setConfirmingPurchaseReset(false); }}
-                disabled={!allPurchaseNeedOrderIds.length}
-                style={{ background: allPurchaseNeedOrderIds.length ? TOMATO : '#E5E1D4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: allPurchaseNeedOrderIds.length ? 'pointer' : 'default' }}
-              >
-                Reset all {allPurchaseNeedOrderIds.length > 0 ? allPurchaseNeedOrderIds.length : ''}
-              </button>
-              <button onClick={() => setConfirmingPurchaseReset(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-            </div>
-          </div>
-        )}
-        <p style={{ margin: '10px 0 0', fontSize: 11, color: MUTED }}>
-          Items are hidden below once stock already covers demand — they don't need buying right now.
-        </p>
-      </Panel>
-
-      {view === 'purchased' ? (
-        <Panel>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-            <button onClick={() => setView('list')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0 }}>
-              <ArrowLeft size={15} /> Back
-            </button>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Purchased{purchasedDate ? ` on ${purchasedDate}` : ''} ({purchasedList.length})</p>
-            <div style={{ flex: 1 }} />
-            <input type="date" value={purchasedDate} onChange={(e) => setPurchasedDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
+      <div style={{ padding: 16 }}>
+        <button onClick={() => setView('list')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 12, padding: 0 }}>
+          <ArrowLeft size={15} /> Back
+        </button>
+        <Card>
+          <div style={sectionTitle}>Purchased{purchasedDate ? ` on ${purchasedDate}` : ''} ({purchasedList.length})</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 10 }}>
+            <Field type="date" value={purchasedDate} onChange={(e) => setPurchasedDate(e.target.value)} style={{ marginBottom: 0, flex: 1 }} />
             {purchasedDate && (
               <button onClick={() => setPurchasedDate('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
             )}
-            <button
-              onClick={() => setConfirmingDelete((x) => !x)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              <Trash2 size={13} /> Delete old purchases
-            </button>
           </div>
+          <button
+            onClick={() => setConfirmingDelete((x) => !x)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', boxSizing: 'border-box', background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700, marginBottom: 10 }}
+          >
+            <Trash2 size={13} /> Delete old purchases
+          </button>
           {confirmingDelete && (
-            <div style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', borderRadius: 10, padding: 14, marginBottom: 14 }}>
-              <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13, color: INK }}>Delete purchases recorded before a date</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: MUTED }}>Delete everything before</span>
-                <input type="date" value={deleteBeforeDate} onChange={(e) => setDeleteBeforeDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 170 }} />
-              </div>
+            <div style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6 }}>Delete purchases before a date</div>
+              <Field type="date" value={deleteBeforeDate} onChange={(e) => setDeleteBeforeDate(e.target.value)} style={{ marginBottom: 8 }} />
               {deleteBeforeDate && (
-                <p style={{ margin: '0 0 10px', fontSize: 12, color: purchasesToDelete.length ? INK : MUTED }}>
+                <div style={{ fontSize: 11, color: purchasesToDelete.length ? INK : MUTED, marginBottom: 8 }}>
                   {purchasesToDelete.length === 0
                     ? 'No purchases match this — nothing would be deleted.'
-                    : `This will permanently delete ${purchasesToDelete.length} purchase record${purchasesToDelete.length === 1 ? '' : 's'} totalling ₹${deleteTotal.toLocaleString('en-IN')}.`}
-                </p>
+                    : `Will permanently delete ${purchasesToDelete.length} record${purchasesToDelete.length === 1 ? '' : 's'} (₹${deleteTotal.toLocaleString('en-IN')}).`}
+                </div>
               )}
-              <p style={{ margin: '0 0 12px', fontSize: 11, color: MUTED, lineHeight: 1.5 }}>
-                This removes them from this Purchased list and from the vendor's purchase history, and can shift an item's "last known cost" used for Pricing and Sales cost comparisons. It does <strong>not</strong> touch Vendor Ledger dues — if any of these were credit purchases, settle or adjust that separately in Vendors.
-              </p>
+              <div style={{ fontSize: 10.5, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
+                Removes them from this list and the vendor's purchase history, and can shift an item's last-known cost. Doesn't touch Vendor Ledger dues — settle those separately if needed.
+              </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   onClick={() => { if (purchasesToDelete.length) confirmDelete(); }}
                   disabled={!purchasesToDelete.length}
-                  style={{ background: purchasesToDelete.length ? TOMATO : '#E5E1D4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: purchasesToDelete.length ? 'pointer' : 'default' }}
+                  style={{ flex: 1, background: purchasesToDelete.length ? TOMATO : '#E5E1D4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}
                 >
-                  Delete {purchasesToDelete.length > 0 ? `${purchasesToDelete.length} purchase${purchasesToDelete.length === 1 ? '' : 's'}` : ''}
+                  Delete{purchasesToDelete.length > 0 ? ` (${purchasesToDelete.length})` : ''}
                 </button>
-                <button onClick={() => { setConfirmingDelete(false); setDeleteBeforeDate(''); }} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={() => { setConfirmingDelete(false); setDeleteBeforeDate(''); }} style={{ flex: 1, background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}>Cancel</button>
               </div>
             </div>
           )}
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Date</Th><Th>Item</Th><Th>Supplier</Th><Th>Qty</Th><Th>Cost</Th><Th>Source</Th></tr></thead>
-            <tbody>
-              {purchasedList.map((p) => (
-                <tr key={p.id}>
-                  <Td>{p.date || <span style={{ color: MUTED }}>—</span>}</Td>
-                  <Td>{p.item}</Td>
-                  <Td>{p.supplier || <span style={{ color: MUTED }}>—</span>}</Td>
-                  <Td>{p.qty} {p.unit || 'kg'}</Td>
-                  <Td>₹{p.cost.toLocaleString('en-IN')}</Td>
-                  <Td>{p.source || 'Manual'}</Td>
-                </tr>
-              ))}
-              {purchasedList.length === 0 && <tr><Td colSpan={6} style={{ textAlign: 'center', color: MUTED }}>{purchasedDate ? 'Nothing purchased on this date.' : 'No purchases recorded yet.'}</Td></tr>}
-            </tbody>
-          </table>
-          </div>
-        </Panel>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 18 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <Panel>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
-                <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Items needing purchase ({filteredItems.length})</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {selectMode ? (
-                    <button onClick={exitSelectMode} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-                  ) : (
-                    <button onClick={() => setSelectMode(true)} style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 8, padding: '7px 12px', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select items</button>
-                  )}
-                  <button
-                    onClick={() => downloadPurchasePdf(filteredItems)}
-                    disabled={filteredItems.length === 0}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: filteredItems.length === 0 ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: filteredItems.length === 0 ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
-                  >
-                    <Download size={13} /> Download purchase PDF
-                  </button>
-                </div>
-              </div>
-              {selectMode && selectedItemIds.length > 0 && (
-                <button
-                  onClick={() => { setOrderNameDraft(`Order ${new Date().toLocaleDateString('en-IN')}`); setShowOrderNameModal(true); }}
-                  style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 9, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 12 }}
-                >
-                  Share order ({selectedItemIds.length} items)
-                </button>
-              )}
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr>{selectMode && <Th />}<Th>Item</Th><Th>Category</Th><Th>Stock</Th><Th>To buy</Th></tr></thead>
-                <tbody>
-                  {filteredItems.map((it) => {
-                    const isSelected = selectMode && selectedItemIds.includes(it.id);
-                    return (
-                      <tr
-                        key={it.id}
-                        onClick={() => (selectMode ? toggleSelectItem(it.id) : openItem(it.id))}
-                        style={{ cursor: 'pointer', background: isSelected ? '#EAF3DE' : 'transparent' }}
-                      >
-                        {selectMode && (
-                          <Td style={{ width: 30 }}>
-                            <input type="checkbox" checked={isSelected} onChange={() => toggleSelectItem(it.id)} onClick={(e) => e.stopPropagation()} />
-                          </Td>
-                        )}
-                        <Td style={{ fontWeight: 700, color: selectedItemId === it.id ? LEAF : INK }}>{it.name}</Td>
-                        <Td>{it.category}</Td>
-                        <Td>{it.stock} {it.unit}</Td>
-                        <Td style={{ color: TOMATO, fontWeight: 700 }}>{it.toBuy} {it.unit}</Td>
-                      </tr>
-                    );
-                  })}
-                  {filteredItems.length === 0 && <tr><Td colSpan={selectMode ? 5 : 4} style={{ textAlign: 'center', color: MUTED }}>No items match these filters.</Td></tr>}
-                </tbody>
-              </table>
-              </div>
-            </Panel>
-          </div>
+          {purchasedList.map((p) => (
+            <div key={p.id} style={{ borderTop: `1px solid ${LINE}`, padding: '8px 0' }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{p.item}</div>
+              <div style={{ fontSize: 11, color: MUTED }}>{p.date || '—'} · {p.supplier || 'No supplier'} · {p.qty} {p.unit || 'kg'} · ₹{p.cost.toLocaleString('en-IN')}</div>
+            </div>
+          ))}
+          {purchasedList.length === 0 && <div style={hint}>{purchasedDate ? 'Nothing purchased on this date.' : 'No purchases recorded yet.'}</div>}
+        </Card>
+      </div>
+    );
+  }
 
-          <ItemDetailPanel />
+  return (
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <select value={vendorFilterId} onChange={(e) => setVendorFilterId(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '6px 4px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }}>
+            <option value="">All vendors</option>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+          <select value={PURCHASE_CATEGORY_OPTIONS.includes(categoryFilter) ? categoryFilter : 'ALL'} onChange={(e) => setCategoryFilter(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '6px 4px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }}>
+            {PURCHASE_CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <select value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '6px 4px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }}>
+            <option value="none">Default sort</option>
+            <option value="asc">Qty: Low-High</option>
+            <option value="desc">Qty: High-Low</option>
+          </select>
+          <select value={fulfilmentDateFilter} onChange={(e) => setFulfilmentDateFilter(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '6px 4px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }}>
+            <option value="ALL">All Purchase</option>
+            {availableFulfilmentDates.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 11, color: MUTED }}>Search item</span>
+            <Field placeholder="Search..." value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} style={{ marginBottom: 0 }} />
+          </div>
+        </div>
+        {hasActiveFilters && (
+          <button onClick={clearFilters} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 8, padding: 0 }}>Clear filters</button>
+        )}
+        <button
+          onClick={() => setView('purchased')}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginTop: 10 }}
+        >
+          Purchased ({allPurchasedCount})
+        </button>
+        <button
+          onClick={() => setConfirmingPurchaseReset((x) => !x)}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 8 }}
+        >
+          <RotateCcw size={13} /> Reset items needing purchase
+        </button>
+        {excludedOrderIds.length > 0 && (
+          <button
+            onClick={() => onRestoreExcluded(excludedOrderIds)}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 10, padding: '9px 0', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 8 }}
+          >
+            Restore {excludedOrderIds.length} hidden
+          </button>
+        )}
+      </Card>
+
+      {confirmingPurchaseReset && (
+        <Card style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Reset "Items needing purchase"?</div>
+          <div style={{ fontSize: 11, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
+            Marks every item on this list as handled — <strong>all {allPurchaseNeedOrderIds.length} pending order(s)</strong>, not just what your filters show. Doesn't touch what's already bought or dispatched; a new indent brings an item back if it's still needed. Forgot something? Log it directly from Vendors.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => { onResetPurchaseNeeds(allPurchaseNeedOrderIds); setConfirmingPurchaseReset(false); }}
+              disabled={!allPurchaseNeedOrderIds.length}
+              style={{ flex: 1, background: allPurchaseNeedOrderIds.length ? TOMATO : '#E5E1D4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}
+            >
+              Reset all {allPurchaseNeedOrderIds.length > 0 ? allPurchaseNeedOrderIds.length : ''}
+            </button>
+            <button onClick={() => setConfirmingPurchaseReset(false)} style={{ flex: 1, background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}>Cancel</button>
+          </div>
+        </Card>
       )}
 
+      <Card>
+        {Object.keys(cutWithoutRecipe).length > 0 && (
+          <div style={{ background: '#FFF4D6', border: '1px solid #E8C766', color: '#6B4E00', borderRadius: 8, padding: '8px 10px', fontSize: 11, marginBottom: 10 }}>
+            <strong>Recipe missing:</strong> these CUT items have orders but no recipe, so their raw material is not in this list — {Object.entries(cutWithoutRecipe).map(([n, v]) => `${n} (${Math.round(v.qty * 100) / 100} ${v.unit})`).join(', ')}. Add a recipe in Cut &amp; Process.
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={sectionTitle}>Items ({filteredItems.length})</div>
+          {selectMode ? (
+            <button onClick={exitSelectMode} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+          ) : (
+            <button onClick={() => setSelectMode(true)} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select</button>
+          )}
+        </div>
+
+        {selectMode && selectedItemIds.length > 0 && (
+          <button
+            onClick={() => { setOrderNameDraft(`Order ${new Date().toLocaleDateString('en-IN')}`); setShowOrderNameModal(true); }}
+            style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 10 }}
+          >
+            Share order ({selectedItemIds.length} items)
+          </button>
+        )}
+
+        {filteredItems.map((it) => {
+          const isSelected = selectMode && selectedItemIds.includes(it.id);
+          return (
+            <div
+              key={it.id}
+              onClick={() => selectMode ? toggleSelectItem(it.id) : openItem(it.id)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: `1px solid ${LINE}`, cursor: 'pointer', background: isSelected ? '#EAF3DE' : 'transparent', borderRadius: isSelected ? 8 : 0, padding: '9px 4px' }}
+            >
+              {selectMode && (
+                <div style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${isSelected ? LEAF : LINE}`, background: isSelected ? LEAF : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isSelected && <div style={{ color: '#fff', fontSize: 12, fontWeight: 900 }}>✓</div>}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
+                <div style={{ fontSize: 10, color: MUTED, marginTop: 1 }}>{it.category}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <div style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 6px', textAlign: 'center', minWidth: 52 }}>
+                  <div style={{ fontSize: 8, color: MUTED, fontWeight: 700 }}>STOCK</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: INK }}>{it.stock}</div>
+                  <div style={{ fontSize: 8, color: MUTED }}>{it.unit}</div>
+                </div>
+                <div style={{ border: `1px solid ${TOMATO}`, background: '#FBEAE3', borderRadius: 6, padding: '4px 6px', textAlign: 'center', minWidth: 52 }}>
+                  <div style={{ fontSize: 8, color: TOMATO, fontWeight: 700 }}>TO BUY</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: TOMATO }}>{it.toBuy}</div>
+                  <div style={{ fontSize: 8, color: TOMATO }}>{it.unit}</div>
+                </div>
+                {!selectMode && <ChevronRight size={14} color={MUTED} />}
+              </div>
+            </div>
+          );
+        })}
+        {filteredItems.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '10px 0' }}>
+            <div style={{ ...hint, marginBottom: hasActiveFilters ? 8 : 0 }}>No items match these filters.</div>
+            {hasActiveFilters && (
+              <button onClick={clearFilters} style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 8, padding: '7px 14px', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Order name modal */}
       {showOrderNameModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', borderRadius: 18, padding: 28, width: 440, maxWidth: '92vw', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
-            <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 16, color: INK }}>Name this order</p>
-            <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>This will be saved to Vendors → Order Placed where you can edit and share it.</p>
-            <input placeholder="Order name (e.g. Morning Order 14 Sep)" value={orderNameDraft} onChange={(e) => setOrderNameDraft(e.target.value)} style={inputStyle} autoFocus />
-            <p style={{ margin: '0 0 18px', fontSize: 12, color: MUTED }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 200 }}>
+          <div style={{ background: '#fff', borderRadius: '18px 18px 0 0', padding: '24px 20px 32px', width: '100%', maxWidth: 420 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>Name this order</div>
+            <div style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>This will be saved to Vendors → Order Placed where you can edit and share it.</div>
+            <Field placeholder="Order name (e.g. Morning Order 14 Sep)" value={orderNameDraft} onChange={(e) => setOrderNameDraft(e.target.value)} />
+            <div style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>
               {selectedItemIds.length} item{selectedItemIds.length !== 1 ? 's' : ''}: {filteredItems.filter((it) => selectedItemIds.includes(it.id)).map((it) => `${it.name} (${it.toBuy} ${it.unit})`).join(', ')}
-            </p>
+            </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => setShowOrderNameModal(false)} style={{ flex: 1, background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
               <button onClick={confirmShareOrder} style={{ flex: 2, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save to Order Placed</button>
@@ -5124,7 +4088,6 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     </div>
   );
 }
-
 // For a given item and count-date, works out what should still be on hand:
 // the last physically-counted stock (if any), plus everything purchased since
 // then, minus everything actually dispatched (across every channel) since then.
@@ -5172,52 +4135,48 @@ function StockCountRow({ item, existingCount, lastKnown, unit, expected, onSave 
   };
 
   return (
-    <tr>
-      <Td style={{ fontWeight: 700 }}>{item.name}</Td>
-      <Td>{item.category}</Td>
-      <Td>
-        {lastKnown ? (
-          <span style={{ color: MUTED }}>{lastKnown.closingQty} {unit} <span style={{ fontSize: 11 }}>({lastKnown.date})</span></span>
-        ) : (
-          <span style={{ color: MUTED }}>Never counted</span>
-        )}
-      </Td>
-      <Td>
-        {editing ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input
-              type="number"
-              placeholder="Remaining stock"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              autoFocus
-              style={{ width: 90, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LEAF}`, fontSize: 12, padding: '5px 8px' }}
-            />
-            <span style={{ fontSize: 12, color: MUTED }}>{unit}</span>
-            <button onClick={save} disabled={value === ''} style={{ background: value === '' ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: value === '' ? 'default' : 'pointer' }}>
-              Save
-            </button>
-            <button onClick={cancelEdit} style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 8px', fontSize: 11, color: MUTED, cursor: 'pointer' }}>
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontWeight: 700, color: hasSaved ? INK : MUTED }}>
-              {displayValue} {unit}
-              {!hasSaved && <span style={{ fontWeight: 400, fontSize: 11, color: MUTED }}> (expected)</span>}
-            </span>
-            <button onClick={startEdit} title="Edit remaining stock" style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 6, padding: '4px 7px', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-              <Pencil size={12} />
-            </button>
-          </div>
-        )}
-      </Td>
-    </tr>
+    <div style={{ borderTop: `1px solid ${LINE}`, padding: '10px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>{item.name}</div>
+        <div style={{ fontSize: 11, color: MUTED }}>{item.category}</div>
+      </div>
+      <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>
+        {lastKnown ? `Last known: ${lastKnown.closingQty} ${unit} (${lastKnown.date})` : 'Never counted'}
+      </div>
+      {editing ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+          <input
+            type="number"
+            placeholder="Remaining stock"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            autoFocus
+            style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LEAF}`, fontSize: 13, padding: '7px 8px' }}
+          />
+          <span style={{ fontSize: 12, color: MUTED }}>{unit}</span>
+          <button onClick={save} disabled={value === ''} style={{ background: value === '' ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 12px', fontSize: 12, fontWeight: 700, cursor: value === '' ? 'default' : 'pointer' }}>
+            Save
+          </button>
+          <button onClick={cancelEdit} style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 6, padding: '7px 10px', fontSize: 12, color: MUTED, cursor: 'pointer' }}>
+            ✕
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+          <span style={{ fontWeight: 700, fontSize: 14, color: hasSaved ? INK : MUTED }}>
+            {displayValue} {unit}
+            {!hasSaved && <span style={{ fontWeight: 400, fontSize: 11, color: MUTED }}> (expected)</span>}
+          </span>
+          <button onClick={startEdit} style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 9px', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <Pencil size={13} />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
-function StockCountPanel({ items, stockCounts, purchases, dispatchLog, onRecord, onReset }) {
+function StockCountTab({ items, stockCounts, purchases, dispatchLog, onRecord, onReset }) {
   const [date, setDate] = useState(todayLocalDate());
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [search, setSearch] = useState('');
@@ -5231,11 +4190,10 @@ function StockCountPanel({ items, stockCounts, purchases, dispatchLog, onRecord,
 
   const latestCountByItem = useMemo(() => {
     const map = {};
-    stockCounts.forEach((sc) => {
-      if (!map[sc.itemId] || sc.date > map[sc.itemId].date) map[sc.itemId] = sc;
-    });
+    stockCounts.forEach((sc) => { if (!map[sc.itemId] || sc.date > map[sc.itemId].date) map[sc.itemId] = sc; });
     return map;
   }, [stockCounts]);
+
 
   const filteredItems = items
     .filter((it) => categoryFilter === 'ALL' || it.category === categoryFilter)
@@ -5243,84 +4201,69 @@ function StockCountPanel({ items, stockCounts, purchases, dispatchLog, onRecord,
 
   const countedToday = filteredItems.filter((it) => countsForDate[it.id] !== undefined).length;
 
+  // Items already counted for this date sink to the bottom; uncounted ones stay on top.
+  const sortedItems = [
+    ...filteredItems.filter((it) => countsForDate[it.id] === undefined),
+    ...filteredItems.filter((it) => countsForDate[it.id] !== undefined),
+  ];
+
   return (
-    <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Layers size={16} /> Nightly stock count
-      </p>
-      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>
-        "Remaining stock" is worked out automatically — last count plus purchases minus everything dispatched since. Confirm it with the edit button, or correct it if the physical count is different.
-      </p>
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 6 }}><Layers size={15} /> Nightly stock count</div>
+        <div style={hint}>"Remaining stock" is worked out automatically — last count plus purchases minus everything dispatched since. Confirm it with the edit button, or correct it if the physical count is different.</div>
+        <div style={smallLabel}>DATE</div>
+        <Field type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <div style={smallLabel}>CATEGORY</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 8 }}>
+          {['ALL', ...CATEGORY_OPTIONS].map((c) => <Chip key={c} label={c === 'ALL' ? 'All' : c} active={categoryFilter === c} onClick={() => setCategoryFilter(c)} />)}
+        </div>
+        <Field placeholder="Search items..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 0 }} />
+        <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>{countedToday} / {filteredItems.length} counted for {date}</div>
+      </Card>
 
       <button
         onClick={() => setConfirmingReset((x) => !x)}
-        style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 14 }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', boxSizing: 'border-box', background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700, marginBottom: 12 }}
       >
         <RotateCcw size={13} /> Reset stock
       </button>
       {confirmingReset && (
-        <div style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', borderRadius: 10, padding: 14, marginBottom: 14 }}>
-          <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13, color: INK }}>Reset stock for {date}?</p>
-          <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED, lineHeight: 1.5 }}>
-            This sets <strong>every item's</strong> remaining stock to 0 for this date — not just the {filteredItems.length} shown by your current filters. "Remaining stock" from the day after will then build up fresh from 0 (plus any purchases, minus any dispatch) instead of whatever it was expecting before. Use this to wipe out a bad count and start over, not as a routine action.
-          </p>
+        <Card style={{ border: `1px solid ${TOMATO}`, background: '#FCF1EC', marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Reset stock for {date}?</div>
+          <div style={{ fontSize: 11, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
+            This sets <strong>every item's</strong> remaining stock to 0 for this date — not just the {filteredItems.length} shown by your filters. "Remaining stock" from the day after builds up fresh from 0 instead of whatever it expected before. Use this to wipe a bad count, not routinely.
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={() => { onReset(items, date); setConfirmingReset(false); }}
-              style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              style={{ flex: 1, background: TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}
             >
-              Reset all {items.length} items to 0
+              Reset all {items.length}
             </button>
-            <button onClick={() => setConfirmingReset(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={() => setConfirmingReset(false)} style={{ flex: 1, background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 0', fontSize: 12, fontWeight: 700 }}>Cancel</button>
           </div>
-        </div>
+        </Card>
       )}
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>DATE</p>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
-            {['ALL', ...CATEGORY_OPTIONS].map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SEARCH ITEM</p>
-          <input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-        </div>
-        <div style={{ paddingBottom: 8, fontSize: 12, color: MUTED, whiteSpace: 'nowrap' }}>
-          {countedToday} / {filteredItems.length} counted for {date}
-        </div>
-      </div>
-
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr><Th>Item</Th><Th>Category</Th><Th>Last known count</Th><Th>Remaining stock for {date}</Th></tr></thead>
-        <tbody>
-          {filteredItems.map((it) => {
-            const { expected } = computeExpectedStock(it.name, date, stockCounts, purchases, dispatchLog);
-            return (
-              <StockCountRow
-                key={it.id}
-                item={it}
-                unit={it.uom}
-                existingCount={countsForDate[it.id]}
-                lastKnown={latestCountByItem[it.id]}
-                expected={expected}
-                onSave={(val) => onRecord(it.id, it.name, it.uom, date, val)}
-              />
-            );
-          })}
-          {filteredItems.length === 0 && (
-            <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>No items match this filter.</Td></tr>
-          )}
-        </tbody>
-      </table>
-      </div>
-    </Panel>
+      <Card>
+        {sortedItems.map((it) => {
+          const { expected } = computeExpectedStock(it.name, date, stockCounts, purchases, dispatchLog);
+          return (
+            <StockCountRow
+              key={it.id}
+              item={it}
+              unit={it.uom}
+              existingCount={countsForDate[it.id]}
+              lastKnown={latestCountByItem[it.id]}
+              expected={expected}
+              onSave={(val) => onRecord(it.id, it.name, it.uom, date, val)}
+            />
+          );
+        })}
+        {filteredItems.length === 0 && <div style={hint}>No items match this filter.</div>}
+      </Card>
+    </div>
   );
 }
 
@@ -5342,10 +4285,6 @@ function buildLatestUnitPriceByItem(purchases) {
   // recorded in byName regardless of whether it also has an itemId, so the
   // two maps independently reflect the true latest purchase either way could
   // find; buildPricingArticles then takes whichever of the two is newer.
-  // The name key is normalized (trimmed, lowercased) since it's a fallback for
-  // when itemId isn't available — a stray case or whitespace difference
-  // between how an order and a purchase recorded the same item's name
-  // shouldn't silently break the match the way an exact-string key would.
   const byId = {};
   const byName = {};
   purchases
@@ -5355,147 +4294,14 @@ function buildLatestUnitPriceByItem(purchases) {
       if (p.itemId) {
         if (!byId[p.itemId] || entry.date >= byId[p.itemId].date) byId[p.itemId] = entry;
       }
-      const nameKey = p.item ? p.item.trim().toLowerCase() : '';
-      if (nameKey) {
-        if (!byName[nameKey] || entry.date >= byName[nameKey].date) byName[nameKey] = entry;
+      if (p.item) {
+        if (!byName[p.item] || entry.date >= byName[p.item].date) byName[p.item] = entry;
       }
     });
   return { byId, byName };
 }
 
-// Resolves an item by its channel alias's EAN/code — used when an order's own
-// itemId is missing (an older order predating that field), so the fallback is
-// still an unambiguous identifier chain (order's EAN/code -> item's alias ->
-// item) rather than a fragile match on the product's display name.
-function resolveItemIdByChannelCode(items, channel, ean, code) {
-  const target = (ean || code || '').toString().trim().toLowerCase();
-  if (!target) return null;
-  for (const it of items) {
-    const hit = (it.aliases || []).some((a) => a.channel === channel
-      && ((a.ean && String(a.ean).toLowerCase() === target) || (a.code && String(a.code).toLowerCase() === target)));
-    if (hit) return it.id;
-  }
-  return null;
-}
 
-// A Cut & Process item (e.g. "Cauliflower Florets") is never itself bought from a
-// vendor — only its raw ingredients are (e.g. whole Cauliflower) — so its cost has
-// to come from its recipe rather than from a direct purchase record. This sums
-// each ingredient's own latest purchase price (kg or piece, matching how recipe
-// quantities are normalized) times the quantity the recipe uses per one output
-// unit. Returns null (rather than a partial total) if the item has no recipe, or
-// if any ingredient has never been purchased — a partial sum would understate the
-// true cost and look like a real price rather than an incomplete one.
-function computeRecipeUnitCost(item, recipes, items, latestUnitPriceByItem) {
-  if (!item) return null;
-  const recipe = recipes.find((r) => r.outputItemId === item.id);
-  if (!recipe || !recipe.ingredients?.length) return null;
-  let total = 0;
-  for (const ing of recipe.ingredients) {
-    const ingItem = items.find((it) => it.id === ing.itemId);
-    const byId = ing.itemId ? latestUnitPriceByItem.byId[ing.itemId] : null;
-    const byName = ingItem ? latestUnitPriceByItem.byName[ingItem.name.trim().toLowerCase()] : null;
-    const info = !byId ? byName : (!byName ? byId : (byId.date >= byName.date ? byId : byName));
-    if (!info) return null; // this ingredient has never been purchased - can't give a complete cost yet
-    const normalized = normalizeIngredientQty(ing.qtyPerUnit, ing.unit);
-    total += normalized.value * info.unitPrice;
-  }
-  return Math.round(total * 100) / 100;
-}
-
-// One entry per distinct article that has come through an indent — same product can have
-// several pack sizes (e.g. 500g "Baby Banana" vs 600g "Banana 3pc"), each priced separately.
-// Shared by the Pricing tab and the Profit & Loss tab so both agree on cost.
-// The key is prefixed with city so that two cities selling the same product/platform/pack
-// combo never share the same pricing config (grading %, margins, etc. stay per-city).
-function buildPricingArticles(orders, items, purchases, city, configByKey, recipes) {
-  const latestUnitPriceByItem = buildLatestUnitPriceByItem(purchases);
-  const map = {};
-  orders
-    .filter((o) => o.packSize && o.packUnit)
-    .forEach((o) => {
-      const key = `${city}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-      // Pre-fix pricingConfig docs were saved without a city prefix at all, shared across
-      // every city. Keeping this around lets a city inherit those old settings the first
-      // time it prices this article, instead of silently resetting everyone to zero.
-      const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-      if (map[key]) return;
-      const item = items.find((it) => it.name === o.product);
-      // itemId is the reliable match; when this order predates that field, its own
-      // EAN/code (from the indent) resolves the same item unambiguously via the
-      // item's channel alias — only when neither is available does name matching
-      // (case/whitespace-insensitive) become the last resort.
-      const resolvedItemId = o.itemId || resolveItemIdByChannelCode(items, o.platform, o.rawEan, o.rawCode);
-      const byIdInfo = resolvedItemId ? latestUnitPriceByItem.byId[resolvedItemId] : null;
-      const byNameInfo = latestUnitPriceByItem.byName[o.product?.trim().toLowerCase() || ''];
-      const unitPriceInfo = !byIdInfo ? byNameInfo : (!byNameInfo ? byIdInfo : (byIdInfo.date >= byNameInfo.date ? byIdInfo : byNameInfo));
-      // A Cut & Process item is never purchased directly, so when no purchase-based
-      // price exists at all, fall back to what its own recipe says it costs to make.
-      const recipeUnitCost = unitPriceInfo ? null : computeRecipeUnitCost(item, recipes || [], items, latestUnitPriceByItem);
-      const autoBasePrice = unitPriceInfo
-        ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100
-        : (recipeUnitCost != null ? Math.round(recipeUnitCost * o.packSize * 100) / 100 : null);
-      const autoBasePriceSource = unitPriceInfo ? 'purchase' : (recipeUnitCost != null ? 'recipe' : null);
-      // A base price fetched from the latest purchase is the default — but a specific
-      // article's config can carry a manual override (e.g. before any purchase exists yet,
-      // or to correct a one-off odd purchase price) which always wins when set.
-      const config = configByKey?.[key] || configByKey?.[legacyKey];
-      const hasOverride = config?.basePriceOverride != null;
-      const basePrice = hasOverride ? config.basePriceOverride : autoBasePrice;
-      const alias = findAlias(item, o.platform, o.packSize, o.packUnit, o.rawEan || o.rawCode);
-      map[key] = {
-        key,
-        legacyKey,
-        articleName: o.articleName || o.product,
-        product: o.product,
-        category: item?.category || '',
-        platform: o.platform,
-        code: alias?.ean || alias?.code || '',
-        packSize: o.packSize,
-        packUnit: o.packUnit,
-        basePrice,
-        autoBasePrice,
-        autoBasePriceSource,
-        hasBasePriceOverride: hasOverride,
-      };
-    });
-  return Object.values(map).sort((a, b) => a.articleName.localeCompare(b.articleName));
-}
-
-// One indent (batch) may have several articles that don't yet have a purchase price —
-// those are simply left out of the running cost until they do (this is what makes the
-// batch's total climb from "day one" partial toward a complete figure as purchases happen).
-// Quantity marked short at packing time is subtracted from the pack count before costing
-// it, so a shortfall we never actually bought or sent out doesn't get counted as spend.
-function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
-  const batchOrders = orders.filter((o) => o.batchId === batch.id && !o.isAdvance);
-  const batchCity = batch.city || CITIES[0];
-  const rows = batchOrders.map((o) => {
-    const key = `${batchCity}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-    const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-    const article = articlesByKey[key];
-    const packSize = Number(o.packSize) || 1;
-    const shortPacks = Math.min(Number(o.packQty) || 0, (Number(o.shortQty) || 0) / packSize);
-    const effectivePacks = Math.max(0, Math.round(((Number(o.packQty) || 0) - shortPacks) * 100) / 100);
-    const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key] || configByKey[legacyKey]) : null;
-    const cost = finalPricePerPack == null ? null : Math.round(finalPricePerPack * effectivePacks * 100) / 100;
-    return {
-      orderId: o.id,
-      articleName: o.articleName || o.product,
-      code: article?.code || '',
-      packQty: Number(o.packQty) || 0,
-      shortPacks: Math.round(shortPacks * 100) / 100,
-      effectivePacks,
-      packSize: o.packSize,
-      packUnit: o.packUnit,
-      finalPricePerPack,
-      cost,
-    };
-  });
-  const pricedRows = rows.filter((r) => r.cost != null);
-  const totalCost = Math.round(pricedRows.reduce((s, r) => s + r.cost, 0) * 100) / 100;
-  return { rows, totalCost, pricedCount: pricedRows.length, totalCount: rows.length };
-}
 
 // Indent-wise fill rate: for a given uploaded indent, how much of what was ordered
 // (in the original pack unit) actually went out the door (dispatched) vs fell
@@ -5537,228 +4343,43 @@ function fillRateColor(rate) {
   return TOMATO;
 }
 
-function PricingRow({ article, config, onUpdate }) {
-  const [grading, setGrading] = useState(String(config?.gradingPercent ?? 0));
-  const [vendorMargin, setVendorMargin] = useState(String(config?.vendorMarginPercent ?? 0));
-  const [packaging, setPackaging] = useState(String(config?.packaging ?? 0));
-  const [labour, setLabour] = useState(String(config?.labour ?? 0));
-  const [transportation, setTransportation] = useState(String(config?.transportation ?? 0));
-  const [basePriceInput, setBasePriceInput] = useState(article.basePrice == null ? '' : String(article.basePrice));
 
-  useEffect(() => {
-    setGrading(String(config?.gradingPercent ?? 0));
-    setVendorMargin(String(config?.vendorMarginPercent ?? 0));
-    setPackaging(String(config?.packaging ?? 0));
-    setLabour(String(config?.labour ?? 0));
-    setTransportation(String(config?.transportation ?? 0));
-  }, [config]);
-
-  useEffect(() => {
-    setBasePriceInput(article.basePrice == null ? '' : String(article.basePrice));
-  }, [article.basePrice]);
-
-  const commit = (field, value) => onUpdate(article.key, { [field]: Number(value) || 0 }, article.legacyKey);
-
-  // Base price normally comes from the latest purchase, but a specific article can be
-  // pinned to a manual figure instead — e.g. before any purchase exists yet, or to
-  // correct a one-off odd purchase price. Clearing the field reverts to auto-fetch.
-  const commitBasePrice = (value) => {
-    const trimmed = value.trim();
-    onUpdate(article.key, { basePriceOverride: trimmed === '' ? null : (Number(trimmed) || 0) }, article.legacyKey);
-  };
-  const resetBasePrice = () => {
-    setBasePriceInput(article.autoBasePrice == null ? '' : String(article.autoBasePrice));
-    onUpdate(article.key, { basePriceOverride: null }, article.legacyKey);
-  };
-
-  const basePrice = article.basePrice;
-  const finalPrice = computeFinalPrice(basePrice, {
-    gradingPercent: Number(grading) || 0,
-    vendorMarginPercent: Number(vendorMargin) || 0,
-    packaging: Number(packaging) || 0,
-    labour: Number(labour) || 0,
-    transportation: Number(transportation) || 0,
+// ── Hyperpure / Blinkit GRN report PDFs — parsed client-side via pdf.js ──
+// Each article row in these PDFs follows a fixed column order once all the
+// text is flattened onto one line: row# / item code / UPC / description /
+// MRP / tax / landing rate (PO avg, then GRN) / qty (PO, then GRN) /
+// fill rate% / total GRN amount / GMV loss. We only need the item code,
+// description, GRN qty and GRN landing rate.
+let pdfJsLoadPromise = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfJsLoadPromise) return pdfJsLoadPromise;
+  pdfJsLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    script.onerror = () => reject(new Error('Could not load the PDF reader.'));
+    document.head.appendChild(script);
   });
-
-  const cellInput = (value, setValue, field) => (
-    <input
-      type="number"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={(e) => commit(field, e.target.value)}
-      style={{ width: 68, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
-    />
-  );
-
-  return (
-    <tr>
-      <Td style={{ fontWeight: 700 }}>{article.articleName}</Td>
-      <Td>{article.code || <span style={{ color: MUTED }}>—</span>}</Td>
-      <Td>{article.packSize}{article.packUnit}/pack</Td>
-      <Td>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ color: MUTED, fontWeight: 700 }}>₹</span>
-          <input
-            type="number"
-            value={basePriceInput}
-            placeholder={article.autoBasePrice == null ? 'Set price' : String(article.autoBasePrice)}
-            onChange={(e) => setBasePriceInput(e.target.value)}
-            onBlur={(e) => commitBasePrice(e.target.value)}
-            style={{ width: 68, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${article.hasBasePriceOverride ? AMBER : LINE}`, fontSize: 12, padding: '5px 6px', fontWeight: 700, color: LEAF, background: article.hasBasePriceOverride ? '#FFFBF3' : '#fff' }}
-          />
-        </div>
-        {article.hasBasePriceOverride ? (
-          <p style={{ margin: '3px 0 0', fontSize: 10, color: AMBER, display: 'flex', alignItems: 'center', gap: 4 }}>
-            Manually set
-            <button onClick={resetBasePrice} style={{ background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 10, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>use purchase price</button>
-          </p>
-        ) : (
-          <p style={{ margin: '3px 0 0', fontSize: 10, color: MUTED }}>{article.autoBasePrice == null ? 'No purchase yet' : (article.autoBasePriceSource === 'recipe' ? 'From recipe (ingredient cost)' : 'From latest purchase')}</p>
-        )}
-      </Td>
-      <Td>{cellInput(grading, setGrading, 'gradingPercent')}</Td>
-      <Td>{cellInput(vendorMargin, setVendorMargin, 'vendorMarginPercent')}</Td>
-      <Td>{cellInput(packaging, setPackaging, 'packaging')}</Td>
-      <Td>{cellInput(labour, setLabour, 'labour')}</Td>
-      <Td>{cellInput(transportation, setTransportation, 'transportation')}</Td>
-      <Td style={{ fontWeight: 800, color: finalPrice == null ? MUTED : TOMATO }}>{finalPrice == null ? '—' : `₹${finalPrice.toFixed(2)}`}</Td>
-    </tr>
-  );
+  return pdfJsLoadPromise;
 }
 
-function downloadPricingSheet(rows) {
-  const sheetRows = rows.map((r) => ({
-    'Product Name': r.articleName,
-    'Category': r.category || '',
-    'Channel': r.platform,
-    'Channel Code (SKU)': r.code || '',
-    'UOM': `${r.packSize}${r.packUnit}/pack`,
-    'Base Price (₹)': r.basePrice ?? '',
-    'Grading %': r.gradingPercent ?? 0,
-    'Vendor Margin %': r.vendorMarginPercent ?? 0,
-    'Packaging (₹)': r.packaging ?? 0,
-    'Labour (₹)': r.labour ?? 0,
-    'Transportation (₹)': r.transportation ?? 0,
-    'Final Price (₹)': r.finalPrice ?? '',
-  }));
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(sheetRows);
-  XLSX.utils.book_append_sheet(wb, ws, 'Pricing');
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob = new Blob([wbout], { type: 'application/octet-stream' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `fnv-pricing-sheet-${todayLocalDate()}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+async function extractPdfText(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    fullText += content.items.map((item) => item.str).join(' ') + '\n';
+  }
+  return fullText;
 }
 
-function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate, recipes }) {
-  const [search, setSearch] = useState('');
-  const [channelFilter, setChannelFilter] = useState('ALL');
-  const [categoryFilter, setCategoryFilter] = useState('ALL');
-
-  const configByKey = useMemo(() => {
-    const map = {};
-    pricingConfig.forEach((c) => { map[c.id] = c; });
-    return map;
-  }, [pricingConfig]);
-
-  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes), [orders, items, purchases, city, configByKey, recipes]);
-
-  const categoriesPresent = useMemo(() => ['ALL', ...Array.from(new Set(articles.map((a) => a.category).filter(Boolean)))], [articles]);
-
-  const filteredArticles = articles
-    .filter((a) => !search.trim() || a.articleName.toLowerCase().includes(search.trim().toLowerCase()))
-    .filter((a) => channelFilter === 'ALL' || a.platform === channelFilter)
-    .filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter);
-
-  const rowsForExport = filteredArticles.map((a) => {
-    const c = configByKey[a.key] || configByKey[a.legacyKey];
-    const gradingPercent = c?.gradingPercent ?? 0;
-    const vendorMarginPercent = c?.vendorMarginPercent ?? 0;
-    const packaging = c?.packaging ?? 0;
-    const labour = c?.labour ?? 0;
-    const transportation = c?.transportation ?? 0;
-    const finalPrice = computeFinalPrice(a.basePrice, { gradingPercent, vendorMarginPercent, packaging, labour, transportation });
-    return { ...a, gradingPercent, vendorMarginPercent, packaging, labour, transportation, finalPrice };
-  });
-
-  return (
-    <Panel>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <IndianRupee size={16} /> Pricing
-          </p>
-          <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED, maxWidth: 640 }}>
-            Base price is fetched automatically from the item's latest purchase price × pack size — e.g. Tomato at ₹50/kg with a 500g pack gives a ₹25 base price. Grading % and vendor margin % both apply on top of the base price; packaging, labour and transportation are flat amounts added after — all editable per article.
-          </p>
-        </div>
-        <button
-          onClick={() => downloadPricingSheet(rowsForExport)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-        >
-          <Download size={14} /> Download pricing sheet
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SEARCH</p>
-          <input
-            placeholder="Search article..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ ...inputStyle, marginBottom: 0 }}
-          />
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={() => setChannelFilter('ALL')} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${channelFilter === 'ALL' ? LEAF : LINE}`, background: channelFilter === 'ALL' ? LEAF : '#fff', color: channelFilter === 'ALL' ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>All</button>
-            {PLATFORMS.map((p) => (
-              <button key={p} onClick={() => setChannelFilter(p)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${channelFilter === p ? LEAF : LINE}`, background: channelFilter === p ? LEAF : '#fff', color: channelFilter === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{p}</button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
-            {categoriesPresent.map((c) => <option key={c} value={c}>{c === 'ALL' ? 'All' : c}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <Th>Product name</Th><Th>Channel code (SKU)</Th><Th>UOM</Th><Th>Base price</Th><Th>Grading %</Th><Th>Vendor margin %</Th><Th>Packaging</Th><Th>Labour</Th><Th>Transportation</Th><Th>Final price</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredArticles.map((a) => (
-            <PricingRow key={a.key} article={a} config={configByKey[a.key] || configByKey[a.legacyKey]} onUpdate={onUpdate} />
-          ))}
-          {filteredArticles.length === 0 && (
-            <tr><Td colSpan={10} style={{ textAlign: 'center', color: MUTED }}>No indent-imported articles match this filter.</Td></tr>
-          )}
-        </tbody>
-      </table>
-      </div>
-    </Panel>
-  );
-}
-
-// Flipkart's "Items Received" export isn't a plain table: it opens with an
-// invoice header block, then a blank line, and only then the real item header —
-// so reading row 1 as the header (which a plain sheet_to_json does) finds no
-// items at all. This scans for the row that actually looks like the item header,
-// and drops the trailing "Total" summary row so it isn't counted as an article.
 const GRN_CODE_KEYS = ['productid', 'itemcode', 'code', 'sku', 'articlecode', 'fsn'];
 const GRN_NAME_KEYS = ['productdescription', 'itemname', 'name', 'description', 'article', 'product'];
 // "Received"/"accepted" must beat a generic "quantity", or a PO-ordered column wins.
@@ -5800,7 +4421,7 @@ function parseGrnSheetRows(rows) {
     const name = cols.name === -1 ? '' : String(cells[cols.name] ?? '').trim();
     // The footer row has "Total" where the code/name belongs and no real article.
     if (!code && !name) continue;
-    if (normaliseHeader(code).startsWith('total') || normaliseHeader(name).startsWith('total')) continue;
+    if (normaliseHeader(code) === 'total' || normaliseHeader(name) === 'total') continue;
     const qty = Number(String(cells[cols.qty] ?? '').replace(/,/g, '')) || 0;
     const price = cols.price === -1 ? 0 : Number(String(cells[cols.price] ?? '').replace(/,/g, '')) || 0;
     if (qty > 0) out.push({ code, name, qty, price });
@@ -5808,87 +4429,11 @@ function parseGrnSheetRows(rows) {
   return out;
 }
 
-// ── Hyperpure / Blinkit GRN report PDFs — parsed client-side via pdf.js ──
-// Each article row in these PDFs follows a fixed column order once all the
-// text is flattened onto one line: row# / item code / UPC / description /
-// MRP / tax / landing rate (PO avg, then GRN) / qty (PO, then GRN) /
-// fill rate% / total GRN amount / GMV loss. We only need the item code,
-// description, GRN qty and GRN landing rate.
-let pdfJsLoadPromise = null;
-function loadPdfJs() {
-  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
-  if (pdfJsLoadPromise) return pdfJsLoadPromise;
-  pdfJsLoadPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-    script.onload = () => {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      resolve(window.pdfjsLib);
-    };
-    script.onerror = () => reject(new Error('Could not load the PDF reader.'));
-    document.head.appendChild(script);
-  });
-  return pdfJsLoadPromise;
-}
-
-async function extractPdfText(file) {
-  const pdfjsLib = await loadPdfJs();
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    fullText += content.items.map((item) => item.str).join(' ') + '\n';
-  }
-  return fullText;
-}
-
-// Same as extractPdfText, but keeps each word's position instead of flattening
-// everything into one string. Zepto's GRN PDF (see parseZeptoGrnWords below)
-// wraps a multi-word item name onto two lines that straddle the row's own
-// numbers — a plain flattened-text regex reliably shreds those wrapped names
-// (a trailing word floats into the NEXT row) — so that parser reconstructs
-// each row from x/y position instead, which needs this richer per-word
-// extraction. Returns one array of { text, x, y } per page; y increases
-// downward (like a page you read top to bottom), unlike pdf.js's own
-// coordinate space which increases upward, so it's negated here once and
-// every consumer can treat "bigger y" as "further down the page".
-async function extractPdfWords(file) {
-  const pdfjsLib = await loadPdfJs();
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const pages = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const words = [];
-    content.items.forEach((item) => {
-      const x = item.transform[4];
-      const y = -item.transform[5];
-      String(item.str || '').split(/\s+/).filter(Boolean).forEach((w) => words.push({ text: w, x, y }));
-    });
-    pages.push(words);
-  }
-  return pages;
-}
-
-// ── Purchase Orders ──
-// A PO is the channel telling us what they'll PAY us per pack, so parsing it is
-// what turns "expected profit" from a typed-in guess into a per-article
-// comparison against our own cost.
 const PO_CODE_KEYS = ['productno', 'productid', 'itemcode', 'code', 'sku', 'articlecode', 'fsn'];
 const PO_NAME_KEYS = ['productname', 'productdetails', 'productdescription', 'itemname', 'name', 'description', 'article', 'product'];
 const PO_QTY_KEYS = ['qty', 'quantity', 'orderedqty', 'poquantity'];
 const PO_PRICE_KEYS = ['priceperunit', 'perunitprice', 'unitprice', 'landingrate', 'rate', 'price'];
 const PO_TOTAL_KEYS = ['totalamount', 'linetotal', 'total', 'amount', 'value'];
-// Only needed for printing a tax invoice that matches the channel's own
-// layout (EAN/HSN/UOM columns) — the margin-comparison feature that also
-// calls parsePoSheetRows doesn't use these, so they're just extra, optional
-// fields tacked onto each row rather than a separate parser to maintain.
-const PO_EAN_KEYS = ['ean'];
-const PO_HSN_KEYS = ['hsnsaccode', 'hsncode', 'hsn'];
-const PO_UOM_KEYS = ['uom'];
 
 function parsePoSheetRows(rows) {
   let headerIdx = -1;
@@ -5910,114 +4455,32 @@ function parsePoSheetRows(rows) {
       // so the two never collide onto the same column.
       const nameIdx = findColumnIndex(merged.map((v, idx) => (idx === idIdx ? '' : v)), PO_NAME_KEYS);
       const totalIdx = findColumnIndex(merged, PO_TOTAL_KEYS);
-      const eanIdx = findColumnIndex(merged, PO_EAN_KEYS);
-      const hsnIdx = findColumnIndex(merged, PO_HSN_KEYS);
-      const uomIdx = findColumnIndex(merged, PO_UOM_KEYS);
       if (qtyIdx !== -1 && (priceIdx !== -1 || totalIdx !== -1) && (idIdx !== -1 || nameIdx !== -1)) {
         headerIdx = i;
         headerSpan = span;
-        cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx, ean: eanIdx, hsn: hsnIdx, uom: uomIdx };
+        cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx };
         break;
       }
     }
   }
   if (headerIdx === -1) return [];
   const num = (v) => Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, '')) || 0;
-  const cell = (cells, idx) => (idx === -1 || idx == null ? '' : String(cells[idx] == null ? '' : cells[idx]).trim());
   const out = [];
   for (let i = headerIdx + headerSpan; i < rows.length; i += 1) {
     const cells = rows[i] || [];
     const code = cols.code === -1 ? '' : String(cells[cols.code] == null ? '' : cells[cols.code]).trim();
     const name = cols.name === -1 ? '' : String(cells[cols.name] == null ? '' : cells[cols.name]).trim();
     if (!code && !name) continue;
-    // A footer/summary line (e.g. "Total Quantity=", "Total:", "Grand Total")
-    // isn't a real article row — its own "total" cell typically holds the whole
-    // PO's grand total, so letting it slip through would silently double the
-    // PO value computed by summing every row's total. Checking "starts with
-    // total" (rather than requiring an exact match) catches these variants.
-    if (normaliseHeader(code).startsWith('total') || normaliseHeader(name).startsWith('total')) continue;
+    if (normaliseHeader(code) === 'total' || normaliseHeader(name) === 'total') continue;
     const qty = num(cells[cols.qty]);
     let price = cols.price === -1 ? 0 : num(cells[cols.price]);
     const total = cols.total === -1 ? 0 : num(cells[cols.total]);
     if (!price && total && qty) price = Math.round((total / qty) * 100) / 100;
-    if (qty > 0 && price > 0) out.push({ code, name, qty, price, total: total || Math.round(qty * price * 100) / 100, ean: cell(cells, cols.ean), hsn: cell(cells, cols.hsn), uom: cell(cells, cols.uom) });
+    if (qty > 0 && price > 0) out.push({ code, name, qty, price, total: total || Math.round(qty * price * 100) / 100 });
   }
   return out;
 }
 
-// ── Flipkart "Items Received" store receiving report, used as its GRN ──
-// Flipkart doesn't issue a GRN report at all — the closest thing is this CSV
-// each store exports after physically receiving a PO ("Items Received"), which
-// only carries product id/name/approved/received quantity, no price. So this
-// file isn't valued on its own: its Received Quantity is matched, by Product
-// ID, against the price on the PO already uploaded for this batch, and the
-// GRN amount is qty(received) * that PO's per-unit price (e.g. 10 units sent
-// @ ₹100 total = ₹10/unit; only 8 received -> ₹80 GRN amount).
-// The export's own quoting is minimal (only a couple of flower-name rows wrap
-// a comma in quotes), so a small quote-aware splitter is enough here instead
-// of pulling in the XLSX/CSV library used for the other channels' sheets.
-function splitFlipkartCsvLine(line) {
-  const out = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i += 1; }
-      else if (ch === '"') { inQuotes = false; }
-      else cur += ch;
-    } else if (ch === '"') { inQuotes = true; }
-    else if (ch === ',') { out.push(cur); cur = ''; }
-    else cur += ch;
-  }
-  out.push(cur);
-  return out;
-}
-function parseFlipkartReceivingCsv(text) {
-  const lines = String(text || '').split(/\r?\n/);
-  let headerIdx = -1;
-  for (let i = 0; i < lines.length; i += 1) {
-    const norm = normaliseHeader(lines[i]);
-    if (norm.includes('productid') && norm.includes('receivedquantity')) { headerIdx = i; break; }
-  }
-  if (headerIdx === -1) return [];
-  const header = splitFlipkartCsvLine(lines[headerIdx]).map(normaliseHeader);
-  const idIdx = header.findIndex((h) => h.includes('productid'));
-  const nameIdx = header.findIndex((h) => h.includes('productdescription'));
-  const recvIdx = header.findIndex((h) => h.includes('receivedquantity'));
-  const rows = [];
-  for (let i = headerIdx + 1; i < lines.length; i += 1) {
-    if (!lines[i] || !lines[i].trim()) continue;
-    const cells = splitFlipkartCsvLine(lines[i]);
-    const code = (cells[idIdx] || '').trim();
-    const name = (cells[nameIdx] || '').trim();
-    if (!code || normaliseHeader(code).startsWith('total')) continue;
-    const qty = Number(String(cells[recvIdx] || '').replace(/,/g, '')) || 0;
-    if (qty > 0) rows.push({ code, name, qty });
-  }
-  return rows;
-}
-// Values each received row against the PO(s) already uploaded for this batch
-// (matched by Product ID) - qty is what was actually received, price is what
-// the PO said we'd be paid per unit for that product.
-function valueFlipkartReceiving(receivingRows, poRows) {
-  const priceByCode = new Map();
-  (poRows || []).forEach((r) => { if (r.code && !priceByCode.has(r.code)) priceByCode.set(r.code, r.price); });
-  return receivingRows.map((r) => {
-    const price = priceByCode.get(r.code) || 0;
-    return { code: r.code, name: r.name, qty: r.qty, price, total: Math.round(r.qty * price * 100) / 100 };
-  });
-}
-
-// Hyperpure's PO PDF flattens to: productNo name HSN MRP margin qty pricePerUnit
-// UoM gst% taxPerUnit total. The UoM is free text ("200 g", "1 unit (150 - 160 g)")
-// so it's matched loosely between the two numeric runs.
-// Neither PO parser currently captures a header-level PO number (they only
-// read the article-line table) — this pulls it separately, from the same raw
-// text/filename already available at upload time. Hyperpure's own PDF states
-// it explicitly ("PO Number: 21265209..."); other exports (Flipkart's own
-// per-store Excel PO) carry no such field, so the filename itself — which is
-// already a unique per-PO reference — is used as a readable fallback.
 function extractPoNumber(rawText, fileName) {
   const m = rawText && String(rawText).match(/PO\s*Number\s*:?\s*([A-Za-z0-9-]+)/i);
   if (m) return m[1];
@@ -6037,189 +4500,151 @@ function parsePoPdfText(text) {
   return rows;
 }
 
-function parseGrnPdfText(text) {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  const pattern = /(\d+) (\d{6,8}) (\d{6,10}) (\d{3,4}) (.*?) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}|-) (\d+) (\d+) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2})/g;
-  const rows = [];
-  let match;
-  while ((match = pattern.exec(flat)) !== null) {
-    const [, , code, , , desc, , , , rateGrn, , qtyGrn] = match;
-    const qty = Number(qtyGrn) || 0;
-    const price = rateGrn === '-' ? 0 : Number(rateGrn) || 0;
-    if (qty > 0) rows.push({ code: code.trim(), name: desc.trim(), qty, price });
-  }
-  return rows;
-}
+function grnValueForBatch(batchId, grnReports, items, articlesByKey, configByKey, city, platform) {
+  let value = 0;
+  let pricedRows = 0;
+  let unpricedRows = 0;
 
-// ── Zepto GRN report PDFs ──
-// Unlike Blinkit's, Zepto's GRN table has no item code column at all — the
-// "SKU" column is just the plain item name — and a two-word-or-longer name
-// wraps onto a second line that straddles the row's own numbers (e.g. "Pumpkin"
-// sits just above the "3 ... 60" line and "Green" sits just below it). Flattening
-// the page to one line of text and reading it left to right, the way every other
-// PDF parser above does, shifts each wrapped word into the following row's name
-// instead — so this reconstructs rows from each word's position (extractPdfWords)
-// instead of from flattened text.
-//
-// The row's own number line still parses in a fixed left-to-right order — Exp
-// qty, Recv qty, Unit Price, Taxable value, four CGST/SGST/IGST/Cess rate-and-
-// amount pairs, then Total — but only the first four and the last of those are
-// used (matches priceForCode's fallback in grnValueForBatch: qty * price = Recv
-// qty * Unit Price, which is the whole point of parsing this file — Total comes
-// along mostly to sanity-check that against Taxable value while debugging).
-function parseZeptoGrnWords(pages) {
-  const isNum = (s) => /^-?\d+(\.\d+)?$/.test(s);
-  const rows = [];
-  let expectedSr = 1;
+  const priceForCode = (code) => {
+    if (!code) return null;
+    const lower = String(code).toLowerCase();
+    const item = (items || []).find((it) => (it.aliases || []).some((a) =>
+      (a.code && a.code.toLowerCase() === lower) || (a.ean && a.ean.toLowerCase() === lower) || (a.altCode && a.altCode.toLowerCase() === lower)));
+    if (!item) return null;
+    const alias = (item.aliases || []).find((a) => a.channel === platform) || (item.aliases || [])[0];
+    if (!alias || !alias.packSize) return null;
+    const key = `${city}__${item.name}__${platform}__${alias.packSize}__${alias.packUnit}`;
+    const legacyKey = `${item.name}__${platform}__${alias.packSize}__${alias.packUnit}`;
+    const article = articlesByKey?.[key];
+    if (!article) return null;
+    return computeFinalPrice(article.basePrice, configByKey?.[key] || configByKey?.[legacyKey]);
+  };
 
-  pages.forEach((words) => {
-    if (!words.length) return;
-    const sorted = [...words].sort((a, b) => a.y - b.y || a.x - b.x);
-    // The table header repeats on every page — "SKU" marks where the item
-    // rows start, and the summary "Total" row (a lone "Total" hard against
-    // the left margin, unlike the per-row "Total(INR)" column) marks where
-    // they end. Without these, the first/last row on a page would swallow
-    // the header text above it or the grand-total line below it.
-    const headerY = words.filter((w) => w.text === 'SKU').reduce((m, w) => Math.max(m, w.y), -Infinity);
-    const footerY = words.filter((w) => w.text === 'Total' && w.x < 30).reduce((m, w) => Math.min(m, w.y), Infinity);
-
-    const anchors = [];
-    sorted.forEach((w) => {
-      if (w.x < 20 && isNum(w.text) && Number(w.text) === expectedSr) {
-        anchors.push(w);
-        expectedSr += 1;
-      }
-    });
-
-    anchors.forEach((a, i) => {
-      const prevY = i > 0 ? anchors[i - 1].y : headerY;
-      const nextY = i + 1 < anchors.length ? anchors[i + 1].y : footerY;
-      const bandLo = i > 0 ? (prevY + a.y) / 2 : Math.max(headerY, a.y - 15);
-      const bandHi = i + 1 < anchors.length ? (a.y + nextY) / 2 : Math.min(footerY, a.y + 15);
-      const bandWords = words.filter((w) => w !== a && w.y >= bandLo && w.y < bandHi);
-
-      const nameWords = bandWords
-        .filter((w) => !isNum(w.text) && w.x < 115)
-        .sort((p, q) => p.y - q.y || p.x - q.x);
-      const name = nameWords.map((w) => w.text).join(' ');
-
-      const lineNums = bandWords
-        .filter((w) => isNum(w.text) && Math.abs(w.y - a.y) < 1.5)
-        .sort((p, q) => p.x - q.x);
-      if (lineNums.length < 5) return;
-      const recvQty = Number(lineNums[1].text) || 0;
-      const unitPrice = Number(lineNums[2].text) || 0;
-      const total = Number(lineNums[lineNums.length - 1].text) || 0;
-      if (recvQty > 0 && name) rows.push({ name, qty: recvQty, price: unitPrice, total });
+  grnReports.filter((g) => g.batchId === batchId).forEach((g) => {
+    (g.rows || []).forEach((r) => {
+      const qty = Number(r.qty) || 0;
+      if (qty <= 0) return;
+      const filePrice = Number(r.price) || 0;
+      if (filePrice > 0) { value += qty * filePrice; pricedRows += 1; return; }
+      const ourPrice = priceForCode(r.code);
+      if (ourPrice != null && ourPrice > 0) { value += qty * ourPrice; pricedRows += 1; }
+      else unpricedRows += 1;
     });
   });
-
-  return rows;
+  return { value: Math.round(value * 100) / 100, pricedRows, unpricedRows };
 }
 
-// ── Generate-invoice-from-PO ──────────────────────────────────────────────
-// A channel's PO already carries everything a tax invoice back to them needs
-// (the PO number they require us to quote, the agreed price per article, the
-// buyer's own billing details) — so uploading the PO the channel already sent
-// is enough to build the invoice, rather than re-typing all of that by hand.
-// This is deliberately separate from the batch-linked PO parsing above (which
-// only wants article rows, for a margin comparison) — this one also pulls the
-// header block (vendor/buyer/GSTIN/PO date) that a real invoice document
-// needs to show.
-
-// Scans a sheet's rows (array-of-arrays, same shape parsePoSheetRows takes)
-// for a cell that exactly matches a known label and returns the next
-// non-empty cell to its right — robust to the exact column position shifting
-// a little between exports, since it goes by the label text, not an index.
-function poLabelValue(rows, label, maxRow = 20) {
-  const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
-  const target = norm(label);
-  for (let r = 0; r < Math.min(rows.length, maxRow); r += 1) {
-    const cells = rows[r] || [];
-    for (let c = 0; c < cells.length; c += 1) {
-      if (norm(cells[c]) !== target) continue;
-      for (let c2 = c + 1; c2 < cells.length; c2 += 1) {
-        const v = cells[c2];
-        if (v !== null && v !== undefined && String(v).trim() !== '') return String(v).trim();
-      }
+function matchChannelRow(row, costRows, items) {
+  const code = String(row.code || '').toLowerCase();
+  if (code) {
+    const item = items.find((it) => (it.aliases || []).some((a) =>
+      (a.code && a.code.toLowerCase() === code) || (a.ean && a.ean.toLowerCase() === code) || (a.altCode && a.altCode.toLowerCase() === code)));
+    if (item) {
+      const hit = costRows.find((cr) => String(cr.articleName).toLowerCase().indexOf(String(item.name).toLowerCase()) !== -1);
+      if (hit) return hit;
     }
+    const byCode = costRows.find((cr) => String(cr.code || '').toLowerCase() === code);
+    if (byCode) return byCode;
   }
-  return '';
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const n = norm(row.name);
+  if (!n) return null;
+  return costRows.find((cr) => {
+    const a = norm(cr.articleName);
+    return a && (a === n || a.indexOf(n) !== -1 || n.indexOf(a) !== -1);
+  }) || null;
 }
 
-// Flipkart's own PO export (the "SUPPLIER DETAILS / RETAILER DETAILS" sheet) —
-// "Supplier" in that sheet is us (the vendor issuing the invoice), "Retailer"
-// is Flipkart's billing entity for that city (the one to bill).
-function parseFlipkartPoHeader(rows) {
-  let poNumber = '';
-  for (let r = 0; r < Math.min(rows.length, 10); r += 1) {
-    const cell = (rows[r] || [])[0];
-    const m = cell && String(cell).match(/PURCHASE ORDER NO\s*-\s*(\S+)/i);
-    if (m) { poNumber = m[1]; break; }
-  }
-  return {
-    poNumber,
-    poDate: poLabelValue(rows, 'ORDER DATE'),
-    vendorName: poLabelValue(rows, 'SUPPLIER NAME'),
-    vendorAddress: poLabelValue(rows, 'Billed From Address'),
-    vendorGstin: poLabelValue(rows, 'Biil From GSTIN'), // typo is in Flipkart's own template
-    vendorPhone: poLabelValue(rows, 'SUPPLIER CONTACT'),
-    vendorEmail: poLabelValue(rows, 'EMAIL Id'),
-    buyerName: poLabelValue(rows, 'RETAILER NAME'),
-    buyerAddress: poLabelValue(rows, 'Billed To Address'),
-    buyerGstin: poLabelValue(rows, 'Biil To GSTIN'),
-  };
+function buildPricingArticles(orders, items, purchases, city, configByKey) {
+  const latestUnitPriceByItem = buildLatestUnitPriceByItem(purchases);
+  const map = {};
+  orders
+    .filter((o) => o.packSize && o.packUnit)
+    .forEach((o) => {
+      const key = `${city}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      // Pre-fix pricingConfig docs were saved without a city prefix at all, shared across
+      // every city. Keeping this around lets a city inherit those old settings the first
+      // time it prices this article, instead of silently resetting everyone to zero.
+      const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      if (map[key]) return;
+      const item = items.find((it) => it.name === o.product);
+      const byIdInfo = o.itemId ? latestUnitPriceByItem.byId[o.itemId] : null;
+      const byNameInfo = latestUnitPriceByItem.byName[o.product];
+      const unitPriceInfo = !byIdInfo ? byNameInfo : (!byNameInfo ? byIdInfo : (byIdInfo.date >= byNameInfo.date ? byIdInfo : byNameInfo));
+      const autoBasePrice = unitPriceInfo ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100 : null;
+      // A base price fetched from the latest purchase is the default — but a specific
+      // article's config can carry a manual override (e.g. before any purchase exists yet,
+      // or to correct a one-off odd purchase price) which always wins when set.
+      const config = configByKey?.[key] || configByKey?.[legacyKey];
+      const hasOverride = config?.basePriceOverride != null;
+      const basePrice = hasOverride ? config.basePriceOverride : autoBasePrice;
+      const alias = (item?.aliases || []).find((al) => al.channel === o.platform && String(al.packSize) === String(o.packSize) && al.packUnit === o.packUnit);
+      map[key] = {
+        key,
+        legacyKey,
+        articleName: o.articleName || o.product,
+        product: o.product,
+        category: item?.category || '',
+        platform: o.platform,
+        code: alias?.code || '',
+        packSize: o.packSize,
+        packUnit: o.packUnit,
+        // What the indent sheet itself called this article's unit (e.g. "2 Pieces") -
+        // shown on screen instead of the mapped pack size, which stays purely an
+        // internal conversion for pricing math and never surfaces here.
+        rawUnit: o.rawUnit || '',
+        basePrice,
+        autoBasePrice,
+        hasBasePriceOverride: hasOverride,
+      };
+    });
+  return Object.values(map).sort((a, b) => a.articleName.localeCompare(b.articleName));
 }
 
-// Zepto's PO PDF flattens (via pdf.js text extraction) to one continuous
-// stream of text per page. Each article line is anchored on its SKU code — a
-// UUID that sometimes has a stray space where the PDF wraps it onto a second
-// line inside the cell — which is the one token on the line guaranteed not to
-// look like anything else, so everything between the item description and the
-// following HSN code (a clean 6-8 digit run) is swept up and cleaned after.
-const ZEPTO_PO_ROW_RE = /(\d{1,3}) (\d{4,9}) (.+?) \d{6,8} (\d{4,14}) (\d{1,4}) ([\d.]+) ([\d.]+) ([\d.]+) \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ [\d.]+ ([\d.]+)/g;
-function cleanZeptoDesc(raw) {
-  return raw.replace(/[0-9a-f]{6,}(?:[\s-]+[0-9a-f]{3,})+/gi, '').replace(/\s+/g, ' ').trim();
-}
-function parseZeptoPoText(text) {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  const grab = (re) => { const m = flat.match(re); return m ? m[1].trim() : ''; };
-  const rows = [];
-  let m;
-  ZEPTO_PO_ROW_RE.lastIndex = 0;
-  while ((m = ZEPTO_PO_ROW_RE.exec(flat)) !== null) {
-    const [, , code, descRaw, ean, qty, , rate, taxable, total] = m;
-    const q = Number(qty) || 0;
-    if (q <= 0) continue;
-    rows.push({ code: code.trim(), name: cleanZeptoDesc(descRaw), ean: ean.trim(), qty: q, price: Number(rate) || 0, total: Number(total) || Number(taxable) || 0 });
-  }
-  const buyerM = flat.match(/Billing Address\s+Shipping Address\s+Address:\s*(.+?)\s*GSTIN:\s*(\S+)/i);
-  return {
-    rows,
-    header: {
-      poNumber: grab(/PO\s*No\s*:?\s*([A-Za-z0-9-]+)/i),
-      poDate: grab(/PO\s*Date\s*:?\s*([\d-]+)/i),
-      vendorName: grab(/Vendor Details\s+PO Details\s+Name:\s*(.+?)\s*Address:/i),
-      vendorAddress: grab(/Name:\s*.+?\s*Address:\s*(.+?)\s*Name:/i),
-      vendorGstin: grab(/GSTIN:\s*(\S+)/i), // first GSTIN in the doc is always ours (vendor)
-      buyerName: '', // Zepto's PO doesn't label the buyer's legal name separately from its address block
-      buyerAddress: buyerM ? buyerM[1] : '',
-      buyerGstin: buyerM ? buyerM[2] : '',
-    },
-  };
+function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
+  const batchOrders = orders.filter((o) => o.batchId === batch.id && !o.isAdvance);
+  const batchCity = batch.city || CITIES[0];
+  const rows = batchOrders.map((o) => {
+    const key = `${batchCity}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+    const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+    const article = articlesByKey[key];
+    const packSize = Number(o.packSize) || 1;
+    const shortPacks = Math.min(Number(o.packQty) || 0, (Number(o.shortQty) || 0) / packSize);
+    const effectivePacks = Math.max(0, Math.round(((Number(o.packQty) || 0) - shortPacks) * 100) / 100);
+    const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key] || configByKey[legacyKey]) : null;
+    const cost = finalPricePerPack == null ? null : Math.round(finalPricePerPack * effectivePacks * 100) / 100;
+    return {
+      orderId: o.id,
+      articleName: o.articleName || o.product,
+      code: article?.code || '',
+      packQty: Number(o.packQty) || 0,
+      shortPacks: Math.round(shortPacks * 100) / 100,
+      effectivePacks,
+      packSize: o.packSize,
+      packUnit: o.packUnit,
+      finalPricePerPack,
+      cost,
+    };
+  });
+  const pricedRows = rows.filter((r) => r.cost != null);
+  const totalCost = Math.round(pricedRows.reduce((s, r) => s + r.cost, 0) * 100) / 100;
+  return { rows, totalCost, pricedCount: pricedRows.length, totalCount: rows.length };
 }
 
-// Last 5 invoice numbers across every channel — GST invoice numbering has to
-// stay one continuous sequence per GSTIN regardless of which channel it was
-// billed to, so this is deliberately not filtered to one platform.
-function lastInvoiceNumbers(salesInvoices, n = 5) {
-  return [...salesInvoices]
-    .sort((a, b) => String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')) || String(b.id || '').localeCompare(String(a.id || '')))
-    .slice(0, n);
+function dailySalesFromGrn(grnReports, batchFinancials) {
+  const byDate = {};
+  batchFinancials.forEach((bf) => {
+    if (bf.grnValue <= 0) return;
+    const reports = grnReports.filter((g) => g.batchId === bf.batch.id);
+    const date = (reports[0] && reports[0].date) || bf.batch.purchaseDate || '-';
+    if (!byDate[date]) byDate[date] = { date, total: 0, cost: 0 };
+    byDate[date].total = Math.round((byDate[date].total + bf.grnValue) * 100) / 100;
+    byDate[date].cost = Math.round((byDate[date].cost + bf.indentCost) * 100) / 100;
+  });
+  return Object.values(byDate).sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
-// Bank statement columns, matched generically so this survives the small header
-// wording differences between banks (e.g. "Transaction Date" vs "Txn Date").
+
 const BANK_STMT_DATE_KEYS = ['transactiondate', 'txndate', 'valuedate', 'date'];
 const BANK_STMT_PARTICULARS_KEYS = ['particulars', 'narration', 'description', 'transactiondetails', 'remarks'];
 const BANK_STMT_CREDIT_KEYS = ['credit', 'creditamt', 'depositamt', 'creditamount'];
@@ -6246,11 +4671,7 @@ function normaliseStatementDate(v) {
   }
   return s;
 }
-// Only CREDIT rows count — a bank statement mixes money in and out, and this
-// feature is specifically for detecting channel payments received. Each match
-// keeps the bank's own transaction reference number as its id, so uploading
-// the same statement twice (or an overlapping date range) updates the same
-// payment record instead of logging it a second time.
+
 function parseBankStatementRows(rows) {
   let headerIdx = -1, cols = null;
   for (let i = 0; i < rows.length; i += 1) {
@@ -6286,1990 +4707,32 @@ function parseBankStatementRows(rows) {
   return out;
 }
 
-
-
-
-
-function PackagingRow({ target, progress, onSave, onAdvanceMany }) {
-  const [packedValue, setPackedValue] = useState(String(progress.packedQty || ''));
-  const [shortValue, setShortValue] = useState(String(progress.shortQty || ''));
-  useEffect(() => { setPackedValue(String(progress.packedQty || '')); }, [progress.packedQty]);
-  useEffect(() => { setShortValue(String(progress.shortQty || '')); }, [progress.shortQty]);
-
-  const enteredPacked = Number(packedValue) || 0;
-  const enteredShort = Number(shortValue) || 0;
-  // The only two valid outcomes for an article: fully packed, or packed + short adding
-  // up to exactly the target — there's no in-between state that can be saved.
-  const isResolved = enteredPacked + enteredShort === target.targetPacks;
-  const changed = enteredPacked !== progress.packedQty || enteredShort !== progress.shortQty;
-  const canSave = isResolved && changed;
-  const commit = () => { if (canSave) onSave(enteredPacked, enteredShort); };
-
-  if (!target.hasPack) {
-    const isComplete = target.pendingIds.length === 0;
-    return (
-      <tr style={{ background: isComplete ? '#EAF3DE' : 'transparent' }}>
-        <Td style={{ fontWeight: 700 }}>{target.articleName || target.product}</Td>
-        <Td>{[...target.platforms].join(' + ')}</Td>
-        <Td>—</Td>
-        <Td style={{ color: LEAF, fontWeight: 800 }}>{target.qty} {target.unit}</Td>
-        <Td>—</Td>
-        <Td>—</Td>
-        <Td>
-          {target.pendingIds.length > 0 ? (
-            <span style={{ fontSize: 11, color: AMBER, fontWeight: 700 }}>Awaiting</span>
-          ) : (
-            <span style={{ fontSize: 11, color: LEAF, fontWeight: 700 }}>✓ Packed</span>
-          )}
-        </Td>
-        <Td>
-          {target.pendingIds.length > 0 ? (
-            <button
-              onClick={() => onAdvanceMany(target.pendingIds, 'packed')}
-              style={{ background: '#E6F1FB', color: '#1B5E8C', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-            >
-              Mark {target.pendingIds.length} packed
-            </button>
-          ) : (
-            <span style={{ fontSize: 11, color: MUTED, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <CheckCircle2 size={13} color={LEAF} /> All packed
-            </span>
-          )}
-        </Td>
-      </tr>
-    );
-  }
-
-  const isComplete = progress.packedQty + progress.shortQty >= target.targetPacks && target.targetPacks > 0;
-  let statusLabel = 'Pending';
-  let statusColor = MUTED;
-  if (isComplete) {
-    if (progress.shortQty <= 0) { statusLabel = '✓ Fully packed'; statusColor = LEAF; }
-    else if (progress.packedQty <= 0) { statusLabel = 'Fully short'; statusColor = TOMATO; }
-    else { statusLabel = `Packed, ${progress.shortQty} short`; statusColor = AMBER; }
-  }
-
-  return (
-    <tr style={{ background: isComplete ? '#EAF3DE' : 'transparent' }}>
-      <Td style={{ fontWeight: 700 }}>{target.articleName || target.product}</Td>
-      <Td>{[...target.platforms].join(' + ')}</Td>
-      <Td>{target.rawUnit || `${target.packSize}${target.packUnit}/pack`}</Td>
-      <Td style={{ color: LEAF, fontWeight: 800 }}>{target.targetPacks} packs</Td>
-      <Td>
-        <input
-          type="number"
-          value={packedValue}
-          onChange={(e) => setPackedValue(e.target.value)}
-          style={{ width: 70, borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
-        />
-      </Td>
-      <Td>
-        <input
-          type="number"
-          placeholder="0"
-          value={shortValue}
-          onChange={(e) => setShortValue(e.target.value)}
-          style={{ width: 35, borderRadius: 6, border: `1px solid ${enteredShort > 0 ? TOMATO : LINE}`, fontSize: 12, padding: '5px 6px', color: enteredShort > 0 ? TOMATO : INK }}
-        />
-      </Td>
-      <Td style={{ color: statusColor, fontWeight: 700, fontSize: 11 }}>
-        {statusLabel}
-        {!isResolved && (enteredPacked > 0 || enteredShort > 0) && (
-          <div style={{ color: TOMATO, fontWeight: 500, marginTop: 2 }}>Packed + short must total {target.targetPacks}</div>
-        )}
-      </Td>
-      <Td>
-        <button
-          onClick={commit}
-          disabled={!canSave}
-          style={{ background: canSave ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: canSave ? 'pointer' : 'default' }}
-        >
-          Save
-        </button>
-      </Td>
-    </tr>
-  );
-}
-
-function PackagingPanel({ orders, items, onAdvanceMany, packingProgress, onUpdatePackedQty }) {
-  const [platformFilter, setPlatformFilter] = usePersistedState('fnv_packaging_platform', 'All');
-  const [categoryFilter, setCategoryFilter] = usePersistedState('fnv_packaging_category', 'All');
-  const [selectedDate, setSelectedDate] = usePersistedState('fnv_packaging_date', '');
-  const [qtySort, setQtySort] = usePersistedState('fnv_packaging_qtysort', 'none'); // 'none' | 'asc' | 'desc'
-
-  const categoryByProduct = useMemo(() => {
-    const map = {};
-    items.forEach((it) => { map[it.name] = it.category; });
-    return map;
-  }, [items]);
-
-  const filteredOrders = useMemo(() => {
-    return orders
-      .filter((o) => o.status !== 'dispatched')
-      .filter((o) => platformFilter === 'All' || o.platform === platformFilter)
-      .filter((o) => categoryFilter === 'All' || categoryByProduct[o.product] === categoryFilter)
-      .filter((o) => !selectedDate || o.fulfilmentDate === selectedDate);
-  }, [orders, platformFilter, categoryFilter, categoryByProduct, selectedDate]);
-
-  const groupedByDate = useMemo(() => {
-    const map = {};
-    filteredOrders.forEach((o) => {
-      const dateKey = o.fulfilmentDate || 'No date';
-      map[dateKey] = map[dateKey] || {};
-      const hasPack = !!(o.packQty && o.packSize);
-      const cityKey = o.city || CITIES[0];
-      const key = hasPack ? `${cityKey}__${dateKey}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}` : `${cityKey}__${dateKey}__${o.product}__${o.unit}`;
-      map[dateKey][key] = map[dateKey][key] || {
-        key, product: o.product, articleName: o.articleName || o.product, unit: o.unit, qty: 0, platforms: new Set(),
-        orderIds: [], pendingIds: [], hasPack, packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0,
-      };
-      map[dateKey][key].qty += o.qty;
-      map[dateKey][key].platforms.add(o.platform);
-      map[dateKey][key].orderIds.push(o.id);
-      if (hasPack) map[dateKey][key].targetPacks += o.packQty;
-      if (o.status === 'pending') map[dateKey][key].pendingIds.push(o.id);
-    });
-    return Object.entries(map)
-      .map(([date, targetMap]) => {
-        let targets = Object.values(targetMap);
-        if (qtySort === 'asc') targets = targets.slice().sort((a, b) => (a.hasPack ? a.targetPacks : a.qty) - (b.hasPack ? b.targetPacks : b.qty));
-        else if (qtySort === 'desc') targets = targets.slice().sort((a, b) => (b.hasPack ? b.targetPacks : b.qty) - (a.hasPack ? a.targetPacks : a.qty));
-        return { date, targets };
-      })
-      .sort((a, b) => {
-        if (a.date === 'No date') return 1;
-        if (b.date === 'No date') return -1;
-        return a.date.localeCompare(b.date);
-      });
-  }, [filteredOrders, qtySort]);
-
-  const categoriesPresent = useMemo(() => ['All', ...Array.from(new Set(items.map((it) => it.category).filter(Boolean)))], [items]);
-
-  return (
-    <Panel>
-      <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>Aggregated from pending and packed orders — what needs to be packed today. Pack size comes from the indent, so the same product at different pack sizes shows as separate rows.</p>
-
-      <div style={{ display: 'flex', gap: 16, marginBottom: 18, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
-          <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
-            <option value="All">All</option>
-            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
-            {categoriesPresent.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SORT BY QUANTITY</p>
-          <select value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
-            <option value="none">Default</option>
-            <option value="asc">Low to high</option>
-            <option value="desc">High to low</option>
-          </select>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
-          <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-        </div>
-        {selectedDate && (
-          <button onClick={() => setSelectedDate('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer', paddingBottom: 8 }}>Clear date</button>
-        )}
-      </div>
-
-      {groupedByDate.map(({ date, targets }) => (
-        <div key={date} style={{ marginBottom: 20 }}>
-          <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13, color: INK }}>{date === 'No date' ? 'No fulfilment date' : date}</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Product</Th><Th>Platforms</Th><Th>Pack size</Th><Th>Target</Th><Th>Packed</Th><Th>Short</Th><Th>Status</Th><Th /></tr></thead>
-            <tbody>
-              {targets.map((t) => (
-                <PackagingRow
-                  key={t.key}
-                  target={t}
-                  progress={packingProgress[t.key] || { packedQty: 0, shortQty: 0 }}
-                  onSave={(packedQty, shortQty) => onUpdatePackedQty(t.key, packedQty, shortQty, t.orderIds, t.targetPacks)}
-                  onAdvanceMany={onAdvanceMany}
-                />
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      ))}
-      {groupedByDate.length === 0 && (
-        <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>Nothing to pack right now.</p>
-      )}
-    </Panel>
-  );
-}
-
-function DispatchModal({ selectedCount, crates, onClose, onConfirm }) {
-  const [vehicleNo, setVehicleNo] = useState('');
-  const [driverName, setDriverName] = useState('');
-  const [cratesUsed, setCratesUsed] = useState('');
-  const [boxesUsed, setBoxesUsed] = useState('');
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div style={{ background: '#fff', borderRadius: 18, padding: 28, width: 440, maxWidth: '92vw', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 17, color: INK, display: 'flex', alignItems: 'center', gap: 8 }}><TruckIcon size={17} /> Dispatch order</p>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
-        </div>
-        <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>{selectedCount} order(s) selected</p>
-        <input placeholder="Vehicle number" value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} style={inputStyle} />
-        <input placeholder="Driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} style={inputStyle} />
-        <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-          <input placeholder={`Crates (${crates.crates} in stock)`} type="number" value={cratesUsed} onChange={(e) => setCratesUsed(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-          <input placeholder={`Boxes (${crates.boxes} in stock)`} type="number" value={boxesUsed} onChange={(e) => setBoxesUsed(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-        </div>
-        <p style={{ margin: '2px 0 16px', fontSize: 10, color: MUTED }}>Crate/box counts will be deducted from stock automatically.</p>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => onConfirm({ vehicleNo: vehicleNo.trim(), driverName: driverName.trim(), cratesUsed: Number(cratesUsed) || 0, boxesUsed: Number(boxesUsed) || 0 })}
-            style={{ flex: 1, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-          >
-            Confirm dispatch
-          </button>
-          <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Indent-imported orders carry both a converted base-UOM qty (qty/unit) and the
-// original per-pack figures from the indent file (packSize/packUnit). Dispatch
-// should show the latter — the unit staff actually loaded the indent in — falling
-// back to the converted UOM only for manual (non-indent) orders that have no pack info.
-function renderIndentQty(o, qtyBase) {
-  if (o.packSize && o.packUnit) {
-    const packs = Math.round((Number(qtyBase) / Number(o.packSize)) * 100) / 100;
-    return (
-      <>
-        {packs} pack{packs === 1 ? '' : 's'}
-        <div style={{ fontSize: 10, fontWeight: 400, color: MUTED }}>{o.packSize}{o.packUnit}/pack</div>
-      </>
-    );
-  }
-  return `${qtyBase} ${o.unit}`;
-}
-
-function DispatchFillCard({ batch, orders, onOpen }) {
-  const { orderedPacks, dispatchedPacks, shortPacks, pendingPacks, fillRate } = useMemo(
-    () => computeIndentFillRate(batch, orders),
-    [batch, orders]
-  );
-  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
-  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
-
-  return (
-    <div onClick={onOpen} style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: '12px 14px', marginBottom: 10, cursor: 'pointer' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{batch.platform} — {batch.fileName}</p>
-        <ChevronRight size={16} color={MUTED} />
-      </div>
-      <div style={{ display: 'flex', gap: 20, marginTop: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{fulfilmentDate || '—'}</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ORDERED</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{orderedPacks} packs</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>DISPATCHED</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{dispatchedPacks} packs</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>SHORT</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: shortPacks > 0 ? TOMATO : INK }}>{shortPacks} packs</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>PENDING</p>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{pendingPacks} packs</p>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FILL RATE</p>
-          <p style={{ margin: 0, fontWeight: 800, fontSize: 15, color: fillRateColor(fillRate) }}>{fillRate}%</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DispatchFillDetail({ batch, orders, onBack }) {
-  const { rows, orderedPacks, dispatchedPacks, shortPacks, pendingPacks, fillRate } = useMemo(
-    () => computeIndentFillRate(batch, orders),
-    [batch, orders]
-  );
-  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
-  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
-
-  return (
-    <Panel>
-      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14 }}>
-        <ArrowLeft size={15} /> Back to indents
-      </button>
-
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 15, color: INK }}>{batch.platform} — {batch.fileName}</p>
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${LINE}` }}>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{fulfilmentDate || '—'}</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>ORDERED</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{orderedPacks} packs</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>DISPATCHED</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{dispatchedPacks} packs</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>SHORT</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: shortPacks > 0 ? TOMATO : INK }}>{shortPacks} packs</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>PENDING</p><p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{pendingPacks} packs</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FILL RATE</p><p style={{ margin: 0, fontWeight: 800, fontSize: 15, color: fillRateColor(fillRate) }}>{fillRate}%</p></div>
-      </div>
-
-      <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: INK }}>Article breakdown</p>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr><Th>Article</Th><Th>Pack</Th><Th>Ordered</Th><Th>Dispatched</Th><Th>Short</Th><Th>Pending</Th><Th>Fill rate</Th></tr></thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.orderId}>
-              <Td style={{ fontWeight: 700 }}>{r.articleName}</Td>
-              <Td>{r.packSize}{r.packUnit}/pack</Td>
-              <Td>{r.orderedPacks}</Td>
-              <Td>{r.dispatchedPacks}</Td>
-              <Td style={{ color: r.shortPacks > 0 ? TOMATO : MUTED }}>{r.shortPacks > 0 ? r.shortPacks : '—'}</Td>
-              <Td style={{ color: r.pendingPacks > 0 ? AMBER : MUTED }}>{r.pendingPacks > 0 ? r.pendingPacks : '—'}</Td>
-              <Td style={{ fontWeight: 800, color: fillRateColor(r.fillRate) }}>{r.fillRate}%</Td>
-            </tr>
-          ))}
-          {rows.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No articles in this indent.</Td></tr>}
-        </tbody>
-      </table>
-      </div>
-    </Panel>
-  );
-}
-
-function DispatchPanel({ orders, crates, dispatchLog, indentBatches, onDispatchBatch }) {
-  const packed = useMemo(() => orders
-    .filter((o) => o.status === 'packed')
-    .map((o) => ({ ...o, remaining: Math.max(0, Math.round((o.qty - (o.dispatchedQty || 0) - (o.shortQty || 0)) * 100) / 100) })),
-  [orders]);
-  const dispatched = orders.filter((o) => o.status === 'dispatched');
-
-  const [view, setView] = useState('dispatch'); // 'dispatch' | 'history' | 'all' | 'fills'
-  const [channel, setChannel] = usePersistedState('fnv_dispatch_channel', PLATFORMS[0]);
-  const [storeSel, setStoreSel] = usePersistedState('fnv_dispatch_store', '');
-  const [selected, setSelected] = useState([]);
-  const [showModal, setShowModal] = useState(false);
-  const [selectedFillBatchId, setSelectedFillBatchId] = useState(null);
-
-  // Channel -> its stores (Blinkit has one, Flipkart has one per dark store).
-  const activeChannel = PLATFORMS.includes(channel) ? channel : PLATFORMS[0];
-  const storeOptions = useMemo(() => storeOptionsFor(orders, activeChannel), [orders, activeChannel]);
-  const activeStore = storeOptions.find((s) => s.value === storeSel) || storeOptions[0] || null;
-  const visiblePacked = useMemo(
-    () => packed.filter((o) => o.platform === activeChannel && activeStore && orderStore(o) === activeStore.store),
-    [packed, activeChannel, activeStore],
-  );
-  const changeChannel = (c) => { setChannel(c); setStoreSel(''); setSelected([]); };
-  const changeStore = (v) => { setStoreSel(v); setSelected([]); };
-
-  const toggleSelect = (id) =>
-    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-
-  const submitDispatch = ({ vehicleNo, driverName, cratesUsed, boxesUsed }) => {
-    if (selected.length === 0) return;
-    const items = selected.map((id) => {
-      const o = packed.find((x) => x.id === id);
-      return { orderId: id, dispatchQty: o?.remaining || 0, shortQty: 0 };
-    });
-    onDispatchBatch({ items, vehicleNo, driverName, cratesUsed, boxesUsed });
-    setSelected([]);
-    setShowModal(false);
-  };
-
-  const tabBtn = (key, label, count) => (
-    <button
-      onClick={() => setView(key)}
-      style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${view === key ? LEAF : LINE}`, background: view === key ? LEAF : '#fff', color: view === key ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-    >
-      {label}{count !== undefined ? ` (${count})` : ''}
-    </button>
-  );
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'flex', gap: 8 }}>
-        {tabBtn('dispatch', 'Dispatch')}
-        {tabBtn('history', 'Dispatch history', dispatchLog.length)}
-        {tabBtn('all', 'All dispatched', dispatched.length)}
-        {tabBtn('fills', 'Dispatch Fills', indentBatches.length)}
-      </div>
-
-      {view === 'dispatch' && (
-        <>
-          <Panel>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4, flexWrap: 'wrap', gap: 10 }}>
-              <div>
-                <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Packed — ready to dispatch ({visiblePacked.length})</p>
-                <p style={{ margin: 0, fontSize: 11, color: MUTED }}>
-                  An article only shows up here once it's been fully resolved in Packaging — either fully packed, or packed with the rest marked short. Quantities aren't editable here; go back to Packaging to change them.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowModal(true)}
-                disabled={selected.length === 0}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, background: selected.length === 0 ? '#C9C2AE' : TOMATO, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontWeight: 700, fontSize: 13, cursor: selected.length === 0 ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
-              >
-                <TruckIcon size={14} /> Dispatch order{selected.length > 0 ? ` (${selected.length})` : ''}
-              </button>
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 12, marginBottom: 4, flexWrap: 'wrap' }}>
-              <div>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
-                <select value={activeChannel} onChange={(e) => changeChannel(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
-                  {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-              <div>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>STORE</p>
-                <select value={activeStore ? activeStore.value : ''} onChange={(e) => changeStore(e.target.value)} disabled={storeOptions.length === 0} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 220 }}>
-                  {storeOptions.length === 0 && <option value="">No stores yet</option>}
-                  {storeOptions.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
-              <thead><tr><Th /><Th>Order ID</Th><Th>Product</Th><Th>Qty to dispatch</Th></tr></thead>
-              <tbody>
-                {visiblePacked.map((o) => (
-                  <tr key={o.id}>
-                    <Td>
-                      <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelect(o.id)} />
-                    </Td>
-                    <Td>{o.id}</Td>
-                    <Td>{o.articleName || o.product}</Td>
-                    <Td style={{ fontWeight: 700, color: LEAF }}>{renderIndentQty(o, o.remaining)}</Td>
-                  </tr>
-                ))}
-                {visiblePacked.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>Nothing packed yet for this store — resolve articles in Packaging first.</Td></tr>}
-              </tbody>
-            </table>
-            </div>
-          </Panel>
-        </>
-      )}
-
-      {view === 'history' && (
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Dispatch history ({dispatchLog.length})</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Dispatch ID</Th><Th>Vehicle</Th><Th>Driver</Th><Th>Orders</Th><Th>Crates</Th><Th>Boxes</Th><Th>Time</Th></tr></thead>
-            <tbody>
-              {dispatchLog.map((d) => (
-                <tr key={d.id}>
-                  <Td>{d.id}</Td><Td>{d.vehicleNo}</Td><Td>{d.driverName}</Td>
-                  <Td>{(d.items || d.orderIds || []).length}</Td><Td>{d.cratesUsed}</Td><Td>{d.boxesUsed}</Td><Td>{d.time}</Td>
-                </tr>
-              ))}
-              {dispatchLog.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No dispatches yet.</Td></tr>}
-            </tbody>
-          </table>
-          </div>
-        </Panel>
-      )}
-
-      {view === 'all' && (
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>All dispatched orders ({dispatched.length})</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <tbody>
-              {dispatched.map((o) => (
-                <tr key={o.id}>
-                  <Td>{o.id}</Td><Td>{o.articleName || o.product}</Td><Td>{renderIndentQty(o, o.qty)}</Td>
-                  <Td>
-                    {o.shortQty > 0 ? (
-                      <span style={{ color: TOMATO, fontSize: 11, fontWeight: 700 }}>{renderIndentQty(o, o.shortQty)} short</span>
-                    ) : (
-                      <CheckCircle2 size={15} color={LEAF} />
-                    )}
-                  </Td>
-                </tr>
-              ))}
-              {dispatched.length === 0 && <tr><Td colSpan={4} style={{ textAlign: 'center', color: MUTED }}>No dispatched orders yet.</Td></tr>}
-            </tbody>
-          </table>
-          </div>
-        </Panel>
-      )}
-
-      {view === 'fills' && (
-        selectedFillBatchId ? (
-          <DispatchFillDetail
-            batch={indentBatches.find((b) => b.id === selectedFillBatchId)}
-            orders={orders}
-            onBack={() => setSelectedFillBatchId(null)}
-          />
-        ) : (
-          <Panel>
-            <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Dispatch Fills — indent-wise fill rate</p>
-            <p style={{ margin: '0 0 14px', fontSize: 11, color: MUTED }}>
-              One card per uploaded indent — how much of what was ordered has actually gone out (in the original pack unit), how much fell short, and how much is still pending. Tap a card for the article-by-article breakdown.
-            </p>
-            {indentBatches.map((b) => (
-              <DispatchFillCard key={b.id} batch={b} orders={orders} onOpen={() => setSelectedFillBatchId(b.id)} />
-            ))}
-            {indentBatches.length === 0 && (
-              <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No indents uploaded yet.</p>
-            )}
-          </Panel>
-        )
-      )}
-
-      {showModal && (
-        <DispatchModal
-          selectedCount={selected.length}
-          crates={crates}
-          onClose={() => setShowModal(false)}
-          onConfirm={submitDispatch}
-        />
-      )}
-    </div>
-  );
-}
-
-function CratesPanel({ crates, log, onAdjust }) {
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
-        <CountCard label="Crates" value={crates.crates} color={LEAF} type="crates" onAdjust={onAdjust} />
-        <CountCard label="Boxes" value={crates.boxes} color={AMBER} type="boxes" onAdjust={onAdjust} />
-      </div>
-      <Panel>
-        <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Recent activity</p>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <tbody>
-            {log.map((l) => (
-              <tr key={l.id}>
-                <Td style={{ borderTop: 'none' }}>
-                  {l.delta > 0 ? 'Added' : 'Removed'} {Math.abs(l.delta)} {l.type}
-                  {l.note ? <span style={{ color: MUTED }}> · {l.note}</span> : null}
-                </Td>
-                <Td style={{ borderTop: 'none', color: MUTED, textAlign: 'right' }}>{l.time}</Td>
-              </tr>
-            ))}
-            {log.length === 0 && <tr><Td colSpan={2} style={{ textAlign: 'center', color: MUTED, borderTop: 'none' }}>No activity yet — use + / − above.</Td></tr>}
-          </tbody>
-        </table>
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-const STD_BARCODE_FIELD_DEFS = [
-  { key: 'printBarcode', label: 'Print barcode (the scannable graphic itself)' },
-  { key: 'printQR', label: 'Print QR code (same number, as a QR)' },
-  { key: 'itemName', label: 'Item Name' },
-  { key: 'netWeight', label: 'Net Weight / Net Quantity' },
-  { key: 'packingDate', label: 'Packing Date' },
-  { key: 'expiryDate', label: 'Expiry Date' },
-  { key: 'companyDetails', label: 'Company Details (Name + Address + FSSAI)' },
-  { key: 'showBarcodeNumber', label: 'Show barcode number as text' },
-  // Separate from "Show barcode number as text" (which is tied to the barcode
-  // graphic itself) - this is its own independent text line with the EAN, so
-  // it can be dragged/resized anywhere on the label, even on a format that
-  // doesn't print the barcode graphic at all.
-  { key: 'eanText', label: 'Add EAN number as text' },
-  { key: 'storeTemperature', label: 'Store Temperature' },
-];
-
-function BarcodeLabelsPanel({ items, orders, packingProgress, barcodeFormats, barcodePrints, companyDetails, onSaveFormat, onDeleteFormat, onUpdateCompanyDetails, onUpdateAlias, onUpdateAliasById, onDeleteAliases, onRecordPrint }) {
-  const [view, setView] = useState('print'); // 'print' | 'formats' | 'mapping' | 'business'
-  const views = [
-    { key: 'print', label: 'Print Labels' },
-    { key: 'formats', label: 'Formats' },
-    { key: 'mapping', label: 'Map Formats to Articles' },
-    { key: 'business', label: 'Business Details' },
-  ];
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {views.map((v) => (
-          <button
-            key={v.key}
-            onClick={() => setView(v.key)}
-            style={{
-              background: view === v.key ? LEAF : '#fff',
-              color: view === v.key ? '#fff' : INK,
-              border: `1px solid ${view === v.key ? LEAF : LINE}`,
-              borderRadius: RADIUS.md, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            }}
-          >
-            {v.label}
-          </button>
-        ))}
-      </div>
-      {view === 'print' && <BarcodePrintTab items={items} orders={orders} packingProgress={packingProgress} barcodeFormats={barcodeFormats} barcodePrints={barcodePrints} companyDetails={companyDetails} onUpdateAlias={onUpdateAlias} onRecordPrint={onRecordPrint} />}
-      {view === 'formats' && (
-        <BarcodeFormatsTab
-          formats={barcodeFormats}
-          companyDetails={companyDetails}
-          onSave={(f) => {
-            onSaveFormat(f);
-            // "Apply to all" locks every article mapped to this format onto its
-            // one shared layout — so any per-article layout saved earlier (from
-            // the pencil icon in Print Labels) is cleared the moment this is
-            // turned on, which is what actually makes them "the same" again.
-            if (f.applyToAll) {
-              items.forEach((it) => {
-                (it.aliases || []).forEach((al) => {
-                  if (al.barcodeFormatId === f.id && al.layoutOverride) {
-                    onUpdateAliasById(it.id, al.id, { layoutOverride: null });
-                  }
-                });
-              });
-            }
-          }}
-          onDelete={onDeleteFormat}
-        />
-      )}
-      {view === 'mapping' && <BarcodeMappingTab items={items} formats={barcodeFormats} orders={orders} onMapFormat={(itemId, aliasId, formatId) => onUpdateAliasById(itemId, aliasId, { barcodeFormatId: formatId })} onUpdateAliasById={onUpdateAliasById} onUpdateAlias={onUpdateAlias} onDeleteAliases={onDeleteAliases} />}
-      {view === 'business' && <BusinessDetailsTab details={companyDetails} onSave={onUpdateCompanyDetails} />}
-    </div>
-  );
-}
-
-function BusinessDetailsTab({ details, onSave }) {
-  const [name, setName] = useState(details.name || '');
-  const [address, setAddress] = useState(details.address || '');
-  const [fssai, setFssai] = useState(details.fssai || '');
-  useEffect(() => { setName(details.name || ''); setAddress(details.address || ''); setFssai(details.fssai || ''); }, [details]);
-  const [saved, setSaved] = useState(false);
-  const save = () => { onSave({ name: name.trim(), address: address.trim(), fssai: fssai.trim() }); setSaved(true); setTimeout(() => setSaved(false), 2000); };
-  return (
-    <Panel style={{ maxWidth: 480 }}>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Business details</p>
-      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Printed on every label that includes "Company Details" — one set per city, since a separate premises can hold its own FSSAI licence.</p>
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>COMPANY NAME</p>
-      <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>ADDRESS</p>
-      <textarea value={address} onChange={(e) => setAddress(e.target.value)} style={{ ...inputStyle, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} />
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>FSSAI LICENSE NUMBER</p>
-      <input value={fssai} onChange={(e) => setFssai(e.target.value)} placeholder="14-digit number" style={inputStyle} />
-      <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-        {saved ? 'Saved ✓' : 'Save'}
-      </button>
-    </Panel>
-  );
-}
-
-function formatFieldSummary(f) {
-  const parts = [];
-  STD_BARCODE_FIELD_DEFS.forEach((d) => { if (f.standardFields?.[d.key]) parts.push(d.label); });
-  (f.customFields || []).forEach((c) => parts.push(c.label));
-  return parts.join(' · ') || 'No fields selected';
-}
-
-function BarcodeFormatsTab({ formats, companyDetails, onSave, onDelete }) {
-  const [editing, setEditing] = useState(null);
-
-  if (editing) return <BarcodeFormatEditor format={editing} companyDetails={companyDetails} onSave={(f) => { onSave(f); setEditing(null); }} onCancel={() => setEditing(null)} />;
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Saved label formats</p>
-        <button
-          onClick={() => setEditing({
-            id: `FMT-${Date.now().toString(36).toUpperCase().slice(-6)}`,
-            name: '',
-            standardFields: { printBarcode: true, itemName: true, netWeight: true, packingDate: true, expiryDate: false, companyDetails: true, showBarcodeNumber: true },
-            customFields: [],
-          })}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-        >
-          <Plus size={14} /> New format
-        </button>
-      </div>
-      {formats.length === 0 && <p style={{ color: MUTED, fontSize: 13 }}>No formats yet — create one to start printing labels.</p>}
-      {formats.map((f) => (
-        <Panel key={f.id} style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <p style={{ fontWeight: 700, margin: '0 0 4px' }}>{f.name}</p>
-            <p style={{ fontSize: 11, color: MUTED, margin: 0 }}>{formatFieldSummary(f)}</p>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button onClick={() => setEditing(f)} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer' }}><Pencil size={15} /></button>
-            <ConfirmDeleteButton onConfirm={() => onDelete(f.id)} size={15} title={`Delete format "${f.name}"`} />
-          </div>
-        </Panel>
-      ))}
-    </div>
-  );
-}
-
-// Sample content the live preview renders with — a format is edited before any
-// real article is necessarily mapped to it, so the preview can't use real data.
-const PREVIEW_ARTICLE = { itemName: 'Sample Item', netWeight: '500 g', code: '8901234567890' };
-
-function BarcodeFormatEditor({ format, companyDetails, onSave, onCancel }) {
-  const [name, setName] = useState(format.name);
-  const [standardFields, setStandardFields] = useState(format.standardFields);
-  const [customFields, setCustomFields] = useState(format.customFields || []);
-  const [storeTemperatureText, setStoreTemperatureText] = useState(format.storeTemperatureText || '');
-  const [applyToAll, setApplyToAll] = useState(!!format.applyToAll);
-  // The live preview's own field layout (position + size) — starts from the
-  // format's saved layout (or the stacked default if it's never been opened
-  // here before) and is what "Save format" persists back onto the format.
-  const [layout, setLayout] = useState(() => ({ ...defaultLabelLayout(format), ...(format.layout || {}) }));
-  const [selected, setSelected] = useState(null);
-  const dragRef = useRef(null);
-  const canvasRef = useRef(null);
-  const SCALE = 6; // 50mm label drawn at 300x300px, same convention as the per-article editor
-
-  // Toggling a field on should give it a sensible starting position without ever
-  // disturbing a field that's already been placed — so this only ever ADDS
-  // missing defaults, never overwrites an existing entry.
-  useEffect(() => {
-    setLayout((l) => {
-      const defaults = defaultLabelLayout({ standardFields, customFields });
-      let changed = false;
-      const next = { ...l };
-      Object.keys(defaults).forEach((k) => { if (!next[k]) { next[k] = defaults[k]; changed = true; } });
-      return changed ? next : l;
-    });
-  }, [standardFields, customFields]);
-
-  const toggleStd = (key) => setStandardFields((s) => ({ ...s, [key]: !s[key] }));
-  const addCustom = () => setCustomFields((c) => [...c, { id: `CF-${Date.now().toString(36).toUpperCase()}-${c.length}`, label: '', value: '' }]);
-  const updateCustom = (id, patch) => setCustomFields((c) => c.map((f) => (f.id === id ? { ...f, ...patch } : f)));
-  const removeCustom = (id) => setCustomFields((c) => c.filter((f) => f.id !== id));
-  const canSave = name.trim().length > 0;
-  const save = () => {
-    if (!canSave) return;
-    onSave({ ...format, name: name.trim(), standardFields, customFields: customFields.filter((f) => f.label.trim()), storeTemperatureText: storeTemperatureText.trim(), layout, applyToAll });
-  };
-
-  const activeKeys = LABEL_FIELD_DEFS
-    .filter((d) => {
-      if (d.key === 'barcode') return standardFields.printBarcode !== false;
-      if (d.key === 'qr') return !!standardFields.printQR;
-      if (d.key === 'itemName') return !!standardFields.itemName;
-      if (d.key === 'netWeight') return !!standardFields.netWeight;
-      if (d.key === 'packingDate') return !!standardFields.packingDate;
-      if (d.key === 'expiryDate') return !!standardFields.expiryDate;
-      if (d.key === 'eanText') return !!standardFields.eanText;
-      if (d.key === 'storeTemperature') return !!standardFields.storeTemperature;
-      if (['companyName', 'companyAddress', 'fssai'].includes(d.key)) return !!standardFields.companyDetails;
-      return true;
-    })
-    .map((d) => d.key)
-    .concat(customFields.filter((cf) => cf.label.trim()).map((cf) => `custom_${cf.id}`));
-
-  const defForKey = (key) => LABEL_FIELD_DEFS.find((d) => d.key === key) || { kind: 'text', hasPrefix: true };
-  const contentFor = (key) => {
-    if (key === 'itemName') return PREVIEW_ARTICLE.itemName;
-    if (key === 'netWeight') return PREVIEW_ARTICLE.netWeight;
-    if (key === 'packingDate') return formatLabelDate(todayLocalDate());
-    if (key === 'expiryDate') return formatLabelDate(addDaysToDateStr(todayLocalDate(), 4));
-    if (key === 'eanText') return PREVIEW_ARTICLE.code;
-    if (key === 'storeTemperature') return storeTemperatureText || '(store temperature)';
-    if (key === 'companyName') return companyDetails?.name || '(company name)';
-    if (key === 'companyAddress') return companyDetails?.address || '(address)';
-    if (key === 'fssai') return companyDetails?.fssai || '(FSSAI number)';
-    const cf = customFields.find((c) => `custom_${c.id}` === key);
-    return cf ? cf.value : '';
-  };
-
-  const startDrag = (e, key) => {
-    e.preventDefault();
-    setSelected(key);
-    const entry = layout[key] || { x: 25, y: 25, size: 10 };
-    dragRef.current = { key, startX: e.clientX, startY: e.clientY, origX: entry.x, origY: entry.y };
-  };
-  const onCanvasMouseMove = (e) => {
-    if (!dragRef.current) return;
-    const { key, startX, startY, origX, origY } = dragRef.current;
-    const dx = (e.clientX - startX) / SCALE;
-    const dy = (e.clientY - startY) / SCALE;
-    setLayout((l) => ({ ...l, [key]: { ...l[key], x: Math.max(0, Math.min(50, origX + dx)), y: Math.max(0, Math.min(50, origY + dy)) } }));
-  };
-  const stopDrag = () => { dragRef.current = null; };
-  const adjustSize = (key, delta) => setLayout((l) => ({ ...l, [key]: { ...l[key], size: Math.max(4, Math.round(((l[key]?.size || 10) + delta) * 10) / 10) } }));
-  const setPrefix = (key, prefix) => setLayout((l) => ({ ...l, [key]: { ...l[key], prefix } }));
-
-  return (
-    <Panel style={{ maxWidth: 920 }}>
-      <p style={{ margin: '0 0 16px', fontWeight: 700, fontSize: 14, color: INK }}>{format.name ? 'Edit format' : 'New format'}</p>
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>FORMAT NAME</p>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Blinkit Basic" style={inputStyle} />
-
-          <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>FIELDS TO INCLUDE</p>
-          {STD_BARCODE_FIELD_DEFS.map((d) => (
-            <div key={d.key} style={{ marginBottom: 8 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: INK }}>
-                <input type="checkbox" checked={!!standardFields[d.key]} onChange={() => toggleStd(d.key)} />
-                {d.label}
-              </label>
-              {d.key === 'storeTemperature' && standardFields.storeTemperature && (
-                <input
-                  value={storeTemperatureText}
-                  onChange={(e) => setStoreTemperatureText(e.target.value)}
-                  placeholder="e.g. Store below 4°C / Store in a cool, dry place"
-                  style={{ ...inputStyle, marginTop: 6, marginBottom: 0, marginLeft: 24, width: 'calc(100% - 24px)' }}
-                />
-              )}
-              {d.key === 'expiryDate' && standardFields.expiryDate && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: MUTED, cursor: 'pointer', marginTop: 6, marginLeft: 24 }}>
-                  <input type="checkbox" checked={!!standardFields.expiryDateAsNumber} onChange={() => toggleStd('expiryDateAsNumber')} />
-                  Show only the expiry day-of-month as a number in a small box, instead of a full date (e.g. "6" instead of "06/10/26")
-                </label>
-              )}
-            </div>
-          ))}
-
-          <p style={{ margin: '12px 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>CUSTOM FIELDS (any extra number, symbol, or note)</p>
-          {customFields.map((cf) => (
-            <div key={cf.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <input placeholder="Label (e.g. HSN Code)" value={cf.label} onChange={(e) => updateCustom(cf.id, { label: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-              <input placeholder="Value" value={cf.value} onChange={(e) => updateCustom(cf.id, { value: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-              <button onClick={() => removeCustom(cf.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', flexShrink: 0 }}><Trash2 size={15} /></button>
-            </div>
-          ))}
-          <button onClick={addCustom} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: `1px dashed ${LINE}`, borderRadius: RADIUS.md, padding: '8px 12px', fontSize: 12, fontWeight: 700, color: LEAF, cursor: 'pointer', marginBottom: 18 }}>
-            <Plus size={13} /> Add custom field
-          </button>
-
-          <div style={{ background: '#F6F3EA', borderRadius: RADIUS.md, padding: 12, marginBottom: 18 }}>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer', color: INK, fontWeight: 700 }}>
-              <input type="checkbox" checked={applyToAll} onChange={(e) => setApplyToAll(e.target.checked)} style={{ marginTop: 2 }} />
-              Apply this layout to all mapped articles
-            </label>
-            <p style={{ margin: '6px 0 0', fontSize: 11, color: MUTED }}>
-              When on, every article mapped to this format prints with exactly this layout — any individual sizing/position saved earlier for a specific article (via the pencil icon in Print Labels) is cleared and that article can no longer be customised on its own.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={save} disabled={!canSave} style={{ background: canSave ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: canSave ? 'pointer' : 'default' }}>Save format</button>
-            <button onClick={onCancel} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-          </div>
-        </div>
-
-        <div style={{ flex: '0 0 auto' }}>
-          <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>LIVE PREVIEW — drag a field to move it, click it to resize</p>
-          <div
-            ref={canvasRef}
-            onMouseMove={onCanvasMouseMove}
-            onMouseUp={stopDrag}
-            onMouseLeave={stopDrag}
-            style={{ position: 'relative', width: 50 * SCALE, height: 50 * SCALE, background: '#fafaf7', border: `1px solid ${LINE}`, flexShrink: 0, userSelect: 'none' }}
-          >
-            {activeKeys.map((key) => {
-              const entry = layout[key] || { x: 25, y: 25, size: 10 };
-              const def = defForKey(key);
-              const isSelected = selected === key;
-              const commonStyle = {
-                position: 'absolute', left: entry.x * SCALE, top: entry.y * SCALE, transform: 'translateX(-50%)',
-                cursor: 'move', outline: isSelected ? `1.5px dashed ${LEAF}` : 'none', outlineOffset: 2, padding: 1, whiteSpace: 'nowrap',
-              };
-              if (def.kind === 'graphic') {
-                const pxSize = entry.size * SCALE;
-                const markup = key === 'barcode' ? barcodeSVGMarkup(PREVIEW_ARTICLE.code, pxSize, pxSize * 0.3, standardFields.showBarcodeNumber !== false) : qrSVGMarkup(PREVIEW_ARTICLE.code, pxSize);
-                return <div key={key} onMouseDown={(e) => startDrag(e, key)} style={commonStyle} dangerouslySetInnerHTML={{ __html: markup }} />;
-              }
-              // The expiry-as-a-number mode draws a small resizable box with just
-              // the day digit inside, instead of the usual "prefix + date" line.
-              if (key === 'expiryDate' && standardFields.expiryDateAsNumber) {
-                const box = entry.size * (SCALE / 3.78) * 1.8;
-                return (
-                  <div
-                    key={key}
-                    onMouseDown={(e) => startDrag(e, key)}
-                    style={{ ...commonStyle, width: box, height: box, border: '1.5px solid #000', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: entry.size * (SCALE / 3.78), fontWeight: 700, fontFamily: 'Arial, sans-serif', color: '#000', boxSizing: 'border-box' }}
-                  >
-                    {expiryDayNumber(addDaysToDateStr(todayLocalDate(), 4)) || '6'}
-                  </div>
-                );
-              }
-              const text = (def.hasPrefix ? `${entry.prefix ?? ''} ` : '') + contentFor(key);
-              return (
-                <div key={key} onMouseDown={(e) => startDrag(e, key)} style={{ ...commonStyle, fontSize: entry.size * (SCALE / 3.78), fontWeight: key === 'itemName' ? 700 : 600, fontFamily: 'Arial, sans-serif', color: '#000' }}>
-                  {text}
-                </div>
-              );
-            })}
-          </div>
-          {selected && (
-            <div style={{ marginTop: 10, width: 50 * SCALE, boxSizing: 'border-box' }}>
-              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{defForKey(selected).kind === 'graphic' ? 'SIZE (mm)' : (selected === 'expiryDate' && standardFields.expiryDateAsNumber ? 'BOX SIZE' : 'FONT SIZE (px)')}</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <button onClick={() => adjustSize(selected, -1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>−</button>
-                <span style={{ fontSize: 13, minWidth: 30, textAlign: 'center' }}>{layout[selected]?.size ?? 10}</span>
-                <button onClick={() => adjustSize(selected, 1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>+</button>
-              </div>
-              {defForKey(selected).hasPrefix && !(selected === 'expiryDate' && standardFields.expiryDateAsNumber) && (
-                <>
-                  <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL TEXT</p>
-                  <input value={layout[selected]?.prefix ?? ''} onChange={(e) => setPrefix(selected, e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </Panel>
-  );
-}
-
-function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasById, onUpdateAlias, onDeleteAliases }) {
-  const [search, setSearch] = useState('');
-  const [channelFilter, setChannelFilter] = useState('ALL');
-  const [edits, setEdits] = useState({});
-  const [selected, setSelected] = useState(new Set());
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const importRef = useRef(null);
-  const [importResult, setImportResult] = useState(null); // { created, updated, skipped, errors }
-  const [importError, setImportError] = useState('');
-
-  // Article name and UOM are what actually get printed on the label, so they are
-  // editable here alongside the barcode - the same three fields the Print tab
-  // saves, kept on the channel alias so a correction sticks for good.
-  // Each alias is tracked by its own id — an item can have more than one alias
-  // for the same channel (different pack sizes are different articles), so a
-  // shared "item + channel" key would let editing one silently overwrite another.
+function parseGrnPdfText(text) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const pattern = /(\d+) (\d{6,8}) (\d{6,10}) (\d{3,4}) (.*?) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2}|-) (\d+) (\d+) (\d+\.\d{2}) (\d+\.\d{2}) (\d+\.\d{2})/g;
   const rows = [];
-  items.forEach((it) => {
-    (it.aliases || []).forEach((al) => {
-      if (al.code || al.ean) {
-        // The name the article actually carried on the indent, for context —
-        // this table's "item" is the internal purchase item, which can read
-        // very differently from what the channel itself calls the article
-        // (same idea as the name shown in Packaging).
-        const matchingOrder = orders.find((o) => o.product === it.name && o.platform === al.channel
-          && (al.packSize === '' || al.packSize == null || (String(o.packSize) === String(al.packSize) && String(o.packUnit || '') === String(al.packUnit || ''))));
-        rows.push({
-          itemId: it.id,
-          aliasId: al.id,
-          itemName: it.name,
-          indentArticleName: matchingOrder?.articleName || '',
-          channel: al.channel,
-          packSize: al.packSize || '',
-          packUnit: al.packUnit || '',
-          code: al.ean || al.code || '',
-          labelName: al.labelName || it.name,
-          labelUom: al.labelUom || (al.packSize ? `${al.packSize}${al.packUnit || ''}` : ''),
-          barcodeFormatId: al.barcodeFormatId || '',
-        });
-      }
-    });
-  });
-  const filtered = rows.filter((r) => (channelFilter === 'ALL' || r.channel === channelFilter)
-    && (!search.trim()
-      || r.itemName.toLowerCase().includes(search.trim().toLowerCase())
-      || r.indentArticleName.toLowerCase().includes(search.trim().toLowerCase())
-      || String(r.labelName).toLowerCase().includes(search.trim().toLowerCase())));
-
-  const rowKey = (r) => r.aliasId;
-  const valFor = (r, field) => {
-    const e = edits[rowKey(r)];
-    return e && field in e ? e[field] : r[field];
-  };
-  const setVal = (r, field, value) => setEdits((s) => ({ ...s, [rowKey(r)]: { ...(s[rowKey(r)] || {}), [field]: value } }));
-  const isDirty = (r) => !!edits[rowKey(r)];
-  const save = (r) => {
-    onUpdateAliasById(r.itemId, r.aliasId, {
-      ean: String(valFor(r, 'code')).trim(),
-      labelName: String(valFor(r, 'labelName')).trim(),
-      labelUom: String(valFor(r, 'labelUom')).trim(),
-    });
-    setEdits((s) => { const n = { ...s }; delete n[rowKey(r)]; return n; });
-  };
-
-  const toggleSelected = (aliasId) => setSelected((s) => { const n = new Set(s); if (n.has(aliasId)) n.delete(aliasId); else n.add(aliasId); return n; });
-  const selectAll = () => setSelected(new Set(filtered.map((r) => r.aliasId)));
-  const clearSelected = () => setSelected(new Set());
-  const deleteSelected = () => {
-    const pairs = filtered.filter((r) => selected.has(r.aliasId)).map((r) => ({ itemId: r.itemId, aliasId: r.aliasId }));
-    onDeleteAliases(pairs);
-    setSelected(new Set());
-    setConfirmingDelete(false);
-  };
-
-  // Downloads every current article/format row as a CSV — doubles as a
-  // template (the headers show exactly what Bulk Import expects) and as an
-  // editable export of what's already mapped, since re-uploading the same
-  // rows (with Pack Size unchanged) updates those exact articles rather than
-  // creating duplicates.
-  const downloadTemplate = () => {
-    const header = ['Item', 'Channel', 'Pack Size', 'Pack Unit', 'Article Name (on label)', 'UOM (on label)', 'Barcode (EAN)', 'Format'];
-    const formatNameById = {}; formats.forEach((f) => { formatNameById[f.id] = f.name; });
-    const dataRows = rows.map((r) => [r.itemName, r.channel, r.packSize, r.packUnit, r.labelName, r.labelUom, r.code, formatNameById[r.barcodeFormatId] || '']);
-    const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-    const csv = [header, ...dataRows].map((row) => row.map(esc).join(',')).join('\r\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `barcode_articles_${todayLocalDate()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  // Matches each uploaded row to an item by name and, within that item's
-  // channel, to the alias with the same pack size (same rule the rest of this
-  // screen uses) — if none matches, a new article/alias is created, so this
-  // one file can both correct existing articles and add new ones.
-  const handleBulkImport = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImportError(''); setImportResult(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const wb = XLSX.read(ev.target.result, { type: 'array' });
-        const sheetRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
-        const header = (sheetRows[0] || []).map((h) => String(h || '').toLowerCase().trim());
-        const idx = (candidates) => header.findIndex((h) => candidates.some((c) => h.includes(c)));
-        const cols = {
-          item: idx(['item']), channel: idx(['channel']), packSize: idx(['pack size']), packUnit: idx(['pack unit']),
-          labelName: idx(['article name']), labelUom: idx(['uom']), code: idx(['barcode', 'ean']), format: idx(['format']),
-        };
-        if (cols.item === -1 || cols.channel === -1) { setImportError('Could not find "Item" and "Channel" columns — use Download Format to get the right column headings.'); return; }
-        const formatIdByName = {}; formats.forEach((f) => { formatIdByName[f.name.toLowerCase()] = f.id; });
-        let created = 0, updated = 0, skipped = 0;
-        const errors = [];
-        for (let i = 1; i < sheetRows.length; i += 1) {
-          const row = sheetRows[i];
-          if (!row || row.every((c) => c === '')) continue;
-          const itemName = String(row[cols.item] || '').trim();
-          const channel = String(row[cols.channel] || '').trim();
-          if (!itemName || !channel) continue;
-          const item = items.find((it) => it.name.toLowerCase() === itemName.toLowerCase());
-          if (!item) { skipped += 1; errors.push(`Row ${i + 1}: item "${itemName}" not found`); continue; }
-          const packSize = cols.packSize !== -1 ? String(row[cols.packSize] || '').trim() : '';
-          const packUnit = cols.packUnit !== -1 ? String(row[cols.packUnit] || '').trim() : '';
-          const formatName = cols.format !== -1 ? String(row[cols.format] || '').trim() : '';
-          const patch = {
-            ean: cols.code !== -1 ? String(row[cols.code] || '').trim() : '',
-            labelName: cols.labelName !== -1 ? String(row[cols.labelName] || '').trim() : '',
-            labelUom: cols.labelUom !== -1 ? String(row[cols.labelUom] || '').trim() : '',
-          };
-          if (formatName) {
-            const fid = formatIdByName[formatName.toLowerCase()];
-            if (fid) patch.barcodeFormatId = fid;
-            else errors.push(`Row ${i + 1}: format "${formatName}" not found — left as-is`);
-          }
-          const existed = !!findAlias(item, channel, packSize, packUnit);
-          onUpdateAlias(item.id, channel, patch, packSize, packUnit);
-          if (existed) updated += 1; else created += 1;
-        }
-        setImportResult({ created, updated, skipped, errors });
-      } catch (err) {
-        setImportError('Could not read this file — use the CSV from Download Format, or an Excel file with the same columns.');
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = '';
-  };
-
-  const cell = { fontSize: 12, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' };
-
-  return (
-    <Panel>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
-        <div>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Articles &amp; label formats</p>
-          <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 560 }}>Everything that prints on a label is editable here. Each article can use a different format, so labels carry exactly the fields that article needs. Changes are saved against the article.</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-          <button onClick={downloadTemplate} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <Download size={13} /> Download format
-          </button>
-          <button onClick={() => importRef.current && importRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <Upload size={13} /> Bulk import
-          </button>
-          <input ref={importRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleBulkImport} style={{ display: 'none' }} />
-        </div>
-      </div>
-      {importError && <p style={{ margin: '8px 0 0', fontSize: 12, color: TOMATO }}>{importError}</p>}
-      {importResult && (
-        <div style={{ margin: '10px 0 0', padding: '10px 12px', background: '#F6F3EA', borderRadius: 8, fontSize: 12 }}>
-          <p style={{ margin: 0, fontWeight: 700, color: INK }}>
-            Imported: {importResult.created} new article{importResult.created === 1 ? '' : 's'}, {importResult.updated} updated{importResult.skipped ? `, ${importResult.skipped} skipped` : ''}.
-          </p>
-          {importResult.errors.length > 0 && (
-            <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: AMBER }}>
-              {importResult.errors.slice(0, 10).map((e, i) => <li key={i}>{e}</li>)}
-              {importResult.errors.length > 10 && <li>...and {importResult.errors.length - 10} more</li>}
-            </ul>
-          )}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
-        <input placeholder="Search item or article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260, marginTop: 0 }} />
-        <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '9px 8px' }}>
-          <option value="ALL">All channels</option>
-          {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '10px 0' }}>
-        <button onClick={selectAll} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
-        <button onClick={clearSelected} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
-        {selected.size > 0 && !confirmingDelete && (
-          <button onClick={() => setConfirmingDelete(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            <Trash2 size={13} /> Delete selected ({selected.size})
-          </button>
-        )}
-        {confirmingDelete && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: TOMATO, fontWeight: 700 }}>Delete {selected.size} article{selected.size === 1 ? '' : 's'} for good?</span>
-            <button onClick={deleteSelected} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-            <button onClick={() => setConfirmingDelete(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>No</button>
-          </span>
-        )}
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th /><Th>Article (from indent)</Th><Th>Item</Th><Th>Channel</Th><Th>Article name (on label)</Th><Th>UOM (on label)</Th><Th>Barcode (EAN)</Th><Th>Format</Th><Th /></tr></thead>
-          <tbody>
-            {filtered.map((r) => (
-              <tr key={r.aliasId}>
-                <Td><input type="checkbox" checked={selected.has(r.aliasId)} onChange={() => toggleSelected(r.aliasId)} /></Td>
-                <Td style={{ fontSize: 12 }}>{r.indentArticleName || <span style={{ color: MUTED }}>—</span>}</Td>
-                <Td style={{ fontSize: 12, color: MUTED }}>{r.itemName}</Td>
-                <Td>{r.channel}</Td>
-                <Td>
-                  <input value={valFor(r, 'labelName')} onChange={(e) => setVal(r, 'labelName', e.target.value)} onBlur={() => save(r)} style={{ ...cell, width: 170, fontSize: 13 }} />
-                </Td>
-                <Td>
-                  <input value={valFor(r, 'labelUom')} onChange={(e) => setVal(r, 'labelUom', e.target.value)} onBlur={() => save(r)} placeholder="e.g. 500 g" style={{ ...cell, width: 100 }} />
-                </Td>
-                <Td>
-                  <input value={valFor(r, 'code')} onChange={(e) => setVal(r, 'code', e.target.value)} onBlur={() => save(r)} style={{ ...cell, width: 130, fontFamily: 'monospace' }} />
-                </Td>
-                <Td>
-                  <select
-                    value={r.barcodeFormatId}
-                    onChange={(e) => onMapFormat(r.itemId, r.aliasId, e.target.value)}
-                    style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }}
-                  >
-                    <option value="">— No format (skipped on print) —</option>
-                    {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                  </select>
-                </Td>
-                <Td>
-                  {isDirty(r) && (
-                    <button onClick={() => save(r)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                      <CheckCircle2 size={13} /> Save
-                    </button>
-                  )}
-                </Td>
-              </tr>
-            ))}
-            {filtered.length === 0 && <tr><Td colSpan={9} style={{ color: MUTED, textAlign: 'center' }}>No articles with a code found yet — add channel codes in the Items section first.</Td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
-  );
-}
-
-// ── Label visual editor ──
-// A format has no saved layout until someone opens the editor and hits Save, so
-// this computes a starting arrangement that mirrors the current stacked order —
-// editing from a familiar baseline rather than an empty canvas.
-function defaultLabelLayout(format) {
-  const sf = format?.standardFields || {};
-  const layout = {};
-  const cx = 25; // horizontal center of the 50mm label; fields are centered on x
-  let y = 4;
-  if (sf.itemName) { layout.itemName = { x: cx, y, size: 13 }; y += 6.5; }
-  if (sf.netWeight) { layout.netWeight = { x: cx, y, size: 9.5, prefix: 'Net Wt:' }; y += 4.5; }
-  if (sf.packingDate) { layout.packingDate = { x: cx, y, size: 9.5, prefix: 'Packed:' }; y += 4.5; }
-  if (sf.expiryDate) { layout.expiryDate = { x: cx, y, size: 9.5, prefix: 'Best Before:' }; y += 4.5; }
-  if (sf.eanText) { layout.eanText = { x: cx, y, size: 8, prefix: 'EAN:' }; y += 4; }
-  if (sf.storeTemperature) { layout.storeTemperature = { x: cx, y, size: 7 }; y += 3.5; }
-  if (sf.companyDetails) {
-    layout.companyName = { x: cx, y, size: 8 }; y += 3.5;
-    layout.companyAddress = { x: cx, y, size: 6 }; y += 3;
-    layout.fssai = { x: cx, y, size: 8, prefix: 'FSSAI:' }; y += 4.5;
+  let match;
+  while ((match = pattern.exec(flat)) !== null) {
+    const [, , code, , , desc, , , , rateGrn, , qtyGrn] = match;
+    const qty = Number(qtyGrn) || 0;
+    const price = rateGrn === '-' ? 0 : Number(rateGrn) || 0;
+    if (qty > 0) rows.push({ code: code.trim(), name: desc.trim(), qty, price });
   }
-  (format?.customFields || []).forEach((cf) => { layout[`custom_${cf.id}`] = { x: cx, y, size: 7, prefix: `${cf.label}:` }; y += 3.5; });
-  if (sf.printBarcode !== false) {
-    const bcSize = sf.printQR ? 36 : 44; // a bit smaller by default when QR also needs room on the same label
-    layout.barcode = { x: cx, y, size: bcSize };
-    y += bcSize * 0.3 + 2; // barcode height is size*0.3 in the print renderer — advance past it, not a fixed guess
-  }
-  if (sf.printQR) {
-    const qrSize = sf.printBarcode !== false ? 20 : 26;
-    layout.qr = { x: cx, y, size: qrSize };
-  }
-  return layout;
-}
-// Fields whose text is a fixed value from elsewhere (article name/UOM already
-// have their own edit fields in the Print tab; company values live in Business
-// Details) — this editor repositions and resizes them, but only the key-value
-// lines' PREFIX text ("Net Wt:", "FSSAI:", ...) is genuinely editable here,
-// since that's the one piece of label wording that has no other home.
-const LABEL_FIELD_DEFS = [
-  { key: 'itemName', kind: 'text', hasPrefix: false },
-  { key: 'netWeight', kind: 'text', hasPrefix: true },
-  { key: 'packingDate', kind: 'text', hasPrefix: true },
-  { key: 'expiryDate', kind: 'text', hasPrefix: true },
-  { key: 'eanText', kind: 'text', hasPrefix: true },
-  { key: 'storeTemperature', kind: 'text', hasPrefix: false },
-  { key: 'companyName', kind: 'text', hasPrefix: false },
-  { key: 'companyAddress', kind: 'text', hasPrefix: false },
-  { key: 'fssai', kind: 'text', hasPrefix: true },
-  { key: 'barcode', kind: 'graphic' },
-  { key: 'qr', kind: 'graphic' },
-];
-
-function LabelDesigner({ format, article, companyDetails, onSave, onClose }) {
-  const [layout, setLayout] = useState(() => ({ ...defaultLabelLayout(format), ...(format.layout || {}), ...(article.layoutOverride || {}) }));
-  // Custom fields added from THIS screen belong to this one article's alias
-  // only (saved inside its layoutOverride, never touching the shared format),
-  // unlike a format's own customFields which every article on that format sees.
-  const [ownCustomFields, setOwnCustomFields] = useState(() => article.layoutOverride?.ownCustomFields || []);
-  const [selected, setSelected] = useState(null);
-  const dragRef = useRef(null); // { key, startX, startY, origX, origY }
-  const canvasRef = useRef(null);
-  const SCALE = 6; // 50mm label drawn at 300x300px for comfortable dragging
-
-  const sf = format.standardFields || {};
-  const activeKeys = LABEL_FIELD_DEFS
-    .filter((d) => {
-      if (d.key === 'barcode') return sf.printBarcode !== false;
-      if (d.key === 'qr') return !!sf.printQR;
-      if (d.key === 'itemName') return !!sf.itemName;
-      if (d.key === 'netWeight') return !!sf.netWeight;
-      if (d.key === 'packingDate') return !!sf.packingDate;
-      if (d.key === 'expiryDate') return !!sf.expiryDate;
-      if (d.key === 'eanText') return !!sf.eanText;
-      if (d.key === 'storeTemperature') return !!sf.storeTemperature;
-      if (['companyName', 'companyAddress', 'fssai'].includes(d.key)) return !!sf.companyDetails;
-      return true;
-    })
-    .map((d) => d.key)
-    .concat((format.customFields || []).map((cf) => `custom_${cf.id}`))
-    .concat(ownCustomFields.map((cf) => `own_${cf.id}`));
-
-  const contentFor = (key) => {
-    if (key === 'itemName') return article.itemName;
-    if (key === 'netWeight') return article.netWeight;
-    if (key === 'packingDate') return article.packingDate;
-    if (key === 'expiryDate') return article.expiryDate;
-    if (key === 'eanText') return article.code;
-    if (key === 'storeTemperature') return format.storeTemperatureText || '(store temperature)';
-    if (key === 'companyName') return companyDetails.name || '(company name)';
-    if (key === 'companyAddress') return companyDetails.address || '(address)';
-    if (key === 'fssai') return companyDetails.fssai || '(FSSAI number)';
-    if (key.startsWith('own_')) {
-      const cf = ownCustomFields.find((c) => `own_${c.id}` === key);
-      if (!cf) return '';
-      return cf.label ? `${cf.label}: ${cf.value}` : (cf.value || '(value)');
-    }
-    const cf = (format.customFields || []).find((c) => `custom_${c.id}` === key);
-    return cf ? cf.value : '';
-  };
-  // Own fields carry their label as part of the content itself (see contentFor)
-  // instead of the generic prefix box, so the Custom Fields list below is the
-  // one place their label/value is edited.
-  const defForKey = (key) => (key.startsWith('own_') ? { kind: 'text', hasPrefix: false } : LABEL_FIELD_DEFS.find((d) => d.key === key) || { kind: 'text', hasPrefix: true });
-
-  const addOwnField = () => {
-    const id = `O${Date.now().toString(36).slice(-5)}${Math.floor(Math.random() * 90 + 10)}`;
-    setOwnCustomFields((cfs) => [...cfs, { id, label: '', value: '' }]);
-    setLayout((l) => ({ ...l, [`own_${id}`]: { x: 25, y: 46, size: 7 } }));
-    setSelected(`own_${id}`);
-  };
-  const updateOwnField = (id, patch) => setOwnCustomFields((cfs) => cfs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  const removeOwnField = (id) => {
-    setOwnCustomFields((cfs) => cfs.filter((c) => c.id !== id));
-    setLayout((l) => { const n = { ...l }; delete n[`own_${id}`]; return n; });
-    setSelected((s) => (s === `own_${id}` ? null : s));
-  };
-
-  const startDrag = (e, key) => {
-    e.preventDefault();
-    setSelected(key);
-    const entry = layout[key] || { x: 25, y: 25, size: 10 };
-    dragRef.current = { key, startX: e.clientX, startY: e.clientY, origX: entry.x, origY: entry.y };
-  };
-  const onCanvasMouseMove = (e) => {
-    if (!dragRef.current) return;
-    const { key, startX, startY, origX, origY } = dragRef.current;
-    const dx = (e.clientX - startX) / SCALE;
-    const dy = (e.clientY - startY) / SCALE;
-    setLayout((l) => ({ ...l, [key]: { ...l[key], x: Math.max(0, Math.min(50, origX + dx)), y: Math.max(0, Math.min(50, origY + dy)) } }));
-  };
-  const stopDrag = () => { dragRef.current = null; };
-
-  const adjustSize = (key, delta) => setLayout((l) => ({ ...l, [key]: { ...l[key], size: Math.max(4, Math.round(((l[key]?.size || 10) + delta) * 10) / 10) } }));
-  const setPrefix = (key, prefix) => setLayout((l) => ({ ...l, [key]: { ...l[key], prefix } }));
-
-  const save = () => { onSave(layout, ownCustomFields); onClose(); };
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,16,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div style={{ background: '#fff', borderRadius: RADIUS.xl, padding: 24, maxWidth: 720, width: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 15, color: INK }}>Edit label layout — {format.name}</p>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer' }}><X size={18} /></button>
-        </div>
-        <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Drag any field to reposition it. Click a field to resize it or (for Net Wt / Packed / Best Before / FSSAI) change its label text. This layout is saved for <strong>this article only</strong> — other articles using the {format.name} format keep their own design.</p>
-        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-          <div
-            ref={canvasRef}
-            onMouseMove={onCanvasMouseMove}
-            onMouseUp={stopDrag}
-            onMouseLeave={stopDrag}
-            style={{ position: 'relative', width: 50 * SCALE, height: 50 * SCALE, background: '#fafaf7', border: `1px solid ${LINE}`, flexShrink: 0, userSelect: 'none' }}
-          >
-            {activeKeys.map((key) => {
-              const entry = layout[key] || { x: 25, y: 25, size: 10 };
-              const def = defForKey(key);
-              const isSelected = selected === key;
-              const commonStyle = {
-                position: 'absolute', left: entry.x * SCALE, top: entry.y * SCALE, transform: 'translateX(-50%)',
-                cursor: 'move', outline: isSelected ? `1.5px dashed ${LEAF}` : 'none', outlineOffset: 2, padding: 1, whiteSpace: 'nowrap',
-              };
-              if (def.kind === 'graphic') {
-                const pxSize = entry.size * SCALE * (key === 'qr' ? 1 : 1);
-                const markup = key === 'barcode' ? barcodeSVGMarkup(article.code, pxSize, pxSize * 0.3, true) : qrSVGMarkup(article.code, pxSize);
-                return (
-                  <div key={key} onMouseDown={(e) => startDrag(e, key)} style={commonStyle} dangerouslySetInnerHTML={{ __html: markup }} />
-                );
-              }
-              if (key === 'expiryDate' && format.standardFields?.expiryDateAsNumber) {
-                const box = entry.size * (SCALE / 3.78) * 1.8;
-                return (
-                  <div
-                    key={key}
-                    onMouseDown={(e) => startDrag(e, key)}
-                    style={{ ...commonStyle, width: box, height: box, border: '1.5px solid #000', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: entry.size * (SCALE / 3.78), fontWeight: 700, fontFamily: 'Arial, sans-serif', color: '#000', boxSizing: 'border-box' }}
-                  >
-                    {expiryDayNumber(article.expiryDateRaw) || '6'}
-                  </div>
-                );
-              }
-              const text = (def.hasPrefix ? `${entry.prefix ?? ''} ` : '') + contentFor(key);
-              return (
-                <div key={key} onMouseDown={(e) => startDrag(e, key)} style={{ ...commonStyle, fontSize: entry.size * (SCALE / 3.78), fontWeight: key === 'itemName' ? 700 : 600, fontFamily: 'Arial, sans-serif', color: '#000' }}>
-                  {text}
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            {!selected ? (
-              <p style={{ fontSize: 12, color: MUTED }}>Click a field on the label to edit it.</p>
-            ) : (
-              <div>
-                <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>
-                  {selected.startsWith('own_') ? (ownCustomFields.find((c) => `own_${c.id}` === selected)?.label || 'Custom field') : selected}
-                </p>
-                <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{defForKey(selected).kind === 'graphic' ? 'SIZE (mm)' : 'FONT SIZE (px)'}</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                  <button onClick={() => adjustSize(selected, -1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>−</button>
-                  <span style={{ fontSize: 13, minWidth: 30, textAlign: 'center' }}>{layout[selected]?.size ?? 10}</span>
-                  <button onClick={() => adjustSize(selected, 1)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>+</button>
-                </div>
-                {defForKey(selected).hasPrefix && !(selected === 'expiryDate' && format.standardFields?.expiryDateAsNumber) && (
-                  <>
-                    <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL TEXT</p>
-                    <input value={layout[selected]?.prefix ?? ''} onChange={(e) => setPrefix(selected, e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${LINE}` }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CUSTOM FIELDS — THIS ARTICLE ONLY</p>
-          <p style={{ margin: '0 0 10px', fontSize: 11.5, color: MUTED }}>A field added here prints only on {article.itemName || 'this article'}'s label. Other articles on the {format.name} format are never affected.</p>
-          {ownCustomFields.map((cf) => (
-            <div key={cf.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <input placeholder="Label (e.g. Batch No.)" value={cf.label} onChange={(e) => updateOwnField(cf.id, { label: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-              <input placeholder="Value" value={cf.value} onChange={(e) => updateOwnField(cf.id, { value: e.target.value })} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-              <button onClick={() => setSelected(`own_${cf.id}`)} title="Position this field on the label" style={{ background: 'none', border: `1px solid ${LINE}`, borderRadius: 6, color: MUTED, cursor: 'pointer', flexShrink: 0, padding: '0 10px', fontSize: 11, fontWeight: 700 }}>Position</button>
-              <button onClick={() => removeOwnField(cf.id)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', flexShrink: 0 }}><Trash2 size={15} /></button>
-            </div>
-          ))}
-          <button onClick={addOwnField} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: `1px dashed ${LINE}`, borderRadius: RADIUS.md, padding: '8px 12px', fontSize: 12, fontWeight: 700, color: LEAF, cursor: 'pointer' }}>
-            <Plus size={13} /> Add custom field
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
-          <button onClick={save} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            <CheckCircle2 size={15} /> Save layout
-          </button>
-          <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
+  return rows;
 }
 
-function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barcodePrints, companyDetails, onUpdateAlias, onRecordPrint }) {
-  const [platform, setPlatform] = useState(PLATFORMS[0]);
-  // Blinkit's own indent only ever supplies its internal item code, never a real
-  // retail UPC — so the printed barcode/QR graphic uses the UPC entered for this
-  // article when there is one, falling back to the item code so nothing prints
-  // blank. Flipkart's own code is already a genuine EAN, so this never applies to
-  // it. Shared by the actual print output and the layout editor's live preview,
-  // so the two can never show a different number than what actually prints.
-  const barcodeValueFor = (a) => (platform === 'Blinkit' && a.upc) ? a.upc : a.code;
-  const [categoryFilter, setCategoryFilter] = useState('ALL');
-  const [date, setDate] = useState(todayLocalDate());
-  const [selectedKeys, setSelectedKeys] = useState(new Set());
-  const [qtyOverrides, setQtyOverrides] = useState({});
-  const [codeOverrides, setCodeOverrides] = useState({});
-  const [upcOverrides, setUpcOverrides] = useState({});
-  const [nameOverrides, setNameOverrides] = useState({});
-  const [uomOverrides, setUomOverrides] = useState({});
-  const [bestBeforeOverrides, setBestBeforeOverrides] = useState({});
-  const [labelSize, setLabelSize] = useState('thermal5050'); // 'thermal5050' | 'a4'
-  const [editingArticleKey, setEditingArticleKey] = useState(null);
-
-  const allArticles = useMemo(() => {
-    const dayOrders = orders.filter((o) => o.platform === platform && o.fulfilmentDate === date && o.packQty && o.packSize);
-    const groups = {};
-    dayOrders.forEach((o) => {
-      const cityKey = o.city || CITIES[0];
-      const key = `${cityKey}__${date}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-      if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, rawCode: o.rawCode || '', rawEan: o.rawEan || '', packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0 };
-      groups[key].targetPacks += Number(o.packQty) || 0;
-    });
-    return Object.values(groups)
-      .map((g) => {
-        const item = items.find((it) => it.name === g.product);
-        const alias = findAlias(item, platform, g.packSize, g.packUnit, g.rawEan || g.rawCode);
-        const progress = packingProgress[g.key] || { packedQty: 0 };
-        // The indent is the trustworthy source for what actually shipped this
-        // time — a saved alias only fills in where the channel's own file left
-        // something blank (e.g. no EAN yet for a brand-new article), so it
-        // never overrides fresh indent data with a possibly-stale save.
-        return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: g.rawEan || g.rawCode || alias?.ean || alias?.code || '', upc: alias?.upc || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', layoutOverride: alias?.layoutOverride || null, shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
-      })
-      .sort((a, b) => a.articleName.localeCompare(b.articleName));
-  }, [orders, items, packingProgress, platform, date]);
-
-  const articles = useMemo(
-    () => allArticles.filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter),
-    [allArticles, categoryFilter]
-  );
-
-  useEffect(() => {
-    setSelectedKeys(new Set());
-    setQtyOverrides({});
-    setCodeOverrides({});
-    setUpcOverrides({});
-    setNameOverrides({});
-    setUomOverrides({});
-    setBestBeforeOverrides({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [platform, date]);
-
-  const toggle = (key) => setSelectedKeys((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
-  const selectAllArticles = () => setSelectedKeys(new Set(articles.map((a) => a.key)));
-  const clearAllArticles = () => setSelectedKeys(new Set());
-  const qtyFor = (a) => qtyOverrides[a.key] ?? (a.packedQty || a.targetPacks || 0);
-  // How many of this article's labels have already been printed today, across
-  // every print run (single-row prints and the bulk "Print labels" button both
-  // add to the same running total) — shown as the small "Printed N" badge.
-  const printedFor = (a) => barcodePrints.find((p) => p.key === a.key)?.printedQty || 0;
-  const codeFor = (a) => codeOverrides[a.key] ?? a.code;
-  const upcFor = (a) => upcOverrides[a.key] ?? a.upc ?? '';
-  // Article Name and UOM default from this print run's order data, but once saved
-  // (via the row's Save button) the correction lives on the item's channel alias —
-  // same place Code already lives — so it survives navigating away and reappears
-  // automatically next time, instead of only lasting this one print session.
-  const nameFor = (a) => nameOverrides[a.key] ?? (a.labelName || a.articleName || '');
-  const uomFor = (a) => uomOverrides[a.key] ?? (a.rawUnit || a.labelUom || (a.packSize ? `${a.packSize}${a.packUnit || ''}` : ''));
-  const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides || a.key in upcOverrides;
-  const saveRow = (a) => {
-    if (!a.itemId) return;
-    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim(), upc: upcFor(a).trim() }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
-    setNameOverrides((n) => { const c = { ...n }; delete c[a.key]; return c; });
-    setUomOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
-    setCodeOverrides((c) => { const d = { ...c }; delete d[a.key]; return d; });
-    setUpcOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
-  };
-  // Best Before shows the auto-calculated date (packing date + this article's
-  // remembered shelf life) until the user edits it for this print run — editing it
-  // re-derives and saves a new shelf-life day-count, so tomorrow's auto-calculation
-  // uses the corrected gap from then on.
-  const bestBeforeFor = (a) => bestBeforeOverrides[a.key] ?? (a.shelfLifeDays != null ? addDaysToDateStr(date, a.shelfLifeDays) : '');
-  const commitBestBefore = (a, value) => {
-    if (!value || !a.itemId) return;
-    const days = diffDaysBetween(date, value);
-    onUpdateAlias(a.itemId, platform, { shelfLifeDays: days }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
-  };
-
-  // A checked "Company Details" box on a format only decides WHETHER that section
-  // prints — the actual name/address/FSSAI still come from Business Details, saved
-  // separately per city. Flag it clearly here rather than let it print blank and
-  // only be noticed on the physical label.
-  const needsCompanyDetails = articles.some((a) => barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.standardFields?.companyDetails);
-  const companyDetailsEmpty = !companyDetails.name?.trim() && !companyDetails.address?.trim() && !companyDetails.fssai?.trim();
-
-  // Exports the selected articles as a CSV, for admins who print through their
-  // own BarTender template instead of this app's built-in print — BarTender
-  // reads a data source like this and merges each row into its template, so
-  // the columns here are named to be easy to map in BarTender's Data Source
-  // wizard, and every value matches what would otherwise appear on the printed label.
-  const downloadForBarTender = () => {
-    const selected = articles.filter((a) => selectedKeys.has(a.key));
-    if (selected.length === 0) { alert('Select at least one article first.'); return; }
-    const header = ['Item Name', 'UOM', 'Barcode', 'Best Before', 'Format', 'Qty to Print'];
-    const rows = selected.map((a) => [
-      nameFor(a), uomFor(a), codeFor(a), bestBeforeFor(a) || '',
-      barcodeFormats.find((f) => f.id === a.barcodeFormatId)?.name || '', qtyFor(a),
-    ]);
-    const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
-    // No BOM here (unlike other CSV exports in this file) - BarTender's Text/CSV
-    // database driver can read it as part of the first header's name, which
-    // then fails to match that field when binding it in the label template.
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bartender_labels_${platform}_${date}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const printLabels = (onlyArticles) => {
-    const toPrint = (onlyArticles || articles.filter((a) => selectedKeys.has(a.key))).filter((a) => (platform === 'Blinkit' && a.upc) || a.code);
-    if (toPrint.length === 0) { alert('Select at least one article that has a code before printing.'); return; }
-    const isThermal = labelSize === 'thermal5050';
-    // The TVS LP-46 Neo's 2-up roll is two 50mm labels side by side (100mm total),
-    // well inside its 108mm print head width — so the barcode itself is sized down
-    // to comfortably fit next to several lines of compliance text on one 50mm-tall label.
-    const barcodeW = isThermal ? 44 * 3.78 : 190; // mm→px at 96dpi CSS reference, so the SVG's own coordinate space matches the printed mm size
-    const barcodeH = isThermal ? 13 * 3.78 : 40; // sized down from 18mm after feedback that it dwarfed the item name — 13mm still scans reliably at typical warehouse handheld-scanner distance
-    // A saved layout (from the label editor) only applies to the 50x50mm thermal
-    // size, since its coordinates are defined against that exact label — A4
-    // sheets keep the plain stacked layout regardless.
-    const renderWithLayout = (a, format, sf) => {
-      // A format with "apply to all" locks every mapped article onto its own
-      // layout, so an article's individual override (if any is still lying
-      // around from before that was turned on) is never allowed to win.
-      const layout = (!format.applyToAll && a.layoutOverride) || format.layout;
-      const barcodeValue = barcodeValueFor(a);
-      let html = '<div class="label-abs">';
-      LABEL_FIELD_DEFS.forEach((d) => {
-        const entry = layout[d.key];
-        if (!entry) return;
-        if (d.key === 'barcode' && sf.printBarcode === false) return;
-        if (d.key === 'qr' && !sf.printQR) return;
-        const style = `position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap;`;
-        if (d.kind === 'graphic') {
-          const px = entry.size * 3.78;
-          const markup = d.key === 'barcode' ? barcodeSVGMarkup(barcodeValue, px, px * 0.3, sf.showBarcodeNumber !== false) : qrSVGMarkup(barcodeValue, px);
-          if (markup) html += `<div style="${style}">${markup}</div>`;
-        } else if (d.key === 'expiryDate' && sf.expiryDateAsNumber) {
-          // Day-of-month-only mode: a small bordered box with just the digit(s),
-          // instead of the usual "Best Before: DD/MM/YY" line.
-          const box = entry.size * 1.8;
-          html += `<div style="${style} width:${box}px; height:${box}px; box-sizing:border-box; border:1.5px solid #000; border-radius:2px; display:flex; align-items:center; justify-content:center; font-size:${entry.size}px; font-weight:700; font-family:Arial,sans-serif; color:#000;">${expiryDayNumber(bestBeforeFor(a))}</div>`;
-        } else {
-          const content = { itemName: nameFor(a), netWeight: uomFor(a), packingDate: formatLabelDate(date), expiryDate: formatLabelDate(bestBeforeFor(a)) || '___________', eanText: barcodeValue, storeTemperature: format.storeTemperatureText || '', companyName: companyDetails.name || '', companyAddress: (companyDetails.address || '').replace(/\n/g, '<br/>'), fssai: companyDetails.fssai || '' }[d.key];
-          const prefix = d.hasPrefix && entry.prefix ? `${entry.prefix} ` : '';
-          const weight = d.key === 'itemName' ? 700 : 600;
-          html += `<div style="${style} font-size:${entry.size}px; font-weight:${weight}; font-family:Arial,sans-serif; color:#000;">${prefix}${content}</div>`;
-        }
-      });
-      (format.customFields || []).forEach((cf) => {
-        const entry = layout[`custom_${cf.id}`];
-        if (!entry) return;
-        html += `<div style="position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap; font-size:${entry.size}px; font-weight:600; font-family:Arial,sans-serif; color:#000;">${entry.prefix ? `${entry.prefix} ` : ''}${cf.value}</div>`;
-      });
-      // Own custom fields (added from the layout editor for this article alone)
-      // live in the alias's own layoutOverride, never on the shared format.
-      (a.layoutOverride?.ownCustomFields || []).forEach((cf) => {
-        const entry = layout[`own_${cf.id}`];
-        if (!entry) return;
-        const content = cf.label ? `${cf.label}: ${cf.value}` : (cf.value || '');
-        html += `<div style="position:absolute; left:${entry.x}mm; top:${entry.y}mm; transform:translateX(-50%); white-space:nowrap; font-size:${entry.size}px; font-weight:600; font-family:Arial,sans-serif; color:#000;">${content}</div>`;
-      });
-      html += '</div>';
-      return html;
-    };
-    let totalLabelCount = 0;
-    const labelsHtml = toPrint.map((a) => {
-      const format = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
-      const sf = format?.standardFields || { printBarcode: true, itemName: true, netWeight: true, showBarcodeNumber: true };
-      const qty = Math.max(1, Math.round(qtyFor(a)));
-      totalLabelCount += qty;
-      if (isThermal && (a.layoutOverride || format?.layout)) {
-        const oneLabel = renderWithLayout(a, format, sf);
-        return Array(qty).fill(oneLabel).join('');
-      }
-      // The indent file's own weight/quantity text (e.g. "280-320 g", "2 Units") is
-      // what the platform itself declared for this article — more authoritative for
-      // a printed Net Weight than the admin's own configured pack size, which exists
-      // mainly to drive internal packing-target math. Older orders imported before
-      // this was captured fall back to the configured value so nothing prints blank.
-      const netWeight = uomFor(a);
-      let oneLabel = '<div class="label">';
-      if (sf.itemName) oneLabel += `<div class="lbl-line lbl-name">${nameFor(a)}</div>`;
-      if (sf.netWeight) oneLabel += `<div class="lbl-line lbl-key">Net Wt: ${netWeight}</div>`;
-      if (sf.packingDate) oneLabel += `<div class="lbl-line lbl-key">Packed: ${formatLabelDate(date)}</div>`;
-      if (sf.expiryDate && sf.expiryDateAsNumber) {
-        oneLabel += `<div class="lbl-line lbl-key"><span style="display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border:1.5px solid #000; border-radius:2px; font-weight:700;">${expiryDayNumber(bestBeforeFor(a))}</span></div>`;
-      } else if (sf.expiryDate) {
-        oneLabel += `<div class="lbl-line lbl-key">Best Before: ${formatLabelDate(bestBeforeFor(a)) || '___________'}</div>`;
-      }
-      if (sf.eanText) oneLabel += `<div class="lbl-line lbl-key">EAN: ${barcodeValueFor(a)}</div>`;
-      if (sf.storeTemperature && format?.storeTemperatureText) oneLabel += `<div class="lbl-line lbl-key">${format.storeTemperatureText}</div>`;
-      if (sf.companyDetails) {
-        oneLabel += `<div class="lbl-line lbl-company-name">${companyDetails.name || ''}</div>`;
-        if (companyDetails.address) oneLabel += `<div class="lbl-line lbl-company-addr">${companyDetails.address.replace(/\n/g, '<br/>')}</div>`;
-        if (companyDetails.fssai) oneLabel += `<div class="lbl-line lbl-fssai">FSSAI: ${companyDetails.fssai}</div>`;
-      }
-      (format?.customFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label}: ${cf.value}</div>`; });
-      (a.layoutOverride?.ownCustomFields || []).forEach((cf) => { oneLabel += `<div class="lbl-line">${cf.label ? `${cf.label}: ` : ''}${cf.value}</div>`; });
-      if (sf.printBarcode !== false) {
-        oneLabel += barcodeSVGMarkup(barcodeValueFor(a), barcodeW, barcodeH, sf.showBarcodeNumber !== false);
-      } else if (sf.showBarcodeNumber !== false && barcodeValueFor(a)) {
-        // No scannable graphic on this format, but the code itself can still print
-        // as plain text (e.g. for manual lookup) if that toggle is on.
-        oneLabel += `<div class="lbl-line lbl-name">${barcodeValueFor(a)}</div>`;
-      }
-      if (sf.printQR) {
-        const qrSize = isThermal ? 26 * 3.78 : 70; // same mm→px reference as the barcode
-        const qrMarkup = qrSVGMarkup(barcodeValueFor(a), qrSize);
-        if (qrMarkup) oneLabel += `<div class="lbl-qr">${qrMarkup}</div>`;
-      }
-      oneLabel += '</div>';
-      return Array(qty).fill(oneLabel).join('');
-    }).join('');
-
-    // One page tall enough for every row, instead of a fixed 50mm (one row) —
-    // a fixed single-row page forces the browser to paginate a bigger batch
-    // into several separate pages, and many thermal label printers visibly
-    // pause at each page boundary. A single page long enough for the whole
-    // batch lets it feed through continuously.
-    const labelsPerRow = 2; // 100mm page ÷ 50mm label width
-    const totalRows = Math.max(1, Math.ceil(totalLabelCount / labelsPerRow));
-    const thermalStyle = `
-        @page { size: 100mm ${totalRows * 50}mm; margin: 0; }
-        html, body { width: 100mm; margin: 0; padding: 0; }
-        body { font-family: Arial, sans-serif; }
-        .grid { display: flex; flex-wrap: wrap; width: 100mm; }
-        .label { width: 50mm; height: 50mm; padding: 1.5mm; box-sizing: border-box; overflow: hidden; text-align: center; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        .label-abs { position: relative; width: 50mm; height: 50mm; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; }
-        .lbl-line { font-size: 7px; margin-top: 1.5px; line-height: 1.25; word-break: break-word; }
-        .lbl-key { font-size: 9.5px; font-weight: 600; }
-        .lbl-name { font-weight: 700; font-size: 13px; margin-top: 3px; line-height: 1.2; }
-        .lbl-company-name { font-size: 8px; font-weight: 700; color: #000; margin-top: 3px; line-height: 1.2; }
-        .lbl-company-addr { font-size: 6px; color: #333; margin-top: 1px; line-height: 1.2; }
-        .lbl-fssai { font-size: 8px; font-weight: 700; color: #000; margin-top: 1px; }
-        .lbl-qr { margin-top: 2px; }
-      `;
-    const a4Style = `
-        @page { margin: 8mm; }
-        body { font-family: Arial, sans-serif; margin: 0; }
-        .grid { display: flex; flex-wrap: wrap; gap: 4mm; }
-        .label { width: 60mm; border: 1px dashed #999; padding: 3mm; box-sizing: border-box; text-align: center; page-break-inside: avoid; }
-        .lbl-line { font-size: 9px; margin-top: 2px; line-height: 1.3; word-break: break-word; }
-        .lbl-key { font-size: 10px; font-weight: 600; }
-        .lbl-name { font-weight: 700; font-size: 11px; }
-        .lbl-company-name { font-size: 9.5px; font-weight: 700; color: #000; }
-        .lbl-company-addr { font-size: 7px; color: #333; }
-        .lbl-fssai { font-size: 9.5px; font-weight: 700; color: #000; }
-        .lbl-qr { margin-top: 3px; }
-      `;
-
-    const html = `<!DOCTYPE html><html><head><title>Barcode Labels — ${platform} — ${date}</title>
-      <style>${isThermal ? thermalStyle : a4Style}</style></head>
-      <body><div class="grid">${labelsHtml}</div>
-      <script>window.onload = function() { window.print(); };</script>
-      </body></html>`;
-    const w = window.open('', '_blank');
-    if (!w) { alert('Please allow popups to print labels.'); return; }
-    w.document.write(html);
-    w.document.close();
-    if (onRecordPrint) {
-      onRecordPrint(toPrint.map((a) => ({ key: a.key, date, platform, itemName: nameFor(a), qty: Math.max(1, Math.round(qtyFor(a))) })));
-    }
-  };
-
-  const editingArticle = editingArticleKey ? articles.find((a) => a.key === editingArticleKey) : null;
-  const editingFormat = editingArticle ? barcodeFormats.find((f) => f.id === editingArticle.barcodeFormatId) : null;
-  const saveArticleLayout = (layout, ownCustomFields) => {
-    if (!editingArticle.itemId) return;
-    onUpdateAlias(editingArticle.itemId, platform, { layoutOverride: { ...layout, ownCustomFields: ownCustomFields || [] } }, editingArticle.packSize, editingArticle.packUnit, editingArticle.rawEan || editingArticle.rawCode);
-  };
-
-  return (
-    <>
-    <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Print pack labels</p>
-      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Pulls every article from that day's indent automatically — as soon as it's mapped, not once it's packed. Adjust quantities if needed before printing.</p>
-      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
-          <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
-            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
-            {['ALL', ...CATEGORY_OPTIONS].map((c) => <option key={c} value={c}>{c === 'ALL' ? 'All' : c}</option>)}
-          </select>
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-        </div>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL SIZE</p>
-          <select value={labelSize} onChange={(e) => setLabelSize(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
-            <option value="thermal5050">TVS LP-46 Neo — 50×50mm (2-up roll)</option>
-            <option value="a4">A4 sheet — multiple per page</option>
-          </select>
-        </div>
-      </div>
-      {needsCompanyDetails && companyDetailsEmpty && (
-        <div style={{ background: '#FFF4E5', border: `1px solid ${AMBER}`, borderRadius: RADIUS.md, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: INK }}>
-          A format below prints "Company Details", but Business Details is empty for this city — that section will print blank. Fill it in under the <strong>Business Details</strong> tab.
-        </div>
-      )}
-      {articles.length === 0 ? (
-        <p style={{ color: MUTED, fontSize: 13 }}>No packed articles found for {platform} on {date}.</p>
-      ) : (
-        <>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
-            <button onClick={selectAllArticles} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
-            <button onClick={clearAllArticles} style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Barcode (EAN)</Th>{platform === 'Blinkit' && <Th>UPC Code</Th>}<Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
-              <tbody>
-                {articles.map((a) => {
-                  const rowFormat = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
-                  const layoutLocked = !!rowFormat?.applyToAll;
-                  return (
-                  <tr key={a.key}>
-                    <Td><input type="checkbox" checked={selectedKeys.has(a.key)} onChange={() => toggle(a.key)} /></Td>
-                    <Td>
-                      <input
-                        value={nameFor(a)}
-                        onChange={(e) => setNameOverrides((n) => ({ ...n, [a.key]: e.target.value }))}
-                        onBlur={() => saveRow(a)}
-                        style={{ fontSize: 13, width: 160, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
-                      />
-                      {printedFor(a) > 0 && (
-                        <span style={{ display: 'inline-block', marginTop: 4, background: 'rgba(47,82,51,0.12)', color: LEAF, fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '2px 8px' }}>
-                          Printed {printedFor(a)}
-                        </span>
-                      )}
-                    </Td>
-                    <Td>
-                      <input
-                        value={uomFor(a)}
-                        onChange={(e) => setUomOverrides((u) => ({ ...u, [a.key]: e.target.value }))}
-                        onBlur={() => saveRow(a)}
-                        style={{ fontSize: 12, width: 100, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
-                      />
-                    </Td>
-                    <Td>
-                      <input
-                        value={codeFor(a)}
-                        onChange={(e) => setCodeOverrides((c) => ({ ...c, [a.key]: e.target.value }))}
-                        onBlur={() => saveRow(a)}
-                        placeholder="No code"
-                        style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
-                      />
-                    </Td>
-                    {platform === 'Blinkit' && (
-                      <Td>
-                        <input
-                          value={upcFor(a)}
-                          onChange={(e) => setUpcOverrides((u) => ({ ...u, [a.key]: e.target.value }))}
-                          onBlur={() => saveRow(a)}
-                          placeholder="No UPC yet"
-                          title="Blinkit's indent only gives its own item code — enter the article's real UPC here so the printed barcode is scannable at retail"
-                          style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
-                        />
-                      </Td>
-                    )}
-                    <Td>
-                      {rowDirty(a) && (
-                        <button
-                          onClick={() => saveRow(a)}
-                          title="Save Article Name, UOM and Code"
-                          style={{ display: 'flex', alignItems: 'center', gap: 4, background: LEAF, color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          <CheckCircle2 size={13} /> Save
-                        </button>
-                      )}
-                    </Td>
-                    <Td>
-                      <input
-                        type="date"
-                        value={bestBeforeFor(a)}
-                        onChange={(e) => setBestBeforeOverrides((b) => ({ ...b, [a.key]: e.target.value }))}
-                        onBlur={(e) => commitBestBefore(a, e.target.value)}
-                        style={{ fontSize: 12, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
-                      />
-                      {a.shelfLifeDays != null && <p style={{ margin: '2px 0 0', fontSize: 10, color: MUTED }}>{a.shelfLifeDays}-day shelf life (remembered)</p>}
-                    </Td>
-                    <Td>
-                      <select
-                        value={a.barcodeFormatId || ''}
-                        onChange={(e) => onUpdateAlias(a.itemId, platform, { barcodeFormatId: e.target.value }, a.packSize, a.packUnit, a.rawEan || a.rawCode)}
-                        disabled={!a.itemId}
-                        title={!a.itemId ? 'This article isn\'t mapped to an item yet — map it in Orders first' : ''}
-                        style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px', background: a.itemId ? '#fff' : '#F6F3EA', color: a.itemId ? INK : MUTED }}
-                      >
-                        <option value="">Not mapped</option>
-                        {barcodeFormats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                      </select>
-                    </Td>
-                    <Td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input type="number" value={qtyFor(a)} onChange={(e) => setQtyOverrides((q) => ({ ...q, [a.key]: Number(e.target.value) }))} style={{ width: 70, padding: '6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }} />
-                        <button
-                          onClick={() => printLabels([a])}
-                          title="Print just this article"
-                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 6, padding: '6px 8px', cursor: 'pointer', flexShrink: 0 }}
-                        >
-                          <Barcode size={13} />
-                        </button>
-                        <button
-                          onClick={() => setEditingArticleKey(a.key)}
-                          title={layoutLocked ? 'This format applies the same layout to every article — edit it under Formats' : 'Edit this label\'s layout'}
-                          disabled={!a.barcodeFormatId || layoutLocked}
-                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: (a.barcodeFormatId && !layoutLocked) ? MUTED : '#C9C2AE', border: `1px solid ${(a.barcodeFormatId && !layoutLocked) ? LINE : '#E5E1D4'}`, borderRadius: 6, padding: '6px 8px', cursor: (a.barcodeFormatId && !layoutLocked) ? 'pointer' : 'default', flexShrink: 0 }}
-                        >
-                          <Pencil size={13} />
-                        </button>
-                      </div>
-                    </Td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={() => printLabels()} style={{ display: 'flex', alignItems: 'center', gap: 8, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-              <Barcode size={15} /> Print labels
-            </button>
-            <button onClick={downloadForBarTender} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-              <Download size={15} /> Export for BarTender
-            </button>
-          </div>
-        </>
-      )}
-    </Panel>
-    {editingArticle && editingFormat && (
-      <LabelDesigner
-        format={editingFormat}
-        article={{
-          itemName: nameFor(editingArticle),
-          netWeight: uomFor(editingArticle),
-          packingDate: formatLabelDate(date),
-          expiryDate: formatLabelDate(bestBeforeFor(editingArticle)) || '___________',
-          expiryDateRaw: bestBeforeFor(editingArticle),
-          code: barcodeValueFor(editingArticle),
-          layoutOverride: editingArticle.layoutOverride,
-        }}
-        companyDetails={companyDetails}
-        onSave={saveArticleLayout}
-        onClose={() => setEditingArticleKey(null)}
-      />
-    )}
-    </>
-  );
-}
-
-// ── Sales tracking helpers ──
-// A batch's "GRN value" uses the GRN file's OWN rate, not our internal Pricing
-// config — the platform's accepted rate is what actually gets billed/paid, and
-// it can differ from our list price (rate revisions, quality-based cuts, etc.).
-// Blinkit/Hyperpure GRNs carry their own landing rate, so accepted value comes
-// straight off the file. Flipkart's "Items Received" export has quantities only —
-// no rate column at all — so those rows are valued at our own agreed price from
-// the Pricing tab instead, matched back to the item by code (EAN or the FSN we
-// keep alongside it). Rows we can't match are reported rather than counted as
-// zero, so a partial match never quietly understates what the platform owes.
-function grnValueForBatch(batchId, grnReports, items, articlesByKey, configByKey, city, platform) {
-  let value = 0;
-  let pricedRows = 0;
-  let unpricedRows = 0;
-
-  const priceForCode = (code) => {
-    if (!code) return null;
-    const lower = String(code).toLowerCase();
-    const item = (items || []).find((it) => (it.aliases || []).some((a) =>
-      (a.code && a.code.toLowerCase() === lower) || (a.ean && a.ean.toLowerCase() === lower) || (a.altCode && a.altCode.toLowerCase() === lower)));
-    if (!item) return null;
-    const alias = (item.aliases || []).find((a) => a.channel === platform) || (item.aliases || [])[0];
-    if (!alias || !alias.packSize) return null;
-    const key = `${city}__${item.name}__${platform}__${alias.packSize}__${alias.packUnit}`;
-    const legacyKey = `${item.name}__${platform}__${alias.packSize}__${alias.packUnit}`;
-    const article = articlesByKey?.[key];
-    if (!article) return null;
-    return computeFinalPrice(article.basePrice, configByKey?.[key] || configByKey?.[legacyKey]);
-  };
-
-  grnReports.filter((g) => g.batchId === batchId).forEach((g) => {
-    (g.rows || []).forEach((r) => {
-      const qty = Number(r.qty) || 0;
-      if (qty <= 0) return;
-      const filePrice = Number(r.price) || 0;
-      if (filePrice > 0) { value += qty * filePrice; pricedRows += 1; return; }
-      const ourPrice = priceForCode(r.code);
-      if (ourPrice != null && ourPrice > 0) { value += qty * ourPrice; pricedRows += 1; }
-      else unpricedRows += 1;
-    });
-  });
-  return { value: Math.round(value * 100) / 100, pricedRows, unpricedRows };
-}
-
-function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onDeleteGrn, onUpdateIndentBatch, recipes }) {
+// ── Sales (mobile) — same verified logic as the admin panel, laid out in a
+// single narrow column instead of the admin's wide multi-panel grid ──
+function SalesTabMobile({ items, orders, purchases, pricingConfig, grnReports, indentBatches, salesInvoices, salesPayments, city, onUploadGrn, onUpdateIndentBatch, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment }) {
   const [view, setView] = useState('overview');
   const [openBatchId, setOpenBatchId] = useState(null);
   const configByKey = useMemo(() => { const m = {}; pricingConfig.forEach((x) => { m[x.id] = x; }); return m; }, [pricingConfig]);
-  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes), [orders, items, purchases, city, configByKey, recipes]);
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey), [orders, items, purchases, city, configByKey]);
   const articlesByKey = useMemo(() => { const m = {}; articles.forEach((a) => { m[a.key] = a; }); return m; }, [articles]);
 
-  // Advance indents are a buying heads-up only — the channel fixes their real
-  // fulfilment date (and issues the real indent) later, so counting them here
-  // would double-count the same goods in Sales, P&L and receivables.
   const batchFinancials = useMemo(() => indentBatches.filter((b) => !b.isAdvance).map((b) => {
     const costs = computeBatchArticleCosts(b, orders, articlesByKey, configByKey);
     const grn = grnValueForBatch(b.id, grnReports, items, articlesByKey, configByKey, city, b.platform);
-    // Fulfilment date lives on each order (set once, at indent-upload time), not
-    // on the batch document itself — every order in one indent shares the same
-    // date, so the first match is representative of the whole batch.
     const fulfilmentDate = orders.find((o) => o.batchId === b.id && o.fulfilmentDate)?.fulfilmentDate || '';
     // A batch can have more than one PO — the channel sometimes tops up an
     // indent with a second PO rather than reissuing the whole thing — so these
@@ -8303,61 +4766,35 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
   const openBatch = openBatchId ? batchFinancials.find((bf) => bf.batch.id === openBatchId) : null;
   if (openBatch) {
     return (
-      <SalesBatchDetail
+      <SalesBatchDetailMobile
         bf={openBatch}
         items={items}
         reports={grnReports.filter((g) => g.batchId === openBatch.batch.id)}
         onBack={() => setOpenBatchId(null)}
         onUploadGrn={onUploadGrn}
-        onDeleteGrn={onDeleteGrn}
         onUpdateIndentBatch={onUpdateIndentBatch}
       />
     );
   }
 
-  const views = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'batches', label: 'Indents & P&L' },
-    { key: 'invoices', label: 'Invoices' },
-    { key: 'payments', label: 'Payments' },
-  ];
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {views.map((v) => (
-          <button key={v.key} onClick={() => setView(v.key)}
-            style={{ background: view === v.key ? LEAF : '#fff', color: view === v.key ? '#fff' : INK, border: '1px solid ' + (view === v.key ? LEAF : LINE), borderRadius: RADIUS.md, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-            {v.label}
-          </button>
-        ))}
+    <div style={{ padding: 16 }}>
+      <div style={{ marginBottom: 12 }}>
+        <Chip label="Overview" active={view === 'overview'} onClick={() => setView('overview')} />
+        <Chip label="Indents & P&L" active={view === 'batches'} onClick={() => setView('batches')} />
+        <Chip label="Invoices" active={view === 'invoices'} onClick={() => setView('invoices')} />
+        <Chip label="Payments" active={view === 'payments'} onClick={() => setView('payments')} />
       </div>
-      {view === 'overview' && <SalesOverviewTab batchFinancials={batchFinancials} grnReports={grnReports} salesInvoices={salesInvoices} salesPayments={salesPayments} />}
-      {view === 'batches' && <SalesBatchesTab batchFinancials={batchFinancials} onOpen={setOpenBatchId} />}
-      {view === 'invoices' && <SalesInvoicesTab batchFinancials={batchFinancials} salesInvoices={salesInvoices} salesPayments={salesPayments} onSaveInvoice={onSaveInvoice} onDeleteInvoice={onDeleteInvoice} />}
-      {view === 'payments' && <SalesPaymentsTab batchFinancials={batchFinancials} salesInvoices={salesInvoices} salesPayments={salesPayments} onSavePayment={onSavePayment} onDeletePayment={onDeletePayment} />}
+      {view === 'overview' && <SalesOverviewMobile batchFinancials={batchFinancials} grnReports={grnReports} salesInvoices={salesInvoices} salesPayments={salesPayments} />}
+      {view === 'batches' && <SalesBatchesMobile batchFinancials={batchFinancials} onOpen={setOpenBatchId} />}
+      {view === 'invoices' && <SalesInvoicesMobile batchFinancials={batchFinancials} salesInvoices={salesInvoices} salesPayments={salesPayments} onSaveInvoice={onSaveInvoice} onDeleteInvoice={onDeleteInvoice} />}
+      {view === 'payments' && <SalesPaymentsMobile batchFinancials={batchFinancials} salesInvoices={salesInvoices} salesPayments={salesPayments} onSavePayment={onSavePayment} onDeletePayment={onDeletePayment} />}
     </div>
   );
 }
 
-// Exact sales for a day = what the GRN says the channel actually accepted.
-// Everything upstream (dispatch, PO) is an estimate; this is the number that
-// gets billed, so it is what the daily chart is built from.
-function dailySalesFromGrn(grnReports, batchFinancials) {
-  const byDate = {};
-  batchFinancials.forEach((bf) => {
-    if (bf.grnValue <= 0) return;
-    const reports = grnReports.filter((g) => g.batchId === bf.batch.id);
-    const date = (reports[0] && reports[0].date) || bf.batch.purchaseDate || '-';
-    if (!byDate[date]) byDate[date] = { date, total: 0, cost: 0 };
-    byDate[date].total = Math.round((byDate[date].total + bf.grnValue) * 100) / 100;
-    byDate[date].cost = Math.round((byDate[date].cost + bf.indentCost) * 100) / 100;
-  });
-  return Object.values(byDate).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-}
-
-function SalesOverviewTab({ batchFinancials, grnReports, salesInvoices, salesPayments }) {
+function SalesOverviewMobile({ batchFinancials, grnReports, salesInvoices, salesPayments }) {
   const daily = dailySalesFromGrn(grnReports, batchFinancials);
-  const maxVal = Math.max(1, ...daily.map((d) => Math.max(d.total, d.cost)));
   const grandSales = Math.round(daily.reduce((s, d) => s + d.total, 0) * 100) / 100;
   const grandCost = Math.round(daily.reduce((s, d) => s + d.cost, 0) * 100) / 100;
   const grandProfit = Math.round((grandSales - grandCost) * 100) / 100;
@@ -8365,182 +4802,118 @@ function SalesOverviewTab({ batchFinancials, grnReports, salesInvoices, salesPay
   const cards = PLATFORMS.map((platform) => {
     const bfs = batchFinancials.filter((bf) => bf.batch.platform === platform);
     const grn = Math.round(bfs.reduce((s, bf) => s + bf.grnValue, 0) * 100) / 100;
-    const platformInvoices = salesInvoices.filter((i) => i.platform === platform);
-    // Once real invoices exist for a channel, they're a more accurate "owed"
-    // than the GRN estimate — this used to be Flipkart-only because that was
-    // the only channel with an invoicing flow; now any channel can have one.
-    const owed = platformInvoices.length > 0
-      ? Math.round(platformInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0) * 100) / 100
+    const owed = platform === 'Flipkart'
+      ? Math.round(salesInvoices.filter((i) => i.platform === platform).reduce((s, i) => s + (Number(i.amount) || 0), 0) * 100) / 100
       : grn;
     const received = Math.round(salesPayments.filter((p) => p.platform === platform).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
-    return { platform, grn, owed, received, outstanding: Math.round((owed - received) * 100) / 100, hasInvoices: platformInvoices.length > 0 };
+    return { platform, grn, owed, received, outstanding: Math.round((owed - received) * 100) / 100 };
   });
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
-        <Panel style={{ flex: 1, minWidth: 180 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>EXACT SALES (GRN)</p>
-          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: LEAF }}>{money(grandSales)}</p>
-        </Panel>
-        <Panel style={{ flex: 1, minWidth: 180 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>INDENT COST</p>
-          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: TOMATO }}>{money(grandCost)}</p>
-        </Panel>
-        <Panel style={{ flex: 1, minWidth: 180 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>NET PROFIT</p>
-          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: grandProfit >= 0 ? LEAF : TOMATO }}>{money(grandProfit)}</p>
-        </Panel>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>SALES (GRN)</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: LEAF }}>{money(grandSales)}</div>
+        </Card>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>COST</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: TOMATO }}>{money(grandCost)}</div>
+        </Card>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>PROFIT</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: grandProfit >= 0 ? LEAF : TOMATO }}>{money(grandProfit)}</div>
+        </Card>
       </div>
 
-      <Panel style={{ marginBottom: 16 }}>
-        <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Daily sales</p>
-        <p style={{ margin: '0 0 14px', fontSize: 12, color: MUTED }}>Built only from uploaded GRN reports - the quantities the channel actually accepted, valued at the accepted rate. Days without a GRN yet do not appear.</p>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={sectionTitle}>Daily sales</div>
+        <div style={hint}>Built only from uploaded GRN reports. Days without a GRN yet don't appear.</div>
         {daily.length === 0 ? (
-          <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>No GRN reports uploaded yet, so there is nothing to chart.</p>
+          <div style={{ fontSize: 12, color: MUTED }}>No GRN reports uploaded yet.</div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 200, overflowX: 'auto', paddingTop: 8 }}>
-            {daily.map((d) => {
-              const salesH = Math.round((d.total / maxVal) * 140);
-              const costH = Math.round((d.cost / maxVal) * 140);
-              const profit = Math.round((d.total - d.cost) * 100) / 100;
-              return (
-                <div key={d.date} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 70 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: profit >= 0 ? LEAF : TOMATO }}>{money(profit)}</span>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 145 }}>
-                    <div title={'Sales ' + money(d.total)} style={{ width: 20, height: Math.max(2, salesH), background: LEAF, borderRadius: '3px 3px 0 0' }} />
-                    <div title={'Cost ' + money(d.cost)} style={{ width: 20, height: Math.max(2, costH), background: TOMATO, borderRadius: '3px 3px 0 0', opacity: 0.75 }} />
-                  </div>
-                  <span style={{ fontSize: 10, color: MUTED, whiteSpace: 'nowrap' }}>{String(d.date).slice(5)}</span>
+          [...daily].reverse().map((d) => {
+            const profit = Math.round((d.total - d.cost) * 100) / 100;
+            return (
+              <div key={d.date} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${LINE}` }}>
+                <div style={{ fontSize: 12, color: INK, fontWeight: 700 }}>{d.date}</div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <span style={{ fontSize: 11, color: LEAF }}>S {money(d.total)}</span>
+                  <span style={{ fontSize: 11, color: TOMATO }}>C {money(d.cost)}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: profit >= 0 ? LEAF : TOMATO }}>{money(profit)}</span>
                 </div>
-              );
-            })}
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: MUTED }}><span style={{ width: 12, height: 12, background: LEAF, borderRadius: 3 }} /> Sales (GRN)</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: MUTED }}><span style={{ width: 12, height: 12, background: TOMATO, opacity: 0.75, borderRadius: 3 }} /> Indent cost</span>
-        </div>
-      </Panel>
-
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {cards.map((c) => (
-          <Panel key={c.platform} style={{ flex: 1, minWidth: 250 }}>
-            <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 15, color: INK }}>{c.platform}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>Accepted (GRN)</span><span style={{ fontSize: 13, fontWeight: 700 }}>{money(c.grn)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>{c.hasInvoices ? 'Invoiced' : 'Owed (from GRN)'}</span><span style={{ fontSize: 13, fontWeight: 700 }}>{money(c.owed)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, color: MUTED }}>Received</span><span style={{ fontSize: 13, fontWeight: 700, color: LEAF }}>{money(c.received)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid ' + LINE, paddingTop: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 700 }}>Outstanding</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: c.outstanding > 0 ? TOMATO : LEAF }}>{money(c.outstanding)}</span>
               </div>
-            </div>
-          </Panel>
-        ))}
-      </div>
+            );
+          })
+        )}
+      </Card>
+
+      {cards.map((c) => (
+        <Card key={c.platform} style={{ marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>{c.platform}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}><span style={{ color: MUTED }}>Accepted (GRN)</span><span style={{ fontWeight: 700 }}>{money(c.grn)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}><span style={{ color: MUTED }}>{c.platform === 'Flipkart' ? 'Invoiced' : 'Owed (GRN)'}</span><span style={{ fontWeight: 700 }}>{money(c.owed)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}><span style={{ color: MUTED }}>Received</span><span style={{ fontWeight: 700, color: LEAF }}>{money(c.received)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, borderTop: `1px solid ${LINE}`, paddingTop: 6, marginTop: 4 }}>
+            <span style={{ fontWeight: 700 }}>Outstanding</span>
+            <span style={{ fontWeight: 800, color: c.outstanding > 0 ? TOMATO : LEAF }}>{money(c.outstanding)}</span>
+          </div>
+        </Card>
+      ))}
     </div>
   );
 }
 
-function SalesBatchesTab({ batchFinancials, onOpen }) {
+function SalesBatchesMobile({ batchFinancials, onOpen }) {
   const sorted = [...batchFinancials].sort((a, b) => String(b.batch.id).localeCompare(String(a.batch.id)));
   return (
-    <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Indents - cost, PO and profit</p>
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Each indent runs the same course: cost from purchases, then the PO tells us what they will pay, then the GRN confirms what they took. Open one to see it article by article.</p>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Indent</Th><Th>Channel</Th><Th>Fulfilment date</Th><Th>Indent cost</Th><Th>PO value</Th><Th>PO number</Th><Th>Sales (GRN)</Th><Th /></tr></thead>
-          <tbody>
-            {sorted.map((bf) => {
-              const poNumbers = bf.poReports.map((r) => r.poNumber).filter(Boolean);
-              return (
-                <tr key={bf.batch.id}>
-                  <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{bf.batch.id}</Td>
-                  <Td>{bf.batch.platform}</Td>
-                  <Td style={{ fontSize: 12 }}>{bf.fulfilmentDate || '-'}</Td>
-                  <Td>{money(bf.indentCost)}</Td>
-                  <Td>{bf.poValue == null ? <span style={{ color: AMBER, fontSize: 12 }}>No PO yet</span> : money(bf.poValue)}</Td>
-                  <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{poNumbers.length ? poNumbers.join(', ') : <span style={{ color: AMBER, fontSize: 12, fontFamily: 'inherit' }}>No PO yet</span>}</Td>
-                  <Td>{bf.hasGrn ? money(bf.grnValue) : <span style={{ color: AMBER, fontSize: 12 }}>No GRN yet</span>}</Td>
-                  <Td>
-                    <button onClick={() => onOpen(bf.batch.id)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', color: LEAF, border: '1px solid ' + LEAF, borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                      Open <ChevronRight size={12} />
-                    </button>
-                  </Td>
-                </tr>
-              );
-            })}
-            {sorted.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No indent batches yet.</Td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
+    <div>
+      {sorted.length === 0 && <Card><div style={{ fontSize: 12, color: MUTED }}>No indent batches yet.</div></Card>}
+      {sorted.map((bf) => {
+        const poNumbers = bf.poReports.map((r) => r.poNumber).filter(Boolean);
+        return (
+          <Card key={bf.batch.id} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontFamily: 'monospace', fontSize: 11, color: MUTED }}>{bf.batch.id}</div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{bf.batch.platform}</div>
+                <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>{bf.fulfilmentDate ? `Fulfil ${bf.fulfilmentDate}` : 'No fulfilment date'}</div>
+              </div>
+              <button onClick={() => onOpen(bf.batch.id)} style={{ background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700 }}>Open ›</button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11 }}>
+              <span style={{ color: MUTED }}>Cost <b style={{ color: INK }}>{money(bf.indentCost)}</b></span>
+              <span style={{ color: MUTED }}>PO <b style={{ color: INK }}>{bf.poValue == null ? '—' : money(bf.poValue)}</b></span>
+              <span style={{ color: MUTED }}>GRN <b style={{ color: INK }}>{bf.hasGrn ? money(bf.grnValue) : '—'}</b></span>
+            </div>
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 6, fontFamily: 'monospace' }}>
+              {poNumbers.length ? `PO#: ${poNumbers.join(', ')}` : <span style={{ color: AMBER, fontFamily: 'inherit' }}>No PO yet</span>}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
   );
 }
 
-// Matches a PO or GRN line back to one of our own costed articles. Channel files
-// identify articles by their own code (EAN or FSN, both kept on the alias), so
-// code wins; a normalised name is only a fallback for codes we have never seen.
-function matchChannelRow(row, costRows, items) {
-  const code = String(row.code || '').toLowerCase();
-  if (code) {
-    const item = items.find((it) => (it.aliases || []).some((a) =>
-      (a.code && a.code.toLowerCase() === code) || (a.ean && a.ean.toLowerCase() === code) || (a.altCode && a.altCode.toLowerCase() === code)));
-    if (item) {
-      const hit = costRows.find((cr) => String(cr.articleName).toLowerCase().indexOf(String(item.name).toLowerCase()) !== -1);
-      if (hit) return hit;
-    }
-    const byCode = costRows.find((cr) => String(cr.code || '').toLowerCase() === code);
-    if (byCode) return byCode;
-  }
-  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const n = norm(row.name);
-  if (!n) return null;
-  return costRows.find((cr) => {
-    const a = norm(cr.articleName);
-    return a && (a === n || a.indexOf(n) !== -1 || n.indexOf(a) !== -1);
-  }) || null;
-}
-
-function PoReportRow({ report, onRemove }) {
+function PoReportRowMobile({ report, onRemove }) {
   const [confirming, setConfirming] = useState(false);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
-      <p style={{ margin: 0, fontSize: 11, color: MUTED }}>{report.fileName} - {(report.rows || []).length} rows</p>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 2 }}>
+      <div style={{ fontSize: 11, color: MUTED }}>{report.fileName}</div>
       {!confirming ? (
-        <button onClick={() => setConfirming(true)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0, padding: 0 }}>Remove</button>
+        <button onClick={() => setConfirming(true)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 10, fontWeight: 700, flexShrink: 0, padding: 0 }}>Remove</button>
       ) : (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: TOMATO, fontWeight: 700 }}>Remove?</span>
-          <button onClick={onRemove} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-          <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>No</button>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <button onClick={onRemove} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 6px', fontSize: 10, fontWeight: 700 }}>Yes</button>
+          <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 6px', fontSize: 10, fontWeight: 700 }}>No</button>
         </span>
       )}
     </div>
   );
 }
 
-function GrnReportRow({ report, onRemove }) {
-  const [confirming, setConfirming] = useState(false);
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
-      <p style={{ margin: 0, fontSize: 11, color: MUTED }}>{report.fileName} - {(report.rows || []).length} rows</p>
-      {!confirming ? (
-        <button onClick={() => setConfirming(true)} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0, padding: 0 }}>Remove</button>
-      ) : (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: TOMATO, fontWeight: 700 }}>Remove?</span>
-          <button onClick={onRemove} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-          <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>No</button>
-        </span>
-      )}
-    </div>
-  );
-}
-
-function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateIndentBatch, onDeleteGrn }) {
+function SalesBatchDetailMobile({ bf, items, reports, onBack, onUploadGrn, onUpdateIndentBatch }) {
   const poRef = useRef(null);
   const grnRef = useRef(null);
   const [poError, setPoError] = useState('');
@@ -8559,20 +4932,15 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     };
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     if (isPdf) {
-      if (batch.platform === 'Zepto') {
-        extractPdfText(file).then((t) => { const parsed = parseZeptoPoText(t); finish(parsed.rows, file.name, t); }).catch(() => setPoError('Could not read this PDF.'));
-      } else {
-        extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name, t)).catch(() => setPoError('Could not read this PDF.'));
-      }
-      e.target.value = '';
-      return;
+      extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name, t)).catch(() => setPoError('Could not read this PDF.'));
+      e.target.value = ''; return;
     }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: 'array' });
         finish(parsePoSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })), file.name, null);
-      } catch (err) { setPoError('Could not read this file - use .xlsx, .xls, .csv or .pdf.'); }
+      } catch (err) { setPoError('Could not read this file — use .xlsx, .xls, .csv or .pdf.'); }
     };
     reader.readAsArrayBuffer(file);
     e.target.value = '';
@@ -8587,41 +4955,16 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
       onUploadGrn(batch.platform, batchDate, name, rows, batch.id);
     };
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const isCsv = file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv');
     if (isPdf) {
-      if (batch.platform === 'Zepto') {
-        extractPdfWords(file).then((pages) => finish(parseZeptoGrnWords(pages), file.name)).catch(() => setGrnError('Could not read this PDF.'));
-      } else {
-        extractPdfText(file).then((t) => finish(parseGrnPdfText(t), file.name)).catch(() => setGrnError('Could not read this PDF.'));
-      }
-      e.target.value = '';
-      return;
-    }
-    // Flipkart has no GRN report of its own - the store's "Items Received"
-    // export is used instead, valued against the PO(s) already uploaded here.
-    if (isCsv && batch.platform === 'Flipkart') {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const receivingRows = parseFlipkartReceivingCsv(String(ev.target.result || ''));
-          if (!receivingRows.length) { setGrnError('No item rows found in this receiving file.'); return; }
-          const poRows = (bf.poReports || []).flatMap((r) => r.rows);
-          const grnRows = valueFlipkartReceiving(receivingRows, poRows);
-          finish(grnRows, file.name);
-          const unmatchedCount = grnRows.filter((r) => !r.price).length;
-          if (unmatchedCount) setGrnError(`${unmatchedCount} item(s) could not be matched to an uploaded PO price and were recorded at ₹0 - upload the matching PO first for full accuracy.`);
-        } catch (err) { setGrnError('Could not read this file - use the "Items Received" CSV export.'); }
-      };
-      reader.readAsText(file);
-      e.target.value = '';
-      return;
+      extractPdfText(file).then((t) => finish(parseGrnPdfText(t), file.name)).catch(() => setGrnError('Could not read this PDF.'));
+      e.target.value = ''; return;
     }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: 'array' });
         finish(parseGrnSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })), file.name);
-      } catch (err) { setGrnError('Could not read this file - use .xlsx, .xls, .csv or .pdf.'); }
+      } catch (err) { setGrnError('Could not read this file — use .xlsx, .xls, .csv or .pdf.'); }
     };
     reader.readAsArrayBuffer(file);
     e.target.value = '';
@@ -8631,136 +4974,344 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     const cr = matchChannelRow(po, bf.costRows, items);
     const ourCost = cr && cr.finalPricePerPack != null ? cr.finalPricePerPack : null;
     const margin = ourCost == null ? null : Math.round((po.price - ourCost) * 100) / 100;
-    return { po, ourCost, margin, marginPct: ourCost ? Math.round((margin / ourCost) * 1000) / 10 : null };
+    return { po, ourCost, margin };
   }), [bf.poRows, bf.costRows, items]);
-  const unmatched = comparison.filter((x) => x.ourCost == null).length;
 
-  const btn = { display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: '1px solid ' + LEAF, borderRadius: RADIUS.md, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+  const btn = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 0', fontSize: 12, fontWeight: 700, flex: 1 };
 
   return (
-    <div>
-      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14 }}>
+    <div style={{ padding: 16 }}>
+      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, padding: 0, marginBottom: 12 }}>
         <ArrowLeft size={15} /> Back to indents
       </button>
 
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
-        <Panel style={{ flex: 1, minWidth: 170 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>INDENT COST</p>
-          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: TOMATO }}>{money(bf.indentCost)}</p>
-          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>{bf.pricedCount}/{bf.totalCount} articles priced, shorts removed</p>
-        </Panel>
-        <Panel style={{ flex: 1, minWidth: 170 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>PO VALUE</p>
-          <p style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{bf.poValue == null ? '-' : money(bf.poValue)}</p>
-          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>
-            {bf.poRows.length > 0 ? `${bf.poRows.length} article${bf.poRows.length === 1 ? '' : 's'} from ${bf.poReports.length} PO${bf.poReports.length === 1 ? '' : 's'}` : 'No PO uploaded'}
-          </p>
-        </Panel>
-        <Panel style={{ flex: 1, minWidth: 170 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>EXPECTED PROFIT</p>
-          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: bf.expectedProfit == null ? MUTED : (bf.expectedProfit >= 0 ? LEAF : TOMATO) }}>{bf.expectedProfit == null ? '-' : money(bf.expectedProfit)}</p>
-          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>PO value minus indent cost</p>
-        </Panel>
-        <Panel style={{ flex: 1, minWidth: 170 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>NET PROFIT</p>
-          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: bf.netProfit == null ? MUTED : (bf.netProfit >= 0 ? LEAF : TOMATO) }}>{bf.netProfit == null ? '-' : money(bf.netProfit)}</p>
-          <p style={{ margin: '4px 0 0', fontSize: 10, color: MUTED }}>{bf.hasGrn ? 'GRN ' + money(bf.grnValue) + ' minus indent cost' : 'Waiting for GRN'}</p>
-        </Panel>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>COST</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: TOMATO }}>{money(bf.indentCost)}</div>
+        </Card>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>PO VALUE</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{bf.poValue == null ? '—' : money(bf.poValue)}</div>
+          <div style={{ fontSize: 9, color: MUTED, marginTop: 2 }}>
+            {bf.poRows.length > 0 ? `${bf.poRows.length} article${bf.poRows.length === 1 ? '' : 's'} · ${bf.poReports.length} PO${bf.poReports.length === 1 ? '' : 's'}` : 'No PO uploaded'}
+          </div>
+        </Card>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>EXPECTED PROFIT</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: bf.expectedProfit == null ? INK : (bf.expectedProfit >= 0 ? LEAF : TOMATO) }}>{bf.expectedProfit == null ? '—' : money(bf.expectedProfit)}</div>
+        </Card>
+        <Card style={{ flex: 1, padding: 10 }}>
+          <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>NET PROFIT</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: bf.netProfit == null ? INK : (bf.netProfit >= 0 ? LEAF : TOMATO) }}>{bf.netProfit == null ? '—' : money(bf.netProfit)}</div>
+        </Card>
       </div>
 
-      <Panel style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          <div>
-            <p style={{ margin: '0 0 2px', fontWeight: 700, fontSize: 14, color: INK }}>{batch.platform} - {batch.fileName}</p>
-            <p style={{ margin: 0, fontSize: 11, color: MUTED }}>Indent date {batchDate}</p>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button onClick={() => poRef.current && poRef.current.click()} style={btn}><Upload size={13} /> {bf.poReports.length ? 'Add another PO' : 'Add PO'}</button>
-            <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handlePoFile} style={{ display: 'none' }} />
-            <button onClick={() => grnRef.current && grnRef.current.click()} style={btn}><Upload size={13} /> {batch.platform === 'Flipkart' ? (reports.length ? 'Add another Receiving' : 'Upload Receiving') : (reports.length ? 'Add another GRN' : 'Upload GRN')}</button>
-            <input ref={grnRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
-          </div>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{batch.platform} — {batch.fileName}</div>
+        <div style={{ fontSize: 11, color: MUTED, marginBottom: 10 }}>Indent date {batchDate}</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => poRef.current && poRef.current.click()} style={btn}><Upload size={12} /> {bf.poReports.length ? 'Add another PO' : 'Add PO'}</button>
+          <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handlePoFile} style={{ display: 'none' }} />
+          <button onClick={() => grnRef.current && grnRef.current.click()} style={btn}><Upload size={12} /> {reports.length ? 'Add GRN' : 'Upload GRN'}</button>
+          <input ref={grnRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleGrnFile} style={{ display: 'none' }} />
         </div>
-        {poError && <p style={{ margin: '8px 0 0', fontSize: 11, color: TOMATO }}>{poError}</p>}
-        {grnError && <p style={{ margin: '8px 0 0', fontSize: 11, color: TOMATO }}>{grnError}</p>}
+        {poError && <div style={{ fontSize: 11, color: TOMATO, marginTop: 6 }}>{poError}</div>}
+        {grnError && <div style={{ fontSize: 11, color: TOMATO, marginTop: 6 }}>{grnError}</div>}
         {bf.poReports.length > 0 && (
-          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + LINE }}>
-            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PO REPORTS ({bf.poReports.length})</p>
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>{bf.poReports.length} PO REPORT{bf.poReports.length === 1 ? '' : 'S'}</div>
             {bf.poReports.map((r) => (
-              <PoReportRow key={r.id} report={r} onRemove={() => onUpdateIndentBatch(batch.id, { poReports: bf.poReports.filter((x) => x.id !== r.id) })} />
+              <PoReportRowMobile key={r.id} report={r} onRemove={() => onUpdateIndentBatch(batch.id, { poReports: bf.poReports.filter((x) => x.id !== r.id) })} />
             ))}
           </div>
         )}
         {reports.length > 0 && (
-          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + LINE }}>
-            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>GRN REPORTS ({reports.length})</p>
-            {reports.map((g) => (
-              <GrnReportRow key={g.id} report={g} onRemove={() => onDeleteGrn(g.id)} />
-            ))}
-            {bf.grnUnpricedRows > 0 && <p style={{ margin: '6px 0 0', fontSize: 11, color: AMBER }}>{bf.grnUnpricedRows} GRN row(s) could not be matched to an item, so they are not valued.</p>}
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>{reports.length} GRN REPORT{reports.length === 1 ? '' : 'S'}</div>
+            {reports.map((g) => <div key={g.id} style={{ fontSize: 11, color: MUTED }}>{g.fileName}</div>)}
+            {bf.grnUnpricedRows > 0 && <div style={{ fontSize: 11, color: AMBER, marginTop: 4 }}>{bf.grnUnpricedRows} row(s) couldn't be priced.</div>}
           </div>
         )}
-      </Panel>
+      </Card>
 
       {bf.poRows.length > 0 && (
-        <Panel style={{ marginBottom: 16 }}>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Price check - our cost vs what they will pay</p>
-          <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Green means the PO price covers our packed cost; red means we would lose money on that article.{unmatched > 0 ? ' ' + unmatched + ' PO row(s) could not be matched to a costed article.' : ''}</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><Th>Article (from PO)</Th><Th>PO qty</Th><Th>Our cost / pack</Th><Th>PO price / pack</Th><Th>Margin / pack</Th><Th>Margin %</Th></tr></thead>
-              <tbody>
-                {comparison.map((x, i) => {
-                  const good = x.margin != null && x.margin >= 0;
-                  return (
-                    <tr key={i} style={{ background: x.margin == null ? 'transparent' : (good ? 'rgba(47,82,51,0.06)' : 'rgba(217,85,44,0.08)') }}>
-                      <Td style={{ fontWeight: 700 }}>{x.po.name || x.po.code}</Td>
-                      <Td>{x.po.qty}</Td>
-                      <Td>{x.ourCost == null ? <span style={{ color: AMBER, fontSize: 12 }}>No match</span> : money(x.ourCost)}</Td>
-                      <Td>{money(x.po.price)}</Td>
-                      <Td style={{ fontWeight: 800, color: x.margin == null ? MUTED : (good ? LEAF : TOMATO) }}>{x.margin == null ? '-' : (x.margin >= 0 ? '+' : '') + money(x.margin)}</Td>
-                      <Td style={{ color: x.marginPct == null ? MUTED : (good ? LEAF : TOMATO) }}>{x.marginPct == null ? '-' : x.marginPct + '%'}</Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
+        <Card style={{ marginBottom: 12 }}>
+          <div style={sectionTitle}>Price check</div>
+          <div style={hint}>Green covers our cost; red means a loss on that article.</div>
+          {comparison.map((c, i) => {
+            const good = c.margin != null && c.margin >= 0;
+            return (
+              <div key={i} style={{ background: c.margin == null ? 'transparent' : (good ? 'rgba(47,82,51,0.07)' : 'rgba(217,85,44,0.09)'), borderRadius: 6, padding: '6px 8px', marginBottom: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{c.po.name || c.po.code}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: MUTED }}>
+                  <span>Our cost: {c.ourCost == null ? 'No match' : money(c.ourCost)}</span>
+                  <span>PO: {money(c.po.price)}</span>
+                  <span style={{ fontWeight: 700, color: c.margin == null ? MUTED : (good ? LEAF : TOMATO) }}>{c.margin == null ? '—' : `${c.margin >= 0 ? '+' : ''}${money(c.margin)}`}</span>
+                </div>
+              </div>
+            );
+          })}
+        </Card>
       )}
 
-      <Panel>
-        <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Indent cost breakdown ({bf.pricedCount}/{bf.totalCount} articles priced)</p>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Article</Th><Th>Code</Th><Th>Ordered</Th><Th>Short</Th><Th>Costed for</Th><Th>Cost / pack</Th><Th>Cost</Th></tr></thead>
-            <tbody>
-              {bf.costRows.map((r) => (
-                <tr key={r.orderId}>
-                  <Td style={{ fontWeight: 700 }}>{r.articleName}</Td>
-                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</Td>
-                  <Td>{r.packQty}</Td>
-                  <Td style={{ color: r.shortPacks > 0 ? TOMATO : MUTED }}>{r.shortPacks > 0 ? r.shortPacks : '-'}</Td>
-                  <Td>{r.effectivePacks}</Td>
-                  <Td>{r.finalPricePerPack == null ? <span style={{ color: MUTED }}>No price</span> : money(r.finalPricePerPack)}</Td>
-                  <Td style={{ fontWeight: 700, color: r.cost == null ? MUTED : LEAF }}>{r.cost == null ? '-' : money(r.cost)}</Td>
-                </tr>
-              ))}
-              {bf.costRows.length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No articles in this indent.</Td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+      <Card>
+        <div style={sectionTitle}>Cost breakdown ({bf.pricedCount}/{bf.totalCount} priced)</div>
+        {bf.costRows.map((r) => (
+          <div key={r.orderId} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${LINE}` }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>{r.articleName}</div>
+              <div style={{ fontSize: 10, color: MUTED }}>{r.effectivePacks} packs{r.shortPacks > 0 ? ` · ${r.shortPacks} short` : ''}</div>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: r.cost == null ? MUTED : LEAF }}>{r.cost == null ? 'No price' : money(r.cost)}</div>
+          </div>
+        ))}
+        {bf.costRows.length === 0 && <div style={{ fontSize: 12, color: MUTED }}>No articles in this indent.</div>}
+      </Card>
     </div>
   );
 }
 
+function SalesInvoicesMobile({ batchFinancials, salesInvoices, salesPayments, onSaveInvoice, onDeleteInvoice }) {
+  const [creating, setCreating] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(todayLocalDate());
+  const [amount, setAmount] = useState('');
+  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
+
+  const uninvoicedBatches = batchFinancials.filter((bf) => bf.batch.platform === 'Flipkart' && !bf.invoice);
+  const toggleBatch = (id) => setSelectedBatchIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const receivedFor = (invoiceId) => Math.round(salesPayments.filter((p) => p.linkedInvoiceId === invoiceId).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
+
+  const save = () => {
+    if (!invoiceNumber.trim() || !amount || selectedBatchIds.length === 0) return;
+    onSaveInvoice({ id: `INV-${Date.now().toString(36).toUpperCase()}`, platform: 'Flipkart', invoiceNumber: invoiceNumber.trim(), invoiceDate, amount: Number(amount), batchIds: selectedBatchIds });
+    setCreating(false); setInvoiceNumber(''); setAmount(''); setSelectedBatchIds([]);
+  };
+
+  const flipkartInvoices = salesInvoices.filter((inv) => inv.platform === 'Flipkart');
+
+  return (
+    <div>
+      {!creating ? (
+        <button onClick={() => setCreating(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontWeight: 700, fontSize: 12, marginBottom: 12 }}>
+          <Plus size={13} /> New invoice
+        </button>
+      ) : (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={sectionTitle}>New Flipkart invoice</div>
+          <div style={smallLabel}>INVOICE NUMBER</div>
+          <Field value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+          <div style={smallLabel}>INVOICE DATE</div>
+          <Field type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+          <div style={smallLabel}>AMOUNT (₹)</div>
+          <Field type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <div style={{ ...smallLabel, marginTop: 8 }}>BATCHES COVERED</div>
+          <div style={{ maxHeight: 140, overflowY: 'auto', border: `1px solid ${LINE}`, borderRadius: 8, padding: 8, marginBottom: 10 }}>
+            {uninvoicedBatches.length === 0 && <div style={{ fontSize: 11, color: MUTED }}>No un-invoiced Flipkart batches with GRN data yet.</div>}
+            {uninvoicedBatches.map((bf) => (
+              <label key={bf.batch.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 6 }}>
+                <input type="checkbox" checked={selectedBatchIds.includes(bf.batch.id)} onChange={() => toggleBatch(bf.batch.id)} />
+                {bf.batch.id} — GRN {money(bf.grnValue)}
+              </label>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <PrimaryBtn onClick={save}>Save invoice</PrimaryBtn>
+            <button onClick={() => setCreating(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 16px', fontWeight: 700, fontSize: 12 }}>Cancel</button>
+          </div>
+        </Card>
+      )}
+      {flipkartInvoices.length === 0 && <Card><div style={{ fontSize: 12, color: MUTED }}>No invoices yet.</div></Card>}
+      {flipkartInvoices.map((inv) => {
+        const received = receivedFor(inv.id);
+        const outstanding = Math.round((Number(inv.amount) - received) * 100) / 100;
+        return (
+          <Card key={inv.id} style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{inv.invoiceNumber}</div>
+              <ConfirmDeleteButton onConfirm={() => onDeleteInvoice(inv.id)} title={`Delete invoice ${inv.invoiceNumber}`} />
+            </div>
+            <div style={{ fontSize: 11, color: MUTED, marginBottom: 4 }}>{inv.invoiceDate}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span>Amount: <b>{money(inv.amount)}</b></span>
+              <span>Received: <b style={{ color: LEAF }}>{money(received)}</b></span>
+              <span style={{ fontWeight: 700, color: outstanding > 0 ? TOMATO : LEAF }}>{money(outstanding)}</span>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function SalesPaymentsMobile({ batchFinancials, salesInvoices, salesPayments, onSavePayment, onDeletePayment }) {
+  const [logging, setLogging] = useState(false);
+  const [platform, setPlatform] = useState(PLATFORMS[0]);
+  const [date, setDate] = useState(todayLocalDate());
+  const [amount, setAmount] = useState('');
+  const [reference, setReference] = useState('');
+  const [linkedId, setLinkedId] = useState('');
+  const bankRef = useRef(null);
+  const [bankError, setBankError] = useState('');
+  const [bankResult, setBankResult] = useState(null);
+
+  const platformInvoices = salesInvoices.filter((inv) => inv.platform === platform);
+  const platformBatches = batchFinancials.filter((bf) => bf.batch.platform === platform);
+
+  const save = () => {
+    if (!amount) return;
+    onSavePayment({
+      id: `PAY-${Date.now().toString(36).toUpperCase()}`,
+      platform, date, amount: Number(amount), reference: reference.trim(),
+      linkedInvoiceId: platform === 'Flipkart' ? linkedId : null,
+      linkedBatchId: platform !== 'Flipkart' ? linkedId : null,
+    });
+    setLogging(false); setAmount(''); setReference(''); setLinkedId('');
+  };
+
+  // Detects Zomato/Hyperpure (Blinkit) and Duffers Farm (Flipkart) credits in an
+  // uploaded bank statement and logs each as a payment — keyed by the bank's own
+  // reference number, so re-uploading the same statement won't double-count.
+  const handleBankStatementFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setBankError(''); setBankResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        const sheetName = wb.SheetNames.find((n) => /statement/i.test(n)) || wb.SheetNames[0];
+        const found = parseBankStatementRows(XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' }));
+        if (!found.length) { setBankError('No Zomato/Hyperpure or Duffers Farm credits were found in this statement.'); return; }
+        found.forEach((f) => onSavePayment({ id: f.id, platform: f.platform, date: f.date, amount: f.amount, reference: f.reference, auto: true, particulars: f.particulars }));
+        setBankResult({ count: found.length, total: Math.round(found.reduce((s, f) => s + f.amount, 0) * 100) / 100 });
+      } catch (err) { setBankError('Could not read this file — use the .xlsx your bank exports.'); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const outstandingByPlatform = PLATFORMS.map((p) => {
+    const owed = p === 'Flipkart'
+      ? salesInvoices.filter((inv) => inv.platform === p).reduce((s, inv) => s + (Number(inv.amount) || 0), 0)
+      : batchFinancials.filter((bf) => bf.batch.platform === p).reduce((s, bf) => s + bf.grnValue, 0);
+    const received = salesPayments.filter((pay) => pay.platform === p).reduce((s, pay) => s + (Number(pay.amount) || 0), 0);
+    return { platform: p, outstanding: Math.round((owed - received) * 100) / 100 };
+  });
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {outstandingByPlatform.map((o) => (
+          <Card key={o.platform} style={{ flex: 1, padding: 10 }}>
+            <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>{o.platform.toUpperCase()} DUE</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: o.outstanding > 0 ? TOMATO : LEAF }}>{money(o.outstanding)}</div>
+          </Card>
+        ))}
+      </div>
+      {!logging ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          <button onClick={() => setLogging(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontWeight: 700, fontSize: 12 }}>
+            <Plus size={13} /> Log payment
+          </button>
+          <button onClick={() => bankRef.current && bankRef.current.click()} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontWeight: 700, fontSize: 12 }}>
+            <Upload size={13} /> Upload bank statement
+          </button>
+          <input ref={bankRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleBankStatementFile} style={{ display: 'none' }} />
+          {bankError && <div style={{ fontSize: 11, color: TOMATO }}>{bankError}</div>}
+          {bankResult && <div style={{ fontSize: 11, color: LEAF }}>Logged {bankResult.count} payment{bankResult.count === 1 ? '' : 's'} ({money(bankResult.total)}) — Zomato/Hyperpure → Blinkit, Duffers Farm → Flipkart.</div>}
+        </div>
+      ) : (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={sectionTitle}>Log a payment received</div>
+          <div style={smallLabel}>PLATFORM</div>
+          <select value={platform} onChange={(e) => { setPlatform(e.target.value); setLinkedId(''); }} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 8px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, marginBottom: 8 }}>
+            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <div style={smallLabel}>DATE</div>
+          <Field type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <div style={smallLabel}>AMOUNT (₹)</div>
+          <Field type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <div style={smallLabel}>REFERENCE (optional)</div>
+          <Field value={reference} onChange={(e) => setReference(e.target.value)} placeholder="UTR / transaction ID" />
+          <div style={smallLabel}>{platform === 'Flipkart' ? 'AGAINST INVOICE' : 'AGAINST BATCH (optional)'}</div>
+          <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 8px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, marginBottom: 10 }}>
+            <option value="">— Not linked —</option>
+            {(platform === 'Flipkart' ? platformInvoices : platformBatches).map((x) => (
+              platform === 'Flipkart'
+                ? <option key={x.id} value={x.id}>{x.invoiceNumber} ({money(x.amount)})</option>
+                : <option key={x.batch.id} value={x.batch.id}>{x.batch.id} (GRN {money(x.grnValue)})</option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <PrimaryBtn onClick={save}>Save payment</PrimaryBtn>
+            <button onClick={() => setLogging(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 16px', fontWeight: 700, fontSize: 12 }}>Cancel</button>
+          </div>
+        </Card>
+      )}
+      {[...salesPayments].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((p) => (
+        <Card key={p.id} style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{p.platform} · {money(p.amount)}</div>
+            <ConfirmDeleteButton onConfirm={() => onDeletePayment(p.id)} title="Delete this payment" />
+          </div>
+          <div style={{ fontSize: 11, color: MUTED }}>{p.date} {p.reference ? `· ${p.reference}` : ''} · {p.linkedInvoiceId || p.linkedBatchId || 'General'}</div>
+        </Card>
+      ))}
+      {salesPayments.length === 0 && <Card><div style={{ fontSize: 12, color: MUTED }}>No payments logged yet.</div></Card>}
+    </div>
+  );
+}
+
+
+function downloadPricingSheet(rows) {
+  const sheetRows = rows.map((r) => ({
+    'Product Name': r.articleName,
+    'Channel Code (SKU)': r.code || '',
+    'UOM': r.rawUnit || `${r.packSize}${r.packUnit}/pack`,
+    'Base Price (₹)': r.basePrice ?? '',
+    'Grading %': r.gradingPercent ?? 0,
+    'Vendor Margin %': r.vendorMarginPercent ?? 0,
+    'Packaging (₹)': r.packaging ?? 0,
+    'Labour (₹)': r.labour ?? 0,
+    'Transportation (₹)': r.transportation ?? 0,
+    'Final Price (₹)': r.finalPrice ?? '',
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(sheetRows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Pricing');
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `fnv-pricing-sheet-${todayLocalDate()}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ── Grading ───────────────────────────────────────────────
-// One row while an item is still being entered (not yet saved). Qty, Grade A
-// and Grade B are free-typed; Dump is always the leftover and is never typed
-// directly — it just shows whatever is left once Qty, Grade A and Grade B are
-// accounted for.
-function GradingEntryRow({ row, onChange, onRemove }) {
+function formatLocalDateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function addDaysToDateStrLocal(dateStr, days) {
+  if (!dateStr) return '';
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + Number(days));
+  return formatLocalDateLocal(d);
+}
+// One item being entered before it's saved. Qty, Grade A and Grade B are
+// typed by hand; Dump is never typed — it's whatever is left of Qty once
+// Grade A and Grade B are accounted for.
+function GradingEntryCard({ row, onChange, onRemove }) {
   const qtyNum = Number(row.qty) || 0;
   const aNum = Number(row.gradeA) || 0;
   const bNum = Number(row.gradeB) || 0;
@@ -8774,54 +5325,61 @@ function GradingEntryRow({ row, onChange, onRemove }) {
     const remB = Math.max(Math.round((qtyNum - aVal) * 100) / 100, 0);
     onChange({ ...row, gradeA: v, gradeB: remB });
   };
-  // Editing Grade B just updates it — Dump (below) recomputes from the remainder.
+  // Editing Grade B just updates it — Dump below recomputes from the remainder.
   const setGradeB = (v) => onChange({ ...row, gradeB: v });
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr 1fr auto', gap: 8, alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${LINE}` }}>
-      <div>
-        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{row.itemName}</p>
-        <p style={{ margin: 0, fontSize: 10, color: MUTED }}>{row.category}</p>
+    <Card style={{ marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>{row.itemName}</div>
+          <div style={{ fontSize: 10, color: MUTED }}>{row.category}</div>
+        </div>
+        <button onClick={onRemove} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }} aria-label="Remove row"><Trash2 size={15} /></button>
       </div>
-      <input type="number" placeholder={row.uom} value={row.qty} onChange={(e) => setQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-      <input type="number" placeholder="0" value={row.gradeA} onChange={(e) => setGradeA(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-      <input type="number" placeholder="0" value={row.gradeB} onChange={(e) => setGradeB(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-      <div style={{ ...inputStyle, marginBottom: 0, background: BG, color: MUTED, fontWeight: 700, display: 'flex', alignItems: 'center' }}>{dump} {row.uom}</div>
-      <button onClick={onRemove} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex' }} aria-label="Remove row"><Trash2 size={15} /></button>
-    </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 4 }}>QTY ({row.uom})</div>
+          <Field type="number" placeholder="0" value={row.qty} onChange={(e) => setQty(e.target.value)} style={{ marginBottom: 0 }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 4 }}>GRADE A</div>
+          <Field type="number" placeholder="0" value={row.gradeA} onChange={(e) => setGradeA(e.target.value)} style={{ marginBottom: 0 }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 4 }}>GRADE B</div>
+          <Field type="number" placeholder="0" value={row.gradeB} onChange={(e) => setGradeB(e.target.value)} style={{ marginBottom: 0 }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 4 }}>DUMP</div>
+          <div style={{ padding: '9px 10px', borderRadius: RADIUS.md, border: `1px solid ${LINE}`, fontSize: 13, background: BG, color: MUTED, fontWeight: 700 }}>{dump} {row.uom}</div>
+        </div>
+      </div>
+    </Card>
   );
 }
 
-// A saved grading record — read-only, with the same confirm-before-remove
-// pattern used for PO/GRN reports elsewhere in Sales.
-function GradingRecordRow({ record, onRemove }) {
-  const [confirming, setConfirming] = useState(false);
+// A saved grading record — read-only, with the same tap-to-arm delete used
+// throughout this app (ConfirmDeleteButton).
+function GradingRecordCard({ record, onRemove }) {
   const pct = (n) => (record.qty > 0 ? Math.round((n / record.qty) * 1000) / 10 : 0);
   return (
-    <tr>
-      <Td style={{ fontWeight: 700 }}>{record.itemName}</Td>
-      <Td>{record.qty} {record.uom}</Td>
-      <Td>{record.gradeA} {record.uom} <span style={{ color: MUTED, fontSize: 10 }}>({pct(record.gradeA)}%)</span></Td>
-      <Td>{record.gradeB} {record.uom} <span style={{ color: MUTED, fontSize: 10 }}>({pct(record.gradeB)}%)</span></Td>
-      <Td>{record.dump} {record.uom} <span style={{ color: MUTED, fontSize: 10 }}>({pct(record.dump)}%)</span></Td>
-      <Td>
-        {confirming ? (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 10, color: TOMATO, fontWeight: 700 }}>Remove?</span>
-            <button onClick={onRemove} style={{ background: TOMATO, color: '#fff', border: 'none', borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
-            <button onClick={() => setConfirming(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>No</button>
-          </span>
-        ) : (
-          <button onClick={() => setConfirming(true)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4 }} aria-label={`Remove ${record.itemName} grading`}>
-            <Trash2 size={14} />
-          </button>
-        )}
-      </Td>
-    </tr>
+    <Card style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>{record.itemName}</div>
+        <ConfirmDeleteButton onConfirm={onRemove} title={`Remove ${record.itemName} grading`} />
+      </div>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: TEXT_SECONDARY }}>
+        <span>Qty: <b style={{ color: INK }}>{record.qty} {record.uom}</b></span>
+        <span>Grade A: <b style={{ color: LEAF }}>{record.gradeA} {record.uom}</b> ({pct(record.gradeA)}%)</span>
+        <span>Grade B: <b style={{ color: AMBER }}>{record.gradeB} {record.uom}</b> ({pct(record.gradeB)}%)</span>
+        <span>Dump: <b style={{ color: TOMATO }}>{record.dump} {record.uom}</b> ({pct(record.dump)}%)</span>
+      </div>
+    </Card>
   );
 }
 
-function GradingPanel({ items, records, onSave, onDelete }) {
+function GradingTabMobile({ items, records, onSave, onDelete }) {
   const [view, setView] = useState('entry'); // 'entry' | 'reports'
 
   // ---- Add Items / entry view ----
@@ -8838,7 +5396,7 @@ function GradingPanel({ items, records, onSave, onDelete }) {
     return notAdded && matches;
   });
 
-  const addItem = (it) => {
+  const addItemRow = (it) => {
     setRows((prev) => [...prev, { key: `${it.id}-${Date.now()}`, itemId: it.id, itemName: it.name, category: it.category, uom: it.uom, qty: '', gradeA: '', gradeB: '' }]);
     setSearch('');
   };
@@ -8865,22 +5423,22 @@ function GradingPanel({ items, records, onSave, onDelete }) {
 
   // ---- Reports view ----
   const [categoryFilter, setCategoryFilter] = useState('ALL');
-  const [dateFrom, setDateFrom] = useState(() => addDaysToDateStr(todayLocalDate(), -6));
+  const [dateFrom, setDateFrom] = useState(() => addDaysToDateStrLocal(todayLocalDate(), -6));
   const [dateTo, setDateTo] = useState(() => todayLocalDate());
 
   const setQuickRange = (preset) => {
     const today = todayLocalDate();
     if (preset === '7d') {
-      setDateFrom(addDaysToDateStr(today, -6));
+      setDateFrom(addDaysToDateStrLocal(today, -6));
       setDateTo(today);
     } else if (preset === 'thisMonth') {
       const d = new Date(`${today}T00:00:00`);
-      setDateFrom(formatLocalDate(new Date(d.getFullYear(), d.getMonth(), 1)));
+      setDateFrom(formatLocalDateLocal(new Date(d.getFullYear(), d.getMonth(), 1)));
       setDateTo(today);
     } else if (preset === 'lastMonth') {
       const d = new Date(`${today}T00:00:00`);
-      setDateFrom(formatLocalDate(new Date(d.getFullYear(), d.getMonth() - 1, 1)));
-      setDateTo(formatLocalDate(new Date(d.getFullYear(), d.getMonth(), 0)));
+      setDateFrom(formatLocalDateLocal(new Date(d.getFullYear(), d.getMonth() - 1, 1)));
+      setDateTo(formatLocalDateLocal(new Date(d.getFullYear(), d.getMonth(), 0)));
     }
   };
 
@@ -8908,44 +5466,34 @@ function GradingPanel({ items, records, onSave, onDelete }) {
   }, [filteredRecords]);
 
   const categoryChips = ['ALL', ...CATEGORY_OPTIONS];
-  const toggleBtn = (active) => ({ padding: '8px 16px', borderRadius: 8, border: `1px solid ${active ? LEAF : LINE}`, background: active ? LEAF : '#fff', color: active ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' });
-  const quickBtn = { padding: '8px 12px', borderRadius: 8, border: `1px solid ${LINE}`, background: '#fff', color: INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' };
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button onClick={() => setView('entry')} style={toggleBtn(view === 'entry')}>Add Grading</button>
-        <button onClick={() => setView('reports')} style={toggleBtn(view === 'reports')}>Reports</button>
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button onClick={() => setView('entry')} style={{ flex: 1, padding: '10px 0', borderRadius: RADIUS.lg, border: `1px solid ${view === 'entry' ? LEAF : LINE}`, background: view === 'entry' ? LEAF : '#fff', color: view === 'entry' ? '#fff' : INK, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Add Grading</button>
+        <button onClick={() => setView('reports')} style={{ flex: 1, padding: '10px 0', borderRadius: RADIUS.lg, border: `1px solid ${view === 'reports' ? LEAF : LINE}`, background: view === 'reports' ? LEAF : '#fff', color: view === 'reports' ? '#fff' : INK, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Reports</button>
       </div>
 
       {view === 'entry' && (
         <div>
-          <Panel style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
-              <div>
-                <p style={{ margin: '0 0 2px', fontWeight: 700, fontSize: 14, color: INK }}>Add Items</p>
-                <p style={{ margin: 0, fontSize: 11, color: MUTED }}>Select items to grade for this date.</p>
-              </div>
-              <div>
-                <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>DATE</p>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 160 }} />
-              </div>
-            </div>
+          <Card style={{ marginBottom: 14 }}>
+            <div style={sectionTitle}>Add Items</div>
+            <div style={hint}>Select items to grade for this date.</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 4 }}>DATE</div>
+            <Field type="date" value={date} onChange={(e) => setDate(e.target.value)} />
 
             {!pickerOpen ? (
-              <button onClick={() => setPickerOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                <Plus size={14} /> Add Item
-              </button>
+              <PrimaryBtn onClick={() => setPickerOpen(true)}>+ Add Item</PrimaryBtn>
             ) : (
-              <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: 10 }}>
+              <div style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS.lg, padding: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: BG, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
                   <Search size={14} color={MUTED} />
                   <input autoFocus placeholder="Search items..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12, width: '100%' }} />
                   <button onClick={() => { setPickerOpen(false); setSearch(''); }} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer', display: 'flex' }}><X size={14} /></button>
                 </div>
-                <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                <div style={{ maxHeight: 240, overflowY: 'auto' }}>
                   {pickableItems.map((it) => (
-                    <button key={it.id} onClick={() => addItem(it)} style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', borderBottom: `1px solid ${LINE}`, padding: '8px 4px', cursor: 'pointer' }}>
+                    <button key={it.id} onClick={() => addItemRow(it)} style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', borderBottom: `1px solid ${LINE}`, padding: '9px 4px', cursor: 'pointer' }}>
                       <span style={{ fontSize: 13, fontWeight: 700, color: INK }}>{it.name}</span>
                       <span style={{ fontSize: 10, color: MUTED }}>{it.category}</span>
                     </button>
@@ -8954,891 +5502,1025 @@ function GradingPanel({ items, records, onSave, onDelete }) {
                 </div>
               </div>
             )}
-
-            {rows.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr 1fr auto', gap: 8, padding: '0 0 6px', borderBottom: `1px solid ${LINE}` }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>ITEM</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>QTY</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>GRADE A</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>GRADE B</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: MUTED }}>DUMP</span>
-                  <span />
-                </div>
-                {rows.map((r) => (
-                  <GradingEntryRow key={r.key} row={r} onChange={(next) => updateRow(r.key, next)} onRemove={() => removeRow(r.key)} />
-                ))}
-                <button onClick={saveAll} style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-                  Save Grading
-                </button>
-              </div>
-            )}
             {saveMsg && <p style={{ margin: '10px 0 0', fontSize: 12, color: LEAF, fontWeight: 700 }}>{saveMsg}</p>}
-          </Panel>
+          </Card>
+
+          {rows.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              {rows.map((r) => (
+                <GradingEntryCard key={r.key} row={r} onChange={(next) => updateRow(r.key, next)} onRemove={() => removeRow(r.key)} />
+              ))}
+              <PrimaryBtn onClick={saveAll}>Save Grading</PrimaryBtn>
+            </div>
+          )}
 
           {dayRecords.length > 0 && (
-            <Panel>
-              <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 14, color: INK }}>Graded on {date} ({dayRecords.length})</p>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead><tr><Th>Item</Th><Th>Qty</Th><Th>Grade A</Th><Th>Grade B</Th><Th>Dump</Th><Th /></tr></thead>
-                  <tbody>
-                    {dayRecords.map((r) => (
-                      <GradingRecordRow key={r.id} record={r} onRemove={() => onDelete(r.id)} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
+            <div>
+              <div style={{ ...sectionTitle, marginBottom: 8 }}>Graded on {date} ({dayRecords.length})</div>
+              {dayRecords.map((r) => (
+                <GradingRecordCard key={r.id} record={r} onRemove={() => onDelete(r.id)} />
+              ))}
+            </div>
           )}
         </div>
       )}
 
       {view === 'reports' && (
         <div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-            {categoryChips.map((c) => (
-              <button
-                key={c}
-                onClick={() => setCategoryFilter(c)}
-                style={{ padding: '6px 12px', borderRadius: 999, border: `1px solid ${categoryFilter === c ? LEAF : LINE}`, background: categoryFilter === c ? LEAF : '#fff', color: categoryFilter === c ? '#fff' : INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
-              >
-                {c === 'ALL' ? 'All' : c}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
-            <div>
-              <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>FROM</p>
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 150 }} />
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 10 }}>
+              {categoryChips.map((c) => <Chip key={c} label={c === 'ALL' ? 'All' : c} active={categoryFilter === c} onClick={() => setCategoryFilter(c)} />)}
             </div>
-            <div>
-              <p style={{ margin: '0 0 4px', fontSize: 10, color: MUTED, fontWeight: 700 }}>TO</p>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 150 }} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 4 }}>FROM</div>
+                <Field type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ marginBottom: 0 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 4 }}>TO</div>
+                <Field type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ marginBottom: 0 }} />
+              </div>
             </div>
-            <button onClick={() => setQuickRange('7d')} style={quickBtn}>Last 7 Days</button>
-            <button onClick={() => setQuickRange('thisMonth')} style={quickBtn}>This Month</button>
-            <button onClick={() => setQuickRange('lastMonth')} style={quickBtn}>Last Month</button>
-          </div>
-
-          <Panel>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><Th>Item</Th><Th>Category</Th><Th>Entries</Th><Th>Total Qty</Th><Th>Avg Grade A %</Th><Th>Avg Grade B %</Th><Th>Avg Dump %</Th></tr></thead>
-                <tbody>
-                  {grouped.map((g) => (
-                    <tr key={g.itemId}>
-                      <Td style={{ fontWeight: 700 }}>{g.itemName}</Td>
-                      <Td>{g.category}</Td>
-                      <Td>{g.count}</Td>
-                      <Td>{Math.round(g.totalQty * 100) / 100} {g.uom}</Td>
-                      <Td style={{ color: LEAF, fontWeight: 700 }}>{g.avgA}%</Td>
-                      <Td style={{ color: AMBER, fontWeight: 700 }}>{g.avgB}%</Td>
-                      <Td style={{ color: TOMATO, fontWeight: 700 }}>{g.avgDump}%</Td>
-                    </tr>
-                  ))}
-                  {grouped.length === 0 && <tr><Td colSpan={7} style={{ textAlign: 'center', color: MUTED }}>No grading records in this range.</Td></tr>}
-                </tbody>
-              </table>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={() => setQuickRange('7d')} style={{ padding: '7px 11px', borderRadius: 999, border: `1px solid ${LINE}`, background: '#fff', color: INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Last 7 Days</button>
+              <button onClick={() => setQuickRange('thisMonth')} style={{ padding: '7px 11px', borderRadius: 999, border: `1px solid ${LINE}`, background: '#fff', color: INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>This Month</button>
+              <button onClick={() => setQuickRange('lastMonth')} style={{ padding: '7px 11px', borderRadius: 999, border: `1px solid ${LINE}`, background: '#fff', color: INK, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Last Month</button>
             </div>
-          </Panel>
-        </div>
-      )}
-    </div>
-  );
-}
+          </Card>
 
-// Shows the invoice numbers most recently used, across every channel, so
-// whoever is typing the next one by hand can see what came before it and
-// keep the GST sequence continuous.
-function LastInvoiceNumbers({ salesInvoices }) {
-  const last5 = lastInvoiceNumbers(salesInvoices, 5);
-  if (last5.length === 0) return null;
-  return (
-    <div style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: '8px 10px', marginBottom: 12, background: '#F6F3EA' }}>
-      <p style={{ margin: '0 0 4px', fontSize: 10.5, fontWeight: 700, color: MUTED, textTransform: 'uppercase' }}>Last 5 invoice numbers used</p>
-      {last5.map((inv) => (
-        <p key={inv.id} style={{ margin: '2px 0', fontSize: 12, color: INK }}>
-          <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{inv.invoiceNumber}</span>
-          <span style={{ color: MUTED }}> — {inv.platform}, {inv.invoiceDate}</span>
-        </p>
-      ))}
-    </div>
-  );
-}
-
-function GenerateInvoiceFromPo({ salesInvoices, onSaveInvoice, onClose }) {
-  const poRef = useRef(null);
-  const [poError, setPoError] = useState('');
-  const [parsed, setParsed] = useState(null); // { platform, fileName, rows, header }
-  const [poNumber, setPoNumber] = useState('');
-  const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(todayLocalDate());
-
-  const handleFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setPoError(''); setParsed(null);
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    if (isPdf) {
-      // This app only ever sees a PDF purchase order from Zepto — Flipkart's
-      // export is always the .xlsx handled below.
-      extractPdfText(file).then((text) => {
-        const { rows, header } = parseZeptoPoText(text);
-        if (!rows.length) { setPoError('Could not find any priced article rows in this PDF.'); return; }
-        setParsed({ platform: 'Zepto', fileName: file.name, rows, header });
-        setPoNumber(header.poNumber || '');
-      }).catch(() => setPoError('Could not read this PDF.'));
-      e.target.value = '';
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const wb = XLSX.read(ev.target.result, { type: 'array' });
-        const rows2d = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
-        const rows = parsePoSheetRows(rows2d);
-        const header = parseFlipkartPoHeader(rows2d);
-        if (!rows.length) { setPoError('Could not find any priced article rows in this file.'); return; }
-        setParsed({ platform: 'Flipkart', fileName: file.name, rows, header });
-        setPoNumber(header.poNumber || '');
-      } catch (err) { setPoError('Could not read this file — use .xlsx, .xls, .csv or .pdf.'); }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = '';
-  };
-
-  const amount = parsed ? Math.round(parsed.rows.reduce((s, r) => s + (Number(r.total) || Number(r.price) * Number(r.qty) || 0), 0) * 100) / 100 : 0;
-  const canGenerate = !!parsed && poNumber.trim() && invoiceNumber.trim();
-
-  const generate = () => {
-    if (!canGenerate) return;
-    const inv = {
-      id: `INV-${Date.now().toString(36).toUpperCase()}`,
-      platform: parsed.platform,
-      invoiceNumber: invoiceNumber.trim(),
-      invoiceDate,
-      amount,
-      poNumber: poNumber.trim(),
-      poDate: parsed.header.poDate || '',
-      poFileName: parsed.fileName,
-      vendorName: parsed.header.vendorName || '',
-      vendorAddress: parsed.header.vendorAddress || '',
-      vendorGstin: parsed.header.vendorGstin || '',
-      vendorPhone: parsed.header.vendorPhone || '',
-      vendorEmail: parsed.header.vendorEmail || '',
-      buyerName: parsed.header.buyerName || '',
-      buyerAddress: parsed.header.buyerAddress || '',
-      buyerGstin: parsed.header.buyerGstin || '',
-      rows: parsed.rows.map((r) => ({ name: r.name, code: r.code, ean: r.ean || '', hsn: r.hsn || '', uom: r.uom || '', qty: r.qty, price: r.price, total: r.total })),
-      batchIds: [],
-    };
-    onSaveInvoice(inv);
-    printInvoice(inv);
-    onClose();
-  };
-
-  return (
-    <Panel style={{ maxWidth: 560, marginBottom: 16 }}>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Generate invoice from PO</p>
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Upload the Flipkart (.xlsx) or Zepto (.pdf) purchase order — the articles, PO number and amount are read straight from it.</p>
-
-      <button onClick={() => poRef.current && poRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>
-        <Upload size={13} /> {parsed ? 'Upload a different PO' : 'Upload PO'}
-      </button>
-      <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleFile} style={{ display: 'none' }} />
-      {poError && <p style={{ margin: '0 0 10px', fontSize: 11, color: TOMATO }}>{poError}</p>}
-
-      {parsed && (
-        <>
-          <div style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: '8px 10px', marginBottom: 12 }}>
-            <p style={{ margin: 0, fontSize: 12, color: INK }}><b>{parsed.platform}</b> · {parsed.fileName}</p>
-            <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>{parsed.rows.length} article(s) · amount ₹{amount.toLocaleString('en-IN')}</p>
-          </div>
-
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PO NUMBER (will be printed on the invoice)</p>
-          <input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} style={inputStyle} />
-          {!poNumber.trim() && <p style={{ margin: '-8px 0 10px', fontSize: 11, color: AMBER }}>Could not auto-read a PO number from this file — please type it in.</p>}
-
-          <LastInvoiceNumbers salesInvoices={salesInvoices} />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE NUMBER</p>
-          <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} style={inputStyle} placeholder="Type the next number in your series" />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE DATE</p>
-          <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} style={inputStyle} />
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button onClick={generate} disabled={!canGenerate} style={{ background: canGenerate ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: canGenerate ? 'pointer' : 'default' }}>Generate &amp; print invoice</button>
-            <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-          </div>
-        </>
-      )}
-      {!parsed && (
-        <div style={{ marginTop: 4 }}>
-          <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-        </div>
-      )}
-    </Panel>
-  );
-}
-
-function ManualInvoiceForm({ batchFinancials, salesInvoices, onSaveInvoice, onClose }) {
-  const [platform, setPlatform] = useState(PLATFORMS[0]);
-  const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(todayLocalDate());
-  const [amount, setAmount] = useState('');
-  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
-
-  const platformBatches = batchFinancials.filter((bf) => bf.batch.platform === platform);
-  const uninvoicedBatches = platformBatches.filter((bf) => !bf.invoice);
-
-  const toggleBatch = (id) => setSelectedBatchIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-
-  const save = () => {
-    if (!invoiceNumber.trim() || !amount || selectedBatchIds.length === 0) return;
-    onSaveInvoice({ id: `INV-${Date.now().toString(36).toUpperCase()}`, platform, invoiceNumber: invoiceNumber.trim(), invoiceDate, amount: Number(amount), batchIds: selectedBatchIds });
-    onClose();
-  };
-
-  return (
-    <Panel style={{ maxWidth: 520, marginBottom: 16 }}>
-      <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>New invoice (manual)</p>
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CHANNEL</p>
-      <select value={platform} onChange={(e) => { setPlatform(e.target.value); setSelectedBatchIds([]); }} style={inputStyle}>
-        {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-      </select>
-      <LastInvoiceNumbers salesInvoices={salesInvoices} />
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE NUMBER</p>
-      <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} style={inputStyle} />
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE DATE</p>
-      <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} style={inputStyle} />
-      <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
-      <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
-      <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>BATCHES COVERED BY THIS INVOICE</p>
-      <div style={{ maxHeight: 160, overflowY: 'auto', border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, padding: 8, marginBottom: 16 }}>
-        {uninvoicedBatches.length === 0 && <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>No un-invoiced {platform} batches with GRN data yet.</p>}
-        {uninvoicedBatches.map((bf) => (
-          <label key={bf.batch.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 6, cursor: 'pointer' }}>
-            <input type="checkbox" checked={selectedBatchIds.includes(bf.batch.id)} onChange={() => toggleBatch(bf.batch.id)} />
-            {bf.batch.id} — GRN ₹{bf.grnValue.toLocaleString('en-IN')}
-          </label>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save invoice</button>
-        <button onClick={onClose} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-      </div>
-    </Panel>
-  );
-}
-
-function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSaveInvoice, onDeleteInvoice }) {
-  const [mode, setMode] = useState('closed'); // 'closed' | 'po' | 'manual'
-  const [platformFilter, setPlatformFilter] = usePersistedState('fnv_invoices_platform', 'All');
-
-  const receivedFor = (invoiceId) => Math.round(salesPayments.filter((p) => p.linkedInvoiceId === invoiceId).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
-  const filteredInvoices = salesInvoices.filter((inv) => platformFilter === 'All' || inv.platform === platformFilter);
-
-  return (
-    <div>
-      {mode === 'closed' && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-          <button onClick={() => setMode('po')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            <Upload size={14} /> Generate invoice from PO
-          </button>
-          <button onClick={() => setMode('manual')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            <Plus size={14} /> Manual invoice
-          </button>
-        </div>
-      )}
-      {mode === 'po' && <GenerateInvoiceFromPo salesInvoices={salesInvoices} onSaveInvoice={onSaveInvoice} onClose={() => setMode('closed')} />}
-      {mode === 'manual' && <ManualInvoiceForm batchFinancials={batchFinancials} salesInvoices={salesInvoices} onSaveInvoice={onSaveInvoice} onClose={() => setMode('closed')} />}
-
-      <Panel>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Invoices</p>
-          <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ ...inputStyle, width: 'auto', marginBottom: 0 }}>
-            <option value="All">All channels</option>
-            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Invoice #</Th><Th>Channel</Th><Th>Date</Th><Th>PO #</Th><Th>Amount</Th><Th>Received</Th><Th>Outstanding</Th><Th /></tr></thead>
-            <tbody>
-              {filteredInvoices.map((inv) => {
-                const received = receivedFor(inv.id);
-                const outstanding = Math.round((Number(inv.amount) - received) * 100) / 100;
-                return (
-                  <tr key={inv.id}>
-                    <Td>{inv.invoiceNumber}</Td>
-                    <Td>{inv.platform}</Td>
-                    <Td>{inv.invoiceDate}</Td>
-                    <Td style={{ fontSize: 11, fontFamily: 'monospace' }}>{inv.poNumber || <span style={{ color: MUTED, fontFamily: 'inherit' }}>—</span>}</Td>
-                    <Td>₹{Number(inv.amount).toLocaleString('en-IN')}</Td>
-                    <Td style={{ color: LEAF }}>₹{received.toLocaleString('en-IN')}</Td>
-                    <Td style={{ color: outstanding > 0 ? TOMATO : LEAF, fontWeight: 700 }}>₹{outstanding.toLocaleString('en-IN')}</Td>
-                    <Td>
-                      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                        {(inv.rows || []).length > 0 && (
-                          <button onClick={() => printInvoice(inv)} title="Print invoice" style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', padding: 0, display: 'flex' }}><Download size={14} /></button>
-                        )}
-                        <ConfirmDeleteButton onConfirm={() => onDeleteInvoice(inv.id)} title={`Delete invoice ${inv.invoiceNumber}`} />
-                      </div>
-                    </Td>
-                  </tr>
-                );
-              })}
-              {filteredInvoices.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No invoices yet.</Td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSavePayment, onDeletePayment }) {
-  const [logging, setLogging] = useState(false);
-  const [platform, setPlatform] = useState(PLATFORMS[0]);
-  const [date, setDate] = useState(todayLocalDate());
-  const [amount, setAmount] = useState('');
-  const [reference, setReference] = useState('');
-  const [linkType, setLinkType] = useState('invoice'); // 'invoice' | 'batch' | 'general'
-  const [linkedId, setLinkedId] = useState('');
-  const bankRef = useRef(null);
-  const [bankError, setBankError] = useState('');
-  const [bankResult, setBankResult] = useState(null); // { count, total } after a successful upload
-
-  const platformInvoices = salesInvoices.filter((inv) => inv.platform === platform);
-  const platformBatches = batchFinancials.filter((bf) => bf.batch.platform === platform);
-
-  const save = () => {
-    if (!amount) return;
-    onSavePayment({
-      id: `PAY-${Date.now().toString(36).toUpperCase()}`,
-      platform, date, amount: Number(amount), reference: reference.trim(),
-      linkedInvoiceId: linkType === 'invoice' ? linkedId : null,
-      linkedBatchId: linkType === 'batch' ? linkedId : null,
-    });
-    setLogging(false); setAmount(''); setReference(''); setLinkedId('');
-  };
-
-  // Detects Zomato/Hyperpure (Blinkit) and Duffers Farm (Flipkart) credits in an
-  // uploaded bank statement and logs each one as a payment automatically — using
-  // the bank's own transaction reference as the id, so re-uploading the same (or
-  // an overlapping) statement updates those entries instead of duplicating them.
-  const handleBankStatementFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setBankError(''); setBankResult(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const wb = XLSX.read(ev.target.result, { type: 'array' });
-        const sheetName = wb.SheetNames.find((n) => /statement/i.test(n)) || wb.SheetNames[0];
-        const found = parseBankStatementRows(XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' }));
-        if (!found.length) { setBankError('No Zomato/Hyperpure or Duffers Farm credits were found in this statement.'); return; }
-        found.forEach((f) => onSavePayment({ id: f.id, platform: f.platform, date: f.date, amount: f.amount, reference: f.reference, auto: true, particulars: f.particulars }));
-        setBankResult({ count: found.length, total: Math.round(found.reduce((s, f) => s + f.amount, 0) * 100) / 100 });
-      } catch (err) { setBankError('Could not read this file — use the .xlsx your bank exports.'); }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = '';
-  };
-
-  // Outstanding receivables: a channel with real invoices is owed the invoiced
-  // total; one with none yet (no invoicing flow used for it so far) falls
-  // back to the GRN total as an estimate.
-  const outstandingByPlatform = PLATFORMS.map((p) => {
-    const invoicesForP = salesInvoices.filter((inv) => inv.platform === p);
-    const owed = invoicesForP.length > 0
-      ? invoicesForP.reduce((s, inv) => s + (Number(inv.amount) || 0), 0)
-      : batchFinancials.filter((bf) => bf.batch.platform === p).reduce((s, bf) => s + bf.grnValue, 0);
-    const received = salesPayments.filter((pay) => pay.platform === p).reduce((s, pay) => s + (Number(pay.amount) || 0), 0);
-    return { platform: p, outstanding: Math.round((owed - received) * 100) / 100 };
-  });
-
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-        {outstandingByPlatform.map((o) => (
-          <Panel key={o.platform} style={{ flex: 1, minWidth: 200 }}>
-            <p style={{ margin: '0 0 4px', fontSize: 12, color: MUTED }}>{o.platform} outstanding</p>
-            <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: o.outstanding > 0 ? TOMATO : LEAF }}>₹{o.outstanding.toLocaleString('en-IN')}</p>
-          </Panel>
-        ))}
-      </div>
-      {!logging ? (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-          <button onClick={() => setLogging(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            <Plus size={14} /> Log payment
-          </button>
-          <button onClick={() => bankRef.current && bankRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            <Upload size={14} /> Upload bank statement
-          </button>
-          <input ref={bankRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleBankStatementFile} style={{ display: 'none' }} />
-        </div>
-      ) : (
-        <Panel style={{ maxWidth: 480, marginBottom: 16 }}>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Log a payment received</p>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
-          <select value={platform} onChange={(e) => { setPlatform(e.target.value); setLinkedId(''); setLinkType(salesInvoices.some((inv) => inv.platform === e.target.value) ? 'invoice' : 'batch'); }} style={inputStyle}>
-            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
-          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>BANK REFERENCE (optional)</p>
-          <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="UTR / transaction ID" style={inputStyle} />
-          {platformInvoices.length > 0 ? (
-            <>
-              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AGAINST WHICH INVOICE</p>
-              <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
-                <option value="">— Not linked to a specific invoice —</option>
-                {platformInvoices.map((inv) => <option key={inv.id} value={inv.id}>{inv.invoiceNumber} (₹{Number(inv.amount).toLocaleString('en-IN')})</option>)}
-              </select>
-            </>
-          ) : (
-            <>
-              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AGAINST WHICH BATCH (optional)</p>
-              <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
-                <option value="">— Not linked to a specific batch —</option>
-                {platformBatches.map((bf) => <option key={bf.batch.id} value={bf.batch.id}>{bf.batch.id} (GRN ₹{bf.grnValue.toLocaleString('en-IN')})</option>)}
-              </select>
-            </>
+          {grouped.length === 0 && (
+            <Card><p style={{ margin: 0, fontSize: 12, color: MUTED, textAlign: 'center' }}>No grading records in this range.</p></Card>
           )}
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save payment</button>
-            <button onClick={() => setLogging(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-          </div>
-        </Panel>
-      )}
-      {bankError && <p style={{ margin: '0 0 10px', fontSize: 12, color: TOMATO }}>{bankError}</p>}
-      {bankResult && <p style={{ margin: '0 0 10px', fontSize: 12, color: LEAF }}>Logged {bankResult.count} payment{bankResult.count === 1 ? '' : 's'} from the statement (₹{bankResult.total.toLocaleString('en-IN')}) — Zomato/Hyperpure credits go to Blinkit, Duffers Farm credits go to Flipkart.</p>}
-      {!logging && <p style={{ margin: '0 0 16px', fontSize: 11, color: MUTED }}>Uploading a statement only picks up Zomato/Hyperpure and Duffers Farm credits; everything else is ignored, and uploading the same statement again won't double-count.</p>}
-      <Panel>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Date</Th><Th>Platform</Th><Th>Amount</Th><Th>Reference</Th><Th>Against</Th><Th /></tr></thead>
-            <tbody>
-              {[...salesPayments].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((p) => (
-                <tr key={p.id}>
-                  <Td>{p.date}</Td>
-                  <Td>{p.platform}</Td>
-                  <Td>₹{Number(p.amount).toLocaleString('en-IN')}</Td>
-                  <Td style={{ fontSize: 12, color: MUTED }}>{p.reference || '—'}</Td>
-                  <Td style={{ fontSize: 12, color: MUTED }}>{p.linkedInvoiceId || p.linkedBatchId || 'General'}</Td>
-                  <Td><ConfirmDeleteButton onConfirm={() => onDeletePayment(p.id)} title="Delete this payment record" /></Td>
-                </tr>
-              ))}
-              {salesPayments.length === 0 && <tr><Td colSpan={6} style={{ color: MUTED, textAlign: 'center' }}>No payments logged yet.</Td></tr>}
-            </tbody>
-          </table>
+          {grouped.map((g) => (
+            <Card key={g.itemId} style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>{g.itemName}</div>
+                <div style={{ fontSize: 10, color: MUTED }}>{g.category} · {g.count} entr{g.count === 1 ? 'y' : 'ies'} · {Math.round(g.totalQty * 100) / 100} {g.uom}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 14, fontSize: 12 }}>
+                <span style={{ color: LEAF, fontWeight: 700 }}>Grade A avg {g.avgA}%</span>
+                <span style={{ color: AMBER, fontWeight: 700 }}>Grade B avg {g.avgB}%</span>
+                <span style={{ color: TOMATO, fontWeight: 700 }}>Dump avg {g.avgDump}%</span>
+              </div>
+            </Card>
+          ))}
         </div>
-      </Panel>
+      )}
     </div>
   );
 }
 
-// ── Staff helpers ──
-const ATTENDANCE_STATUSES = [
-  { key: 'present', label: 'P', full: 'Present', color: LEAF, payFactor: 1 },
-  { key: 'halfday', label: 'H', full: 'Half day', color: AMBER, payFactor: 0.5 },
-  { key: 'leave', label: 'L', full: 'Paid leave', color: '#5B8DB8', payFactor: 1 },
-  { key: 'absent', label: 'A', full: 'Absent', color: TOMATO, payFactor: 0 },
-];
-const attendanceMeta = (key) => ATTENDANCE_STATUSES.find((s) => s.key === key);
-function daysInMonth(monthStr) {
-  const [y, m] = monthStr.split('-').map(Number);
-  return new Date(y, m, 0).getDate();
-}
-function monthDateStrings(monthStr) {
-  return Array.from({ length: daysInMonth(monthStr) }, (_, i) => `${monthStr}-${String(i + 1).padStart(2, '0')}`);
-}
-function tenureText(joiningDate) {
-  if (!joiningDate) return '—';
-  const start = new Date(`${joiningDate}T00:00:00`);
-  const now = new Date();
-  let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
-  if (now.getDate() < start.getDate()) months -= 1;
-  if (months < 0) return 'Starts soon';
-  const y = Math.floor(months / 12);
-  const m = months % 12;
-  if (y === 0) return `${m} month${m === 1 ? '' : 's'}`;
-  return m === 0 ? `${y} year${y === 1 ? '' : 's'}` : `${y}y ${m}m`;
-}
-// Payroll for one person in one month. Unmarked days are treated as worked —
-// marking every present day would be a lot of clicking, so only exceptions
-// (absent/half-day/leave) need recording, which is how most small teams run it.
-function computePayroll(person, monthStr, attendance, advances) {
-  const dates = monthDateStrings(monthStr);
-  const totalDays = dates.length;
-  const perDay = (Number(person.monthlySalary) || 0) / totalDays;
-  const marks = {};
-  attendance.filter((a) => a.staffId === person.id && (a.date || '').startsWith(monthStr)).forEach((a) => { marks[a.date] = a.status; });
+function PricingCard({ article, config, onUpdate }) {
+  const [grading, setGrading] = useState(String(config?.gradingPercent ?? 0));
+  const [vendorMargin, setVendorMargin] = useState(String(config?.vendorMarginPercent ?? 0));
+  const [packaging, setPackaging] = useState(String(config?.packaging ?? 0));
+  const [labour, setLabour] = useState(String(config?.labour ?? 0));
+  const [transportation, setTransportation] = useState(String(config?.transportation ?? 0));
 
-  // Someone who joined mid-month is only paid from their joining date.
-  const joined = person.joiningDate || '';
-  const eligible = dates.filter((d) => !joined || d >= joined);
+  useEffect(() => {
+    setGrading(String(config?.gradingPercent ?? 0));
+    setVendorMargin(String(config?.vendorMarginPercent ?? 0));
+    setPackaging(String(config?.packaging ?? 0));
+    setLabour(String(config?.labour ?? 0));
+    setTransportation(String(config?.transportation ?? 0));
+  }, [config]);
 
-  const counts = { present: 0, halfday: 0, leave: 0, absent: 0, unmarked: 0 };
-  let payableDays = 0;
-  eligible.forEach((d) => {
-    const status = marks[d];
-    if (!status) { counts.unmarked += 1; payableDays += 1; return; }
-    counts[status] = (counts[status] || 0) + 1;
-    payableDays += attendanceMeta(status)?.payFactor ?? 1;
+  const commit = (field, value) => onUpdate(article.key, { [field]: Number(value) || 0 }, article.legacyKey);
+  const basePrice = article.basePrice;
+  const finalPrice = computeFinalPrice(basePrice, {
+    gradingPercent: Number(grading) || 0, vendorMarginPercent: Number(vendorMargin) || 0,
+    packaging: Number(packaging) || 0, labour: Number(labour) || 0, transportation: Number(transportation) || 0,
   });
 
-  const earned = Math.round(perDay * payableDays * 100) / 100;
-  const monthAdvances = advances.filter((a) => a.staffId === person.id && (a.date || '').startsWith(monthStr));
-  const advanceTotal = Math.round(monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
-  return {
-    totalDays, eligibleDays: eligible.length, counts, payableDays: Math.round(payableDays * 100) / 100,
-    earned, advanceTotal, netPayable: Math.round((earned - advanceTotal) * 100) / 100,
-  };
+  const row = (label, value, setValue, field) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+      <span style={{ fontSize: 11, color: MUTED }}>{label}</span>
+      <input
+        type="number" value={value} onChange={(e) => setValue(e.target.value)} onBlur={(e) => commit(field, e.target.value)}
+        style={{ width: 80, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 8px', textAlign: 'right' }}
+      />
+    </div>
+  );
+
+  return (
+    <Card style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 800, fontSize: 14 }}>{article.articleName}</div>
+      <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>{article.code || 'No code'} · {article.rawUnit || `${article.packSize}${article.packUnit}/pack`}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
+        <span style={{ fontSize: 11, color: MUTED, fontWeight: 700 }}>BASE PRICE</span>
+        <span style={{ fontWeight: 700, color: basePrice == null ? MUTED : LEAF }}>{basePrice == null ? 'No purchase yet' : `₹${basePrice.toFixed(2)}`}</span>
+      </div>
+      {row('Grading %', grading, setGrading, 'gradingPercent')}
+      {row('Vendor margin %', vendorMargin, setVendorMargin, 'vendorMarginPercent')}
+      {row('Packaging (₹)', packaging, setPackaging, 'packaging')}
+      {row('Labour (₹)', labour, setLabour, 'labour')}
+      {row('Transportation (₹)', transportation, setTransportation, 'transportation')}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: INK }}>FINAL PRICE</span>
+        <span style={{ fontWeight: 800, fontSize: 15, color: finalPrice == null ? MUTED : TOMATO }}>{finalPrice == null ? '—' : `₹${finalPrice.toFixed(2)}`}</span>
+      </div>
+    </Card>
+  );
 }
 
-function StaffPanel({ staff, attendance, advances, onSaveStaff, onDeleteStaff, onMarkAttendance, onClearAttendance, onSaveAdvance, onDeleteAdvance }) {
-  const [view, setView] = useState('people');
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const views = [
-    { key: 'people', label: 'People' },
-    { key: 'attendance', label: 'Attendance' },
-    { key: 'advances', label: 'Advances' },
-    { key: 'payroll', label: 'Monthly Payroll' },
-  ];
+function PricingTab({ orders, items, purchases, pricingConfig, city, onUpdate }) {
+  const [search, setSearch] = useState('');
+  const [channelFilter, setChannelFilter] = useState('ALL');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city), [orders, items, purchases, city]);
+  const configByKey = useMemo(() => { const map = {}; pricingConfig.forEach((c) => { map[c.id] = c; }); return map; }, [pricingConfig]);
+  const categoriesPresent = useMemo(() => ['ALL', ...Array.from(new Set(articles.map((a) => a.category).filter(Boolean)))], [articles]);
+
+  const filteredArticles = articles
+    .filter((a) => !search.trim() || a.articleName.toLowerCase().includes(search.trim().toLowerCase()))
+    .filter((a) => channelFilter === 'ALL' || a.platform === channelFilter)
+    .filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter);
+
+  const rowsForExport = filteredArticles.map((a) => {
+    const c = configByKey[a.key] || configByKey[a.legacyKey];
+    const gradingPercent = c?.gradingPercent ?? 0, vendorMarginPercent = c?.vendorMarginPercent ?? 0;
+    const packaging = c?.packaging ?? 0, labour = c?.labour ?? 0, transportation = c?.transportation ?? 0;
+    const finalPrice = computeFinalPrice(a.basePrice, { gradingPercent, vendorMarginPercent, packaging, labour, transportation });
+    return { ...a, gradingPercent, vendorMarginPercent, packaging, labour, transportation, finalPrice };
+  });
+
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        {views.map((v) => (
-          <button
-            key={v.key}
-            onClick={() => setView(v.key)}
-            style={{ background: view === v.key ? LEAF : '#fff', color: view === v.key ? '#fff' : INK, border: `1px solid ${view === v.key ? LEAF : LINE}`, borderRadius: RADIUS.md, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
-          >
-            {v.label}
-          </button>
-        ))}
-        {view !== 'people' && (
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>MONTH</span>
-            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ ...inputStyle, marginBottom: 0, width: 'auto' }} />
-          </div>
-        )}
-      </div>
-      {view === 'people' && <StaffPeopleTab staff={staff} onSaveStaff={onSaveStaff} onDeleteStaff={onDeleteStaff} />}
-      {view === 'attendance' && <StaffAttendanceTab staff={staff} attendance={attendance} month={month} onMark={onMarkAttendance} onClear={onClearAttendance} />}
-      {view === 'advances' && <StaffAdvancesTab staff={staff} advances={advances} month={month} onSave={onSaveAdvance} onDelete={onDeleteAdvance} />}
-      {view === 'payroll' && <StaffPayrollTab staff={staff} attendance={attendance} advances={advances} month={month} />}
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 6 }}><IndianRupee size={15} /> Pricing</div>
+        <div style={hint}>Base price is fetched from the latest purchase price × pack size. Grading % and vendor margin % apply on the base price; packaging, labour and transportation are flat amounts.</div>
+        <Field placeholder="Search article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 8 }} />
+        <div style={smallLabel}>CHANNEL</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 4 }}>
+          <Chip label="All" active={channelFilter === 'ALL'} onClick={() => setChannelFilter('ALL')} />
+          {PLATFORMS.map((p) => <Chip key={p} label={p} active={channelFilter === p} onClick={() => setChannelFilter(p)} />)}
+        </div>
+        <div style={smallLabel}>CATEGORY</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 10 }}>
+          {categoriesPresent.map((c) => <Chip key={c} label={c === 'ALL' ? 'All' : c} active={categoryFilter === c} onClick={() => setCategoryFilter(c)} />)}
+        </div>
+        <PrimaryBtn onClick={() => downloadPricingSheet(rowsForExport)}>Download pricing sheet</PrimaryBtn>
+      </Card>
+
+      {filteredArticles.map((a) => (
+        <PricingCard key={a.key} article={a} config={configByKey[a.key] || configByKey[a.legacyKey]} onUpdate={onUpdate} />
+      ))}
+      {filteredArticles.length === 0 && <div style={hint}>No indent-imported articles match this filter.</div>}
     </div>
   );
 }
 
-function StaffPeopleTab({ staff, onSaveStaff, onDeleteStaff }) {
-  const blank = { id: '', name: '', phone: '', role: '', joiningDate: todayLocalDate(), monthlySalary: '', status: 'active' };
-  const [editing, setEditing] = useState(null);
 
-  const save = () => {
-    if (!editing.name.trim()) return;
-    onSaveStaff({ ...editing, id: editing.id || `STF-${Date.now().toString(36).toUpperCase()}`, name: editing.name.trim(), monthlySalary: Number(editing.monthlySalary) || 0 });
-    setEditing(null);
-  };
 
-  if (editing) {
+
+
+function PackagingTab({ orders, items, onAdvanceMany, packingProgress, onUpdatePackedQty, packingAssignments, onAssignTask, onUnassignTask, users, roles, currentUser }) {
+  const [platformFilter, setPlatformFilter] = usePersistedState('fnv_packaging_platform', 'All');
+  const [categoryFilter, setCategoryFilter] = usePersistedState('fnv_packaging_category', 'All');
+  const [qtySort, setQtySort] = usePersistedState('fnv_packaging_qtysort', 'none'); // 'none' | 'asc' | 'desc'
+  const [dateFilter, setDateFilter] = usePersistedState('fnv_packaging_date', '');
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [itemSearch, setItemSearch] = useState('');
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState(() => new Set());
+  const [assignModalKeys, setAssignModalKeys] = useState(null); // array of keys, or null when closed
+
+  const packerUsers = useMemo(() => {
+    const packerRoleIds = new Set(roles.filter((r) => (r.name || '').trim().toLowerCase() === 'packer').map((r) => r.id));
+    return users.filter((u) => packerRoleIds.has(u.roleId) && u.status === 'active');
+  }, [users, roles]);
+  const isPackerViewer = useMemo(() => {
+    const role = currentUser ? roles.find((r) => r.id === currentUser.roleId) : null;
+    return !!role && (role.name || '').trim().toLowerCase() === 'packer';
+  }, [currentUser, roles]);
+
+  const categoryByProduct = useMemo(() => {
+    const map = {};
+    items.forEach((it) => { map[it.name] = it.category; });
+    return map;
+  }, [items]);
+
+  const filteredOrders = useMemo(() => {
+    return orders
+      .filter((o) => o.status !== 'dispatched')
+      .filter((o) => platformFilter === 'All' || o.platform === platformFilter)
+      .filter((o) => categoryFilter === 'All' || categoryByProduct[o.product] === categoryFilter)
+      .filter((o) => !dateFilter || o.fulfilmentDate === dateFilter);
+  }, [orders, platformFilter, categoryFilter, categoryByProduct, dateFilter]);
+
+  const groupedByDate = useMemo(() => {
+    const map = {};
+    filteredOrders.forEach((o) => {
+      const dateKey = o.fulfilmentDate || 'No date';
+      map[dateKey] = map[dateKey] || {};
+      const hasPack = !!(o.packQty && o.packSize);
+      const cityKey = o.city || CITIES[0];
+      const key = hasPack ? `${cityKey}__${dateKey}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}` : `${cityKey}__${dateKey}__${o.product}__${o.unit}`;
+      map[dateKey][key] = map[dateKey][key] || {
+        key, product: o.product, articleName: o.articleName || o.product, unit: o.unit, qty: 0, platforms: new Set(),
+        pendingIds: [], orderIds: [], hasPack, packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0,
+      };
+      map[dateKey][key].qty += o.qty;
+      map[dateKey][key].platforms.add(o.platform);
+      map[dateKey][key].orderIds.push(o.id);
+      if (hasPack) map[dateKey][key].targetPacks += o.packQty;
+      if (o.status === 'pending') map[dateKey][key].pendingIds.push(o.id);
+    });
+    return Object.entries(map)
+      .map(([date, targetMap]) => {
+        let targets = Object.values(targetMap).map((t) => {
+          const progress = packingProgress[t.key] || { packedQty: 0, shortQty: 0 };
+          const isComplete = t.hasPack ? (progress.packedQty > 0 && progress.packedQty + progress.shortQty >= t.targetPacks) : (t.pendingIds.length === 0);
+          const assignment = packingAssignments[t.key] || null;
+          return { ...t, isComplete, assignedTo: assignment?.assignedTo || null, assignedToName: assignment?.assignedToName || '' };
+        });
+        // A packer only ever sees the articles assigned to them — the tab stays a
+        // personal task queue for that role, while every other role keeps seeing
+        // everything (with an "assigned to" badge instead of a filter).
+        if (isPackerViewer && currentUser) targets = targets.filter((t) => t.assignedTo === currentUser.id);
+        if (qtySort === 'asc') targets.sort((a, b) => (a.hasPack ? a.targetPacks : a.qty) - (b.hasPack ? b.targetPacks : b.qty));
+        else if (qtySort === 'desc') targets.sort((a, b) => (b.hasPack ? b.targetPacks : b.qty) - (a.hasPack ? a.targetPacks : a.qty));
+        const term = itemSearch.trim().toLowerCase();
+        if (term) targets = targets.filter((t) => `${t.articleName} ${t.product}`.toLowerCase().includes(term));
+        // Items still needing work stay on top; fully packed ones sink to the bottom.
+        targets.sort((a, b) => (a.isComplete === b.isComplete ? 0 : a.isComplete ? 1 : -1));
+        return { date, targets };
+      })
+      .filter((g) => g.targets.length > 0)
+      .sort((a, b) => {
+        if (a.date === 'No date') return 1;
+        if (b.date === 'No date') return -1;
+        return a.date.localeCompare(b.date);
+      });
+  }, [filteredOrders, qtySort, packingProgress, itemSearch, packingAssignments, isPackerViewer, currentUser]);
+
+  const categoriesPresent = useMemo(() => ['All', ...Array.from(new Set(items.map((it) => it.category).filter(Boolean)))], [items]);
+
+  const selectedTarget = useMemo(() => {
+    for (const g of groupedByDate) {
+      const t = g.targets.find((x) => x.key === selectedKey);
+      if (t) return { ...t, date: g.date };
+    }
+    return null;
+  }, [groupedByDate, selectedKey]);
+
+  if (selectedTarget) {
     return (
-      <Panel style={{ maxWidth: 480 }}>
-        <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>{editing.id ? 'Edit staff member' : 'Add staff member'}</p>
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>NAME</p>
-        <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} style={inputStyle} />
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>ROLE / DESIGNATION</p>
-        <input value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })} placeholder="e.g. Packer, Driver, Supervisor" style={inputStyle} />
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PHONE</p>
-        <input value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} style={inputStyle} />
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>JOINING DATE</p>
-        <input type="date" value={editing.joiningDate} onChange={(e) => setEditing({ ...editing, joiningDate: e.target.value })} style={inputStyle} />
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>MONTHLY SALARY (₹)</p>
-        <input type="number" value={editing.monthlySalary} onChange={(e) => setEditing({ ...editing, monthlySalary: e.target.value })} style={inputStyle} />
-        <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>STATUS</p>
-        <select value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })} style={inputStyle}>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive (left)</option>
-        </select>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save</button>
-          <button onClick={() => setEditing(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-        </div>
-      </Panel>
+      <PackagingDetail
+        target={selectedTarget}
+        progress={packingProgress[selectedTarget.key] || { packedQty: 0, shortQty: 0 }}
+        onSave={(packedQty, shortQty) => onUpdatePackedQty(selectedTarget.key, packedQty, shortQty, selectedTarget.orderIds, selectedTarget.targetPacks)}
+        onBack={() => setSelectedKey(null)}
+      />
     );
   }
 
-  const active = staff.filter((s) => s.status !== 'inactive');
-  const inactive = staff.filter((s) => s.status === 'inactive');
-  const monthlyWageBill = active.reduce((s, p) => s + (Number(p.monthlySalary) || 0), 0);
+  const toggleSelectKey = (key) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const exitSelectMode = () => { setSelectMode(false); setSelectedKeys(new Set()); };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', gap: 20 }}>
-          <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>ACTIVE STAFF</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18 }}>{active.length}</p></div>
-          <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>MONTHLY WAGE BILL</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: LEAF }}>{money(monthlyWageBill)}</p></div>
+    <div style={{ padding: 16, paddingBottom: selectMode && selectedKeys.size > 0 ? 80 : 16 }}>
+      {!isPackerViewer && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button
+            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            style={{ background: selectMode ? '#F3E7E2' : '#EAF3DE', color: selectMode ? TOMATO : LEAF_DARK, border: 'none', borderRadius: 999, padding: '6px 14px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
+          >
+            {selectMode ? 'Cancel' : 'Select'}
+          </button>
         </div>
-        <button onClick={() => setEditing(blank)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-          <Plus size={14} /> Add staff
-        </button>
-      </div>
-      <Panel>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Name</Th><Th>Role</Th><Th>Phone</Th><Th>Joined</Th><Th>Tenure</Th><Th>Salary / month</Th><Th /></tr></thead>
-            <tbody>
-              {[...active, ...inactive].map((p) => (
-                <tr key={p.id} style={{ opacity: p.status === 'inactive' ? 0.55 : 1 }}>
-                  <Td style={{ fontWeight: 700 }}>{p.name}{p.status === 'inactive' && <span style={{ fontSize: 10, color: MUTED, fontWeight: 400 }}> (left)</span>}</Td>
-                  <Td>{p.role || '—'}</Td>
-                  <Td>{p.phone || '—'}</Td>
-                  <Td>{p.joiningDate || '—'}</Td>
-                  <Td style={{ fontSize: 12, color: MUTED }}>{tenureText(p.joiningDate)}</Td>
-                  <Td style={{ fontWeight: 700 }}>{money(p.monthlySalary)}</Td>
-                  <Td>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => setEditing({ ...blank, ...p })} style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer' }}><Pencil size={14} /></button>
-                      <ConfirmDeleteButton onConfirm={() => onDeleteStaff(p.id)} title={`Delete ${p.name} (their attendance/advance records stay in the database)`} />
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-              {staff.length === 0 && <tr><Td colSpan={7} style={{ color: MUTED, textAlign: 'center' }}>No staff added yet.</Td></tr>}
-            </tbody>
-          </table>
+      )}
+      <Card style={{ marginBottom: 12, padding: '10px 12px' }}>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+          <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '6px 4px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }}>
+            <option value="All">All channels</option>
+            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '6px 4px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }}>
+            {categoriesPresent.map((c) => <option key={c} value={c}>{c === 'All' ? 'All categories' : c}</option>)}
+          </select>
+          <select value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '6px 4px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }}>
+            <option value="none">Default sort</option>
+            <option value="asc">Qty: Low-High</option>
+            <option value="desc">Qty: High-Low</option>
+          </select>
         </div>
-      </Panel>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+          <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} style={{ flex: 1, boxSizing: 'border-box', padding: '6px 8px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 11, color: INK, background: '#fff' }} />
+          {dateFilter && (
+            <button onClick={() => setDateFilter('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>Clear</button>
+          )}
+        </div>
+        <Field placeholder="Search item…" value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} style={{ marginTop: 8, marginBottom: 0 }} />
+      </Card>
+
+      {groupedByDate.map(({ date, targets }) => (
+        <Card key={date} style={{ marginBottom: 12, padding: 10 }}>
+          <div style={{ ...sectionTitle, marginBottom: 4 }}>{date === 'No date' ? 'No fulfilment date' : date}</div>
+          {targets.map((t) => (
+            <PackagingInlineRow
+              key={t.key}
+              target={t}
+              progress={packingProgress[t.key] || { packedQty: 0, shortQty: 0 }}
+              onSave={(packedQty, shortQty) => onUpdatePackedQty(t.key, packedQty, shortQty, t.orderIds, t.targetPacks)}
+              onAdvanceMany={onAdvanceMany}
+              onOpenDetail={() => setSelectedKey(t.key)}
+              selectMode={selectMode}
+              selected={selectedKeys.has(t.key)}
+              onToggleSelect={() => toggleSelectKey(t.key)}
+              isPackerViewer={isPackerViewer}
+              onAssignRow={() => setAssignModalKeys([t.key])}
+            />
+          ))}
+        </Card>
+      ))}
+      {groupedByDate.length === 0 && (
+        <Card>
+          <div style={hint}>{isPackerViewer ? 'No items assigned to you right now.' : 'Nothing to pack right now.'}</div>
+        </Card>
+      )}
+
+      {selectMode && selectedKeys.size > 0 && (
+        <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, background: '#fff', borderTop: `1px solid ${LINE}`, padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, zIndex: 150, boxShadow: '0 -2px 10px rgba(0,0,0,0.08)' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{selectedKeys.size} selected</div>
+          <button
+            onClick={() => setAssignModalKeys([...selectedKeys])}
+            style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <UserCheck size={14} /> Assign task
+          </button>
+        </div>
+      )}
+
+      {assignModalKeys && (
+        <AssignWorkerModal
+          keys={assignModalKeys}
+          packerUsers={packerUsers}
+          currentlyAssigned={assignModalKeys.length === 1 ? packingAssignments[assignModalKeys[0]] : null}
+          onClose={() => setAssignModalKeys(null)}
+          onAssign={(userId, userName) => {
+            assignModalKeys.forEach((k) => onAssignTask(k, userId, userName));
+            setAssignModalKeys(null);
+            exitSelectMode();
+          }}
+          onUnassign={() => {
+            assignModalKeys.forEach((k) => onUnassignTask(k));
+            setAssignModalKeys(null);
+            exitSelectMode();
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function StaffAttendanceTab({ staff, attendance, month, onMark, onClear }) {
-  const dates = monthDateStrings(month);
-  const active = staff.filter((s) => s.status !== 'inactive');
-  const markMap = useMemo(() => {
-    const m = {};
-    attendance.forEach((a) => { m[`${a.staffId}__${a.date}`] = a.status; });
-    return m;
-  }, [attendance]);
+function PackagingInlineRow({ target: t, progress, onSave, onAdvanceMany, onOpenDetail, selectMode, selected, onToggleSelect, isPackerViewer, onAssignRow }) {
+  const [packedValue, setPackedValue] = useState(String(progress.packedQty || ''));
+  const [shortValue, setShortValue] = useState(String(progress.shortQty || ''));
+  useEffect(() => { setPackedValue(String(progress.packedQty || '')); }, [progress.packedQty]);
+  useEffect(() => { setShortValue(String(progress.shortQty || '')); }, [progress.shortQty]);
 
-  // Clicking a cell walks through the statuses then back to unmarked, so one
-  // control covers every case without a dropdown per day.
-  const cycle = (staffId, date) => {
-    const current = markMap[`${staffId}__${date}`];
-    if (!current) { onMark(staffId, date, 'present'); return; }
-    const idx = ATTENDANCE_STATUSES.findIndex((s) => s.key === current);
-    if (idx === ATTENDANCE_STATUSES.length - 1) { onClear(staffId, date); return; }
-    onMark(staffId, date, ATTENDANCE_STATUSES[idx + 1].key);
-  };
+  const enteredPacked = Number(packedValue) || 0;
+  const enteredShort = Number(shortValue) || 0;
+  // The only two valid outcomes for an article: fully packed, or packed + short adding
+  // up to exactly the target — there's no in-between state that can be saved.
+  const isResolved = t.hasPack ? enteredPacked + enteredShort === t.targetPacks : true;
+  const changed = enteredPacked !== progress.packedQty || enteredShort !== progress.shortQty;
+  const canSave = isResolved && changed;
+  const isComplete = t.hasPack ? (progress.packedQty > 0 && progress.packedQty + progress.shortQty >= t.targetPacks) : (t.pendingIds.length === 0);
 
   return (
-    <Panel>
-      <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Attendance — {month}</p>
-      <p style={{ margin: '0 0 10px', fontSize: 12, color: MUTED }}>
-        Click a day to cycle through {ATTENDANCE_STATUSES.map((s) => s.full).join(' → ')} → blank. Blank days count as worked, so you only need to mark the exceptions.
-      </p>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
-        {ATTENDANCE_STATUSES.map((s) => (
-          <span key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: MUTED }}>
-            <span style={{ width: 16, height: 16, borderRadius: 4, background: s.color, color: '#fff', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.label}</span>
-            {s.full}
-          </span>
-        ))}
-      </div>
-      {active.length === 0 ? (
-        <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>No active staff — add someone in the People tab first.</p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '6px 10px', position: 'sticky', left: 0, background: '#fff', borderBottom: `1px solid ${LINE}`, fontSize: 11, color: MUTED, fontWeight: 700 }}>STAFF</th>
-                {dates.map((d) => <th key={d} style={{ padding: '6px 2px', borderBottom: `1px solid ${LINE}`, fontSize: 10, color: MUTED, fontWeight: 700, minWidth: 24 }}>{Number(d.slice(-2))}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {active.map((p) => (
-                <tr key={p.id}>
-                  <td style={{ padding: '6px 10px', position: 'sticky', left: 0, background: '#fff', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', borderBottom: `1px solid ${LINE}` }}>{p.name}</td>
-                  {dates.map((d) => {
-                    const beforeJoining = p.joiningDate && d < p.joiningDate;
-                    const status = markMap[`${p.id}__${d}`];
-                    const meta = status ? attendanceMeta(status) : null;
-                    return (
-                      <td key={d} style={{ padding: 2, borderBottom: `1px solid ${LINE}`, textAlign: 'center' }}>
-                        {beforeJoining ? (
-                          <span style={{ display: 'block', width: 22, height: 22, borderRadius: 4, background: '#F0F0EC' }} title="Before joining date" />
-                        ) : (
-                          <button
-                            onClick={() => cycle(p.id, d)}
-                            title={`${d} — ${meta ? meta.full : 'Not marked (counts as worked)'}`}
-                            style={{ width: 22, height: 22, borderRadius: 4, border: meta ? 'none' : `1px solid ${LINE}`, background: meta ? meta.color : '#fff', color: '#fff', fontSize: 10, fontWeight: 800, cursor: 'pointer', padding: 0 }}
-                          >
-                            {meta ? meta.label : ''}
-                          </button>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div style={{ borderTop: `1px solid ${LINE}`, padding: '9px 0', background: isComplete ? '#EAF3DE' : 'transparent' }}>
+      <div onClick={() => (selectMode ? onToggleSelect() : (t.hasPack && onOpenDetail()))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, cursor: selectMode || t.hasPack ? 'pointer' : 'default' }}>
+        {selectMode && (
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 18, height: 18, flexShrink: 0, accentColor: LEAF }}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{t.articleName || t.product}</div>
+          <div style={{ fontSize: 10.5, color: MUTED }}>
+            {[...t.platforms].join(' + ')}{t.hasPack ? ` · ${t.rawUnit || `${t.packSize}${t.packUnit}/pack`}` : ''}
+          </div>
+          {!isPackerViewer && (
+            t.assignedTo ? (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 3, background: '#EAF3DE', color: LEAF_DARK, fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999 }}>
+                <UserCheck size={10} /> {t.assignedToName || 'Assigned'}
+              </div>
+            ) : !selectMode ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); onAssignRow(); }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 3, background: 'none', border: `1px dashed ${LINE}`, color: MUTED, fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999, cursor: 'pointer' }}
+              >
+                + Assign
+              </button>
+            ) : null
+          )}
         </div>
+        {t.hasPack ? (
+          <div style={{ color: LEAF, fontWeight: 800, fontSize: 13, flexShrink: 0 }}>{t.targetPacks} packs</div>
+        ) : (
+          <div style={{ color: LEAF, fontWeight: 800, fontSize: 13, flexShrink: 0 }}>{t.qty} {t.unit}</div>
+        )}
+        {!selectMode && t.hasPack && <ChevronRight size={15} color={MUTED} style={{ flexShrink: 0 }} />}
+      </div>
+
+      {t.hasPack ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, marginTop: 8 }}>
+            <div style={{ flex: 2 }}>
+              <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>PACKED</div>
+              <input
+                type="number"
+                placeholder="0"
+                value={packedValue}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setPackedValue(e.target.value)}
+                style={{ width: '100%', boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 13, padding: '6px 8px' }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, color: enteredShort > 0 ? TOMATO : MUTED, fontWeight: 700 }}>SHORT</div>
+              <input
+                type="number"
+                placeholder="0"
+                value={shortValue}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setShortValue(e.target.value)}
+                style={{ width: '100%', boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${enteredShort > 0 ? TOMATO : LINE}`, fontSize: 13, padding: '6px 8px', color: enteredShort > 0 ? TOMATO : INK }}
+              />
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (canSave) onSave(enteredPacked, enteredShort); }}
+              disabled={!canSave}
+              style={{ background: canSave ? LEAF : '#C9C2AE', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: canSave ? 'pointer' : 'default' }}
+            >
+              Save
+            </button>
+          </div>
+          {!isResolved && (enteredPacked > 0 || enteredShort > 0) && (
+            <div style={{ color: TOMATO, fontSize: 10.5, marginTop: 4 }}>Packed + short must total {t.targetPacks}</div>
+          )}
+        </>
+      ) : (
+        t.pendingIds.length > 0 ? (
+          <button onClick={() => onAdvanceMany(t.pendingIds, 'packed')} style={{ width: '100%', background: '#E6F1FB', color: '#1B5E8C', border: 'none', borderRadius: 8, padding: '6px 0', fontWeight: 700, fontSize: 11, marginTop: 5, cursor: 'pointer' }}>Mark {t.pendingIds.length} packed</button>
+        ) : (
+          <div style={{ color: LEAF, fontSize: 11, marginTop: 5, fontWeight: 600 }}>✓ All packed</div>
+        )
       )}
-    </Panel>
+    </div>
   );
 }
 
-function StaffAdvancesTab({ staff, advances, month, onSave, onDelete }) {
-  const [adding, setAdding] = useState(false);
-  const [staffId, setStaffId] = useState('');
-  const [date, setDate] = useState(todayLocalDate());
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
-
-  const monthAdvances = advances.filter((a) => (a.date || '').startsWith(month)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const total = monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
-  const nameOf = (id) => staff.find((s) => s.id === id)?.name || 'Unknown';
+function PackagingDetail({ target, progress, onSave, onBack }) {
+  const [packedValue, setPackedValue] = useState(String(progress.packedQty || ''));
+  const [shortValue, setShortValue] = useState(String(progress.shortQty || ''));
+  const enteredPacked = Number(packedValue) || 0;
+  const enteredShort = Number(shortValue) || 0;
+  const isResolved = enteredPacked + enteredShort === target.targetPacks;
+  const changed = enteredPacked !== progress.packedQty || enteredShort !== progress.shortQty;
+  const canSave = isResolved && changed;
 
   const save = () => {
-    if (!staffId || !amount) return;
-    onSave({ id: `ADV-${Date.now().toString(36).toUpperCase()}`, staffId, date, amount: Number(amount), note: note.trim() });
-    setAdding(false); setStaffId(''); setAmount(''); setNote('');
+    if (!canSave) return;
+    onSave(enteredPacked, enteredShort);
+    onBack();
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-        <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>ADVANCES THIS MONTH</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: AMBER }}>{money(total)}</p></div>
-        {!adding && (
-          <button onClick={() => setAdding(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            <Plus size={14} /> Give advance
-          </button>
-        )}
-      </div>
-      {adding && (
-        <Panel style={{ maxWidth: 440, marginBottom: 16 }}>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Record an advance</p>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>STAFF MEMBER</p>
-          <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={inputStyle}>
-            <option value="">— Select —</option>
-            {staff.filter((s) => s.status !== 'inactive').map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
-          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
-          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>NOTE (optional)</p>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason / reference" style={inputStyle} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save</button>
-            <button onClick={() => setAdding(false)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+    <div style={{ padding: 16 }}>
+      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 12, padding: 0 }}>
+        <ArrowLeft size={15} /> Back to packaging
+      </button>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>{target.articleName || target.product}</div>
+        <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>
+          {[...target.platforms].join(' + ')} · {target.date === 'No date' ? 'No fulfilment date' : target.date}
+        </div>
+        <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>Pack size: {target.rawUnit || `${target.packSize}${target.packUnit} per pack`}</div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>TARGET</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: INK }}>{target.targetPacks} packs</div>
           </div>
-        </Panel>
+          <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 8, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: MUTED, fontWeight: 700 }}>SAVED SO FAR</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: INK }}>{progress.packedQty} packed, {progress.shortQty} short</div>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div style={sectionTitle}>Update packed / short quantity</div>
+        <div style={hint}>An article can only be saved once — either fully packed, or packed plus short adding up to the full target ({target.targetPacks} packs).</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 2 }}>
+            <div style={smallLabel}>Packed</div>
+            <Field type="number" placeholder="0" value={packedValue} onChange={(e) => setPackedValue(e.target.value)} style={{ fontSize: 16, fontWeight: 700 }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={smallLabel}>Short</div>
+            <Field type="number" placeholder="0" value={shortValue} onChange={(e) => setShortValue(e.target.value)} style={{ fontSize: 16, fontWeight: 700, borderColor: enteredShort > 0 ? TOMATO : undefined, color: enteredShort > 0 ? TOMATO : undefined }} />
+          </div>
+        </div>
+        {!isResolved && (enteredPacked > 0 || enteredShort > 0) && (
+          <div style={{ color: TOMATO, fontSize: 12, marginTop: -6, marginBottom: 12 }}>Packed + short must total {target.targetPacks} packs.</div>
+        )}
+        <PrimaryBtn onClick={save} disabled={!canSave}>Save</PrimaryBtn>
+      </Card>
+    </div>
+  );
+}
+
+function AssignWorkerModal({ keys, packerUsers, currentlyAssigned, onClose, onAssign, onUnassign }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 200 }}>
+      <div style={{ background: '#fff', borderRadius: '18px 18px 0 0', padding: '24px 20px 32px', width: '100%', maxWidth: 420, maxHeight: '75vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center', gap: 6 }}><UserCheck size={16} /> Assign task</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>
+          {keys.length} article{keys.length === 1 ? '' : 's'} selected{currentlyAssigned?.assignedToName ? ` · currently assigned to ${currentlyAssigned.assignedToName}` : ''}
+        </div>
+
+        {packerUsers.length === 0 ? (
+          <div style={hint}>No active "Packer" role workers found. Add one in Users &amp; Roles first.</div>
+        ) : (
+          packerUsers.map((u) => (
+            <button
+              key={u.id}
+              onClick={() => onAssign(u.id, u.name)}
+              style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 12px', marginBottom: 8, cursor: 'pointer' }}
+            >
+              <span style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</span>
+              <ChevronRight size={15} color={MUTED} />
+            </button>
+          ))
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button onClick={onClose} style={{ flex: 1, background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          {currentlyAssigned && (
+            <button onClick={onUnassign} style={{ flex: 1, background: '#F3E7E2', color: TOMATO, border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Unassign</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Dispatch ----------
+function DispatchModal({ selectedCount, crates, onClose, onConfirm }) {
+  const [vehicleNo, setVehicleNo] = useState('');
+  const [driverName, setDriverName] = useState('');
+  const [cratesUsed, setCratesUsed] = useState('');
+  const [boxesUsed, setBoxesUsed] = useState('');
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 200 }}>
+      <div style={{ background: '#fff', borderRadius: '18px 18px 0 0', padding: '24px 20px 32px', width: '100%', maxWidth: 420 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center', gap: 6 }}><TruckIcon size={16} /> Dispatch order</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>{selectedCount} order(s) selected</div>
+        <Field placeholder="Vehicle number" value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} />
+        <Field placeholder="Driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} />
+        <Field placeholder={`Crates (${crates.crates} in stock)`} type="number" value={cratesUsed} onChange={(e) => setCratesUsed(e.target.value)} />
+        <Field placeholder={`Boxes (${crates.boxes} in stock)`} type="number" value={boxesUsed} onChange={(e) => setBoxesUsed(e.target.value)} />
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button onClick={onClose} style={{ flex: 1, background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <button
+            onClick={() => onConfirm({ vehicleNo: vehicleNo.trim(), driverName: driverName.trim(), cratesUsed: Number(cratesUsed) || 0, boxesUsed: Number(boxesUsed) || 0 })}
+            style={{ flex: 2, background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+          >
+            Confirm dispatch
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Indent-imported orders carry both a converted base-UOM qty (qty/unit) and the
+// original per-pack figures from the indent file (packSize/packUnit). Dispatch
+// should show the latter — the unit staff actually loaded the indent in — falling
+// back to the converted UOM only for manual (non-indent) orders that have no pack info.
+function renderIndentQty(o, qtyBase) {
+  if (o.packSize && o.packUnit) {
+    const packs = Math.round((Number(qtyBase) / Number(o.packSize)) * 100) / 100;
+    return (
+      <>
+        {packs} pack{packs === 1 ? '' : 's'}
+        <div style={{ fontSize: 10, fontWeight: 400, color: MUTED }}>{o.packSize}{o.packUnit}/pack</div>
+      </>
+    );
+  }
+  return `${qtyBase} ${o.unit}`;
+}
+
+function DispatchFillCardMobile({ batch, orders, onOpen }) {
+  const { orderedPacks, dispatchedPacks, shortPacks, pendingPacks, fillRate } = useMemo(
+    () => computeIndentFillRate(batch, orders),
+    [batch, orders]
+  );
+  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
+  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
+
+  return (
+    <div onClick={onOpen} style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, marginBottom: 10, cursor: 'pointer' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>{batch.platform} — {batch.fileName}</div>
+        <ChevronRight size={15} color={MUTED} />
+      </div>
+      <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</div>
+          <div style={{ fontWeight: 700, fontSize: 12 }}>{fulfilmentDate || '—'}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>ORDERED</div>
+          <div style={{ fontWeight: 700, fontSize: 12 }}>{orderedPacks} packs</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>DISPATCHED</div>
+          <div style={{ fontWeight: 700, fontSize: 12 }}>{dispatchedPacks} packs</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>SHORT</div>
+          <div style={{ fontWeight: 700, fontSize: 12, color: shortPacks > 0 ? TOMATO : INK }}>{shortPacks} packs</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>PENDING</div>
+          <div style={{ fontWeight: 700, fontSize: 12 }}>{pendingPacks} packs</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
+        <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>FILL RATE</div>
+        <div style={{ fontWeight: 800, fontSize: 16, color: fillRateColor(fillRate) }}>{fillRate}%</div>
+      </div>
+    </div>
+  );
+}
+
+function DispatchFillDetailMobile({ batch, orders, onBack }) {
+  const { rows, orderedPacks, dispatchedPacks, shortPacks, pendingPacks, fillRate } = useMemo(
+    () => computeIndentFillRate(batch, orders),
+    [batch, orders]
+  );
+  const batchOrders = useMemo(() => orders.filter((o) => o.batchId === batch.id), [orders, batch.id]);
+  const fulfilmentDate = batchOrders[0]?.fulfilmentDate || '';
+
+  return (
+    <div style={{ padding: 16 }}>
+      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 13, cursor: 'pointer', marginBottom: 12, padding: 0 }}>
+        <ArrowLeft size={15} /> Back to indents
+      </button>
+
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{batch.platform} — {batch.fileName}</div>
+        <div style={{ display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' }}>
+          <div><div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</div><div style={{ fontWeight: 700, fontSize: 12 }}>{fulfilmentDate || '—'}</div></div>
+          <div><div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>ORDERED</div><div style={{ fontWeight: 700, fontSize: 12 }}>{orderedPacks} packs</div></div>
+          <div><div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>DISPATCHED</div><div style={{ fontWeight: 700, fontSize: 12 }}>{dispatchedPacks} packs</div></div>
+          <div><div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>SHORT</div><div style={{ fontWeight: 700, fontSize: 12, color: shortPacks > 0 ? TOMATO : INK }}>{shortPacks} packs</div></div>
+          <div><div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>PENDING</div><div style={{ fontWeight: 700, fontSize: 12 }}>{pendingPacks} packs</div></div>
+        </div>
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` }}>
+          <div style={{ fontSize: 9, color: MUTED, fontWeight: 700 }}>FILL RATE</div>
+          <div style={{ fontWeight: 800, fontSize: 16, color: fillRateColor(fillRate) }}>{fillRate}%</div>
+        </div>
+      </Card>
+
+      <Card>
+        <div style={sectionTitle}>Article breakdown</div>
+        {rows.map((r) => (
+          <div key={r.orderId} style={{ borderTop: `1px solid ${LINE}`, padding: '8px 0' }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{r.articleName}</div>
+            <div style={{ fontSize: 11, color: MUTED }}>
+              {r.packSize}{r.packUnit}/pack · Ordered {r.orderedPacks} · Dispatched {r.dispatchedPacks}
+              {r.shortPacks > 0 ? <span style={{ color: TOMATO }}> · {r.shortPacks} short</span> : ''}
+              {r.pendingPacks > 0 ? <span style={{ color: AMBER }}> · {r.pendingPacks} pending</span> : ''}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: fillRateColor(r.fillRate) }}>{r.fillRate}% filled</div>
+          </div>
+        ))}
+        {rows.length === 0 && <div style={hint}>No articles in this indent.</div>}
+      </Card>
+    </div>
+  );
+}
+
+function DispatchTab({ orders, crates, dispatchLog, indentBatches, onDispatchBatch }) {
+  const packed = useMemo(() => orders
+    .filter((o) => o.status === 'packed')
+    .map((o) => ({ ...o, remaining: Math.max(0, Math.round((o.qty - (o.dispatchedQty || 0) - (o.shortQty || 0)) * 100) / 100) })),
+  [orders]);
+
+  const [view, setView] = useState('dispatch'); // 'dispatch' | 'history' | 'fills'
+  const [channel, setChannel] = usePersistedState('fnv_dispatch_channel', PLATFORMS[0]);
+  const [storeSel, setStoreSel] = usePersistedState('fnv_dispatch_store', '');
+  const [dispatchDate, setDispatchDate] = usePersistedState('fnv_dispatch_date', todayLocalDate());
+  const [selected, setSelected] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [selectedFillBatchId, setSelectedFillBatchId] = useState(null);
+
+  // Channel -> its stores (Blinkit has one, Flipkart has one per dark store).
+  const activeChannel = PLATFORMS.includes(channel) ? channel : PLATFORMS[0];
+  const storeOptions = useMemo(() => storeOptionsFor(orders, activeChannel), [orders, activeChannel]);
+  const activeStore = storeOptions.find((s) => s.value === storeSel) || storeOptions[0] || null;
+  const visiblePacked = useMemo(
+    () => packed.filter((o) => o.platform === activeChannel && activeStore && orderStore(o) === activeStore.store && (!dispatchDate || o.fulfilmentDate === dispatchDate)),
+    [packed, activeChannel, activeStore, dispatchDate],
+  );
+  const changeChannel = (c) => { setChannel(c); setStoreSel(''); setSelected([]); };
+  const changeStore = (v) => { setStoreSel(v); setSelected([]); };
+
+  const toggleSelect = (id) => setSelected((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const submitDispatch = ({ vehicleNo, driverName, cratesUsed, boxesUsed }) => {
+    if (selected.length === 0) return;
+    const dispatchItems = selected.map((id) => {
+      const o = packed.find((x) => x.id === id);
+      return { orderId: id, dispatchQty: o?.remaining || 0, shortQty: 0 };
+    });
+    onDispatchBatch({ items: dispatchItems, vehicleNo, driverName, cratesUsed, boxesUsed });
+    setSelected([]); setShowModal(false);
+  };
+
+  if (view === 'fills' && selectedFillBatchId) {
+    return (
+      <DispatchFillDetailMobile
+        batch={indentBatches.find((b) => b.id === selectedFillBatchId)}
+        orders={orders}
+        onBack={() => setSelectedFillBatchId(null)}
+      />
+    );
+  }
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+        <Chip label="Dispatch" active={view === 'dispatch'} onClick={() => setView('dispatch')} />
+        <Chip label={`History (${dispatchLog.length})`} active={view === 'history'} onClick={() => setView('history')} />
+        <Chip label={`Dispatch Fills (${indentBatches.length})`} active={view === 'fills'} onClick={() => setView('fills')} />
+      </div>
+
+      {view === 'dispatch' && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <select value={activeChannel} onChange={(e) => changeChannel(e.target.value)} style={{ flex: '1 1 0', minWidth: 0, boxSizing: 'border-box', padding: '8px 6px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, fontWeight: 700, color: INK, background: '#fff' }}>
+            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={activeStore ? activeStore.value : ''} onChange={(e) => changeStore(e.target.value)} disabled={storeOptions.length === 0} style={{ flex: '1.4 1 0', minWidth: 0, boxSizing: 'border-box', padding: '8px 6px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, fontWeight: 700, color: INK, background: '#fff' }}>
+            {storeOptions.length === 0 && <option value="">No stores yet</option>}
+            {storeOptions.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </div>
       )}
-      <Panel>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Date</Th><Th>Staff</Th><Th>Amount</Th><Th>Note</Th><Th /></tr></thead>
-            <tbody>
-              {monthAdvances.map((a) => (
-                <tr key={a.id}>
-                  <Td>{a.date}</Td>
-                  <Td style={{ fontWeight: 700 }}>{nameOf(a.staffId)}</Td>
-                  <Td style={{ fontWeight: 700, color: AMBER }}>{money(a.amount)}</Td>
-                  <Td style={{ fontSize: 12, color: MUTED }}>{a.note || '—'}</Td>
-                  <Td><ConfirmDeleteButton onConfirm={() => onDelete(a.id)} title="Delete this advance" /></Td>
-                </tr>
-              ))}
-              {monthAdvances.length === 0 && <tr><Td colSpan={5} style={{ color: MUTED, textAlign: 'center' }}>No advances given in {month}.</Td></tr>}
-            </tbody>
-          </table>
+
+      {view === 'dispatch' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <input
+            type="date"
+            value={dispatchDate}
+            onChange={(e) => setDispatchDate(e.target.value)}
+            style={{ flex: 1, boxSizing: 'border-box', padding: '8px 6px', borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, fontWeight: 700, color: INK, background: '#fff' }}
+          />
+          {dispatchDate !== todayLocalDate() && (
+            <button onClick={() => setDispatchDate(todayLocalDate())} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '8px 2px', flexShrink: 0 }}>
+              Today
+            </button>
+          )}
         </div>
-      </Panel>
+      )}
+
+      {view === 'dispatch' && (
+        <>
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={sectionTitle}>Packed — ready ({visiblePacked.length})</div>
+                <div style={hint}>An article only shows up here once it's been fully resolved in Packaging — either fully packed, or packed with the rest marked short. Quantities aren't editable here; go back to Packaging to change them.</div>
+              </div>
+            </div>
+            {visiblePacked.map((o) => (
+              <div key={o.id} style={{ borderTop: `1px solid ${LINE}`, padding: '9px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div onClick={() => toggleSelect(o.id)} style={{ width: 18, height: 18, borderRadius: 4, border: `1.5px solid ${LINE}`, background: selected.includes(o.id) ? LEAF : '#fff', cursor: 'pointer', flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{o.articleName || o.product}</div>
+                    <div style={{ fontSize: 11, color: MUTED }}>{o.id}</div>
+                  </div>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: LEAF, flexShrink: 0, textAlign: 'right' }}>{renderIndentQty(o, o.remaining)}</div>
+                </div>
+              </div>
+            ))}
+            {visiblePacked.length === 0 && <div style={hint}>Nothing packed yet for this store{dispatchDate ? ` on ${dispatchDate}` : ''} — resolve articles in Packaging first, or pick a different date above.</div>}
+          </Card>
+        </>
+      )}
+      {view === 'dispatch' && (
+        <div style={{ position: 'sticky', bottom: 0, background: BG, paddingTop: 10, marginTop: -10, marginLeft: -16, marginRight: -16, paddingLeft: 16, paddingRight: 16, paddingBottom: 4 }}>
+          <button
+            onClick={() => setShowModal(true)}
+            disabled={selected.length === 0}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: selected.length === 0 ? '#C9C2AE' : TOMATO, color: '#fff', border: 'none', borderRadius: 10, padding: '13px 0', fontWeight: 700, fontSize: 14, cursor: selected.length === 0 ? 'default' : 'pointer', boxShadow: '0 -4px 10px rgba(0,0,0,0.06)' }}
+          >
+            <TruckIcon size={15} /> Dispatch order{selected.length > 0 ? ` (${selected.length})` : ''}
+          </button>
+        </div>
+      )}
+
+      {view === 'history' && (
+        <Card>
+          <div style={sectionTitle}>Dispatch history ({dispatchLog.length})</div>
+          {dispatchLog.map((d) => (
+            <div key={d.id} style={{ borderTop: `1px solid ${LINE}`, padding: '8px 0' }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{d.id} · {d.vehicleNo}</div>
+              <div style={{ fontSize: 12, color: MUTED }}>{d.driverName} · {(d.orderIds || []).length} orders · {d.totalDispatchQty || 0} dispatched · {d.cratesUsed} crates, {d.boxesUsed} boxes · {d.time}</div>
+            </div>
+          ))}
+          {dispatchLog.length === 0 && <div style={hint}>No dispatches yet.</div>}
+        </Card>
+      )}
+
+      {view === 'fills' && (
+        <Card>
+          <div style={sectionTitle}>Dispatch Fills — indent-wise fill rate</div>
+          <div style={hint}>One card per uploaded indent — how much of what was ordered has actually gone out (in the original pack unit), how much fell short, and how much is still pending. Tap a card for the article-by-article breakdown.</div>
+          {indentBatches.map((b) => (
+            <DispatchFillCardMobile key={b.id} batch={b} orders={orders} onOpen={() => setSelectedFillBatchId(b.id)} />
+          ))}
+          {indentBatches.length === 0 && <div style={hint}>No indents uploaded yet.</div>}
+        </Card>
+      )}
+
+      {showModal && (
+        <DispatchModal selectedCount={selected.length} crates={crates} onClose={() => setShowModal(false)} onConfirm={submitDispatch} />
+      )}
     </div>
   );
 }
 
-function StaffPayrollTab({ staff, attendance, advances, month }) {
-  const active = staff.filter((s) => s.status !== 'inactive');
-  const rows = active.map((p) => ({ person: p, ...computePayroll(p, month, attendance, advances) }));
-  const totalNet = rows.reduce((s, r) => s + r.netPayable, 0);
-  const totalAdvance = rows.reduce((s, r) => s + r.advanceTotal, 0);
+// ---------- Crates ----------
+function CountBlock({ label, value, color, onMinus, onPlus }) {
+  return (
+    <Card style={{ flex: 1 }}>
+      <div style={{ fontSize: 12, color: MUTED, fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color, marginTop: 4 }}>{value}</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button onClick={onMinus} style={{ flex: 1, border: `1px solid ${LINE}`, background: '#fff', borderRadius: 8, padding: '8px 0', fontWeight: 700, cursor: 'pointer' }}>−</button>
+        <button onClick={onPlus} style={{ flex: 1, border: 'none', background: color, color: '#fff', borderRadius: 8, padding: '8px 0', fontWeight: 700, cursor: 'pointer' }}>+</button>
+      </div>
+    </Card>
+  );
+}
+function CratesTab({ crates, log, onAdjust }) {
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+        <CountBlock label="Crates" value={crates.crates} color={LEAF} onMinus={() => onAdjust('crates', -1)} onPlus={() => onAdjust('crates', 1)} />
+        <CountBlock label="Boxes" value={crates.boxes} color={AMBER} onMinus={() => onAdjust('boxes', -1)} onPlus={() => onAdjust('boxes', 1)} />
+      </div>
+      <Card>
+        <div style={sectionTitle}>Recent activity</div>
+        {log.map((l) => (
+          <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', borderTop: `1px solid ${LINE}`, padding: '8px 0' }}>
+            <div style={{ fontSize: 12, flex: 1 }}>{l.delta > 0 ? 'Added' : 'Removed'} {Math.abs(l.delta)} {l.type}{l.note ? ` · ${l.note}` : ''}</div>
+            <div style={{ fontSize: 11, color: MUTED }}>{l.time}</div>
+          </div>
+        ))}
+        {log.length === 0 && <div style={hint}>No activity yet — use +/− above.</div>}
+      </Card>
+    </div>
+  );
+}
+
+// ---------- Users & Roles ----------
+function UsersRolesTab({ users, roles, onAddUser, onUpdateUser, onDeleteUser, onAddRole, onDeleteRole, onToggleRolePermission }) {
+  const [name, setName] = useState('');
+  const [contact, setContact] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [usernameError, setUsernameError] = useState('');
+  const [roleId, setRoleId] = useState(roles[0]?.id || '');
+  const [city, setCity] = useState('All Cities');
+  const [newRoleName, setNewRoleName] = useState('');
+  const [visiblePasswordId, setVisiblePasswordId] = useState(null);
+  const PERMISSION_SECTIONS = NAV.map((n) => ({ key: n.key, label: n.label }));
+
+  const submitUser = () => {
+    if (!name.trim() || !roleId || !username.trim() || !password.trim()) return;
+    const uname = username.trim().toLowerCase();
+    if (users.some((u) => (u.username || '').toLowerCase() === uname)) {
+      setUsernameError('This username is already taken.');
+      return;
+    }
+    setUsernameError('');
+    onAddUser({ id: `U-${Date.now().toString(36).toUpperCase().slice(-5)}`, name: name.trim(), contact: contact.trim(), roleId, status: 'active', username: uname, password: password.trim(), city });
+    setName(''); setContact(''); setUsername(''); setPassword(''); setCity('All Cities');
+  };
+  const submitRole = () => {
+    if (!newRoleName.trim()) return;
+    const perms = {}; PERMISSION_SECTIONS.forEach((s) => { perms[s.key] = false; });
+    onAddRole({ id: `ROLE-${Date.now().toString(36).toUpperCase().slice(-5)}`, name: newRoleName.trim(), permissions: perms });
+    setNewRoleName('');
+  };
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 20, marginBottom: 12, flexWrap: 'wrap' }}>
-        <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>ADVANCES DEDUCTED</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: AMBER }}>{money(totalAdvance)}</p></div>
-        <div><p style={{ margin: '0 0 2px', fontSize: 11, color: MUTED, fontWeight: 700 }}>NET PAYABLE ({month})</p><p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: LEAF }}>{money(totalNet)}</p></div>
-      </div>
-      <Panel>
-        <p style={{ margin: '0 0 10px', fontSize: 12, color: MUTED }}>Salary is pro-rated per day of the month. Absent days aren't paid, half-days pay half, paid leave pays in full. Anyone who joined mid-month is only paid from their joining date.</p>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Staff</Th><Th>Salary</Th><Th>Absent</Th><Th>Half</Th><Th>Leave</Th><Th>Payable days</Th><Th>Earned</Th><Th>Advances</Th><Th>Net payable</Th></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.person.id}>
-                  <Td style={{ fontWeight: 700 }}>{r.person.name}</Td>
-                  <Td>{money(r.person.monthlySalary)}</Td>
-                  <Td style={{ color: r.counts.absent > 0 ? TOMATO : MUTED, fontWeight: r.counts.absent > 0 ? 700 : 400 }}>{r.counts.absent || '—'}</Td>
-                  <Td style={{ color: r.counts.halfday > 0 ? AMBER : MUTED }}>{r.counts.halfday || '—'}</Td>
-                  <Td style={{ color: MUTED }}>{r.counts.leave || '—'}</Td>
-                  <Td>{r.payableDays} / {r.eligibleDays}</Td>
-                  <Td>{money(r.earned)}</Td>
-                  <Td style={{ color: r.advanceTotal > 0 ? AMBER : MUTED }}>{r.advanceTotal > 0 ? `− ${money(r.advanceTotal)}` : '—'}</Td>
-                  <Td style={{ fontWeight: 800, color: r.netPayable < 0 ? TOMATO : LEAF }}>{money(r.netPayable)}</Td>
-                </tr>
-              ))}
-              {rows.length === 0 && <tr><Td colSpan={9} style={{ color: MUTED, textAlign: 'center' }}>No active staff to pay.</Td></tr>}
-            </tbody>
-          </table>
+    <div style={{ padding: 16 }}>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={sectionTitle}>Add employee</div>
+        <Field placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <Field placeholder="Phone / email" value={contact} onChange={(e) => setContact(e.target.value)} />
+        <div style={smallLabel}>Role</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 10 }}>{roles.map((r) => <Chip key={r.id} label={r.name} active={roleId === r.id} onClick={() => setRoleId(r.id)} />)}</div>
+        <div style={smallLabel}>Login credentials</div>
+        <Field placeholder="Username" value={username} onChange={(e) => { setUsername(e.target.value); setUsernameError(''); }} />
+        {usernameError && <div style={{ fontSize: 11, color: TOMATO, marginTop: -6, marginBottom: 8 }}>{usernameError}</div>}
+        <Field placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <div style={smallLabel}>City access</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 10 }}>
+          <Chip label="All Cities (Admin)" active={city === 'All Cities'} onClick={() => setCity('All Cities')} />
+          {CITIES.map((c) => <Chip key={c} label={c} active={city === c} onClick={() => setCity(c)} />)}
         </div>
-      </Panel>
+        <PrimaryBtn onClick={submitUser}>Add employee</PrimaryBtn>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <div style={sectionTitle}>Employees ({users.length})</div>
+        {users.map((u) => (
+          <div key={u.id} style={{ borderTop: `1px solid ${LINE}`, padding: '10px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
+              <button onClick={() => onDeleteUser(u.id)} style={{ background: 'none', border: 'none', color: TOMATO, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Remove</button>
+            </div>
+            <div style={{ fontSize: 12, color: MUTED }}>{u.contact || '—'}</div>
+            <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>
+              Username: <strong style={{ color: INK }}>{u.username || '—'}</strong>
+              {u.password && (
+                <>
+                  {' · Password: '}
+                  <span style={{ fontFamily: 'monospace' }}>{visiblePasswordId === u.id ? u.password : '••••••••'}</span>
+                  {' '}
+                  <button onClick={() => setVisiblePasswordId(visiblePasswordId === u.id ? null : u.id)} style={{ background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                    {visiblePasswordId === u.id ? 'Hide' : 'Show'}
+                  </button>
+                </>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 6 }}>{roles.map((r) => <Chip key={r.id} label={r.name} active={u.roleId === r.id} onClick={() => onUpdateUser(u.id, { roleId: r.id })} />)}</div>
+            <div style={{ fontSize: 9, color: MUTED, fontWeight: 700, marginTop: 6 }}>CITY ACCESS</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 4 }}>
+              <Chip label="All Cities" active={(u.city || 'All Cities') === 'All Cities'} onClick={() => onUpdateUser(u.id, { city: 'All Cities' })} />
+              {CITIES.map((c) => <Chip key={c} label={c} active={u.city === c} onClick={() => onUpdateUser(u.id, { city: c })} />)}
+            </div>
+            <button onClick={() => onUpdateUser(u.id, { status: u.status === 'active' ? 'inactive' : 'active' })} style={{ background: u.status === 'active' ? '#EAF3DE' : '#F3E7E2', color: u.status === 'active' ? LEAF_DARK : TOMATO, border: 'none', borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 700, marginTop: 8, cursor: 'pointer' }}>
+              {u.status === 'active' ? 'Active' : 'Inactive'}
+            </button>
+          </div>
+        ))}
+      </Card>
+
+      <Card>
+        <div style={sectionTitle}>Roles & permissions</div>
+        <div style={hint}>Tap a section to toggle access for that role.</div>
+        {roles.map((r) => {
+          const inUse = users.some((u) => u.roleId === r.id);
+          return (
+            <div key={r.id} style={{ borderTop: `1px solid ${LINE}`, padding: '10px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name}</div>
+                {!inUse && <button onClick={() => onDeleteRole(r.id)} style={{ background: 'none', border: 'none', color: TOMATO, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Delete</button>}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 6 }}>
+                {PERMISSION_SECTIONS.map((s) => {
+                  const isSensitive = ['staff', 'advanceindent'].includes(s.key);
+                  const active = isSensitive ? hasSensitivePermission(r.permissions, s.key) : hasPermission(r.permissions, s.key);
+                  return <Chip key={s.key} label={s.label} active={active} onClick={() => onToggleRolePermission(r.id, s.key, !active)} />;
+                })}
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          <Field placeholder="New role name" value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} style={{ flex: 1, marginBottom: 0 }} />
+          <button onClick={submitRole} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 8, padding: '0 14px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>+ Add</button>
+        </div>
+      </Card>
     </div>
   );
 }
-
-function CountCard({ label, value, color, type, onAdjust }) {
-  return (
-    <div style={{ flex: 1, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 12, padding: '16px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <div>
-        <p style={{ margin: '0 0 4px', fontSize: 12, color: MUTED, fontWeight: 700 }}>{label}</p>
-        <p style={{ margin: 0, fontSize: 26, fontWeight: 800, color }}>{value}</p>
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button onClick={() => onAdjust(type, -1)} style={countBtnStyle}>−</button>
-        <button onClick={() => onAdjust(type, 1)} style={{ ...countBtnStyle, background: color, color: '#fff', borderColor: color }}>+</button>
-      </div>
-    </div>
-  );
-}
-
-const inputStyle = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '8px 10px',
-  borderRadius: 8,
-  border: `1px solid ${LINE}`,
-  fontSize: 13,
-  marginBottom: 8,
-};
-
-const countBtnStyle = {
-  width: 32,
-  height: 32,
-  borderRadius: 8,
-  border: `1px solid ${LINE}`,
-  background: '#fff',
-  fontSize: 16,
-  fontWeight: 700,
-  cursor: 'pointer',
-  color: INK,
-};
