@@ -6115,6 +6115,39 @@ function parsePoSheetRows(rows) {
   return out;
 }
 
+// Shared by "Generate invoice from PO" and the per-invoice "refresh rows from
+// PO" action, so a PO file is only ever parsed one way in this app. Resolves
+// to { platform, fileName, rows, header } or rejects with a message fit to
+// show the user directly.
+function parsePoFile(file) {
+  return new Promise((resolve, reject) => {
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      // This app only ever sees a PDF purchase order from Zepto — Flipkart's
+      // export is always the .xlsx handled below.
+      extractPdfText(file).then((text) => {
+        const { rows, header } = parseZeptoPoText(text);
+        if (!rows.length) { reject(new Error('Could not find any priced article rows in this PDF.')); return; }
+        resolve({ platform: 'Zepto', fileName: file.name, rows, header });
+      }).catch(() => reject(new Error('Could not read this PDF.')));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        const rows2d = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        const rows = parsePoSheetRows(rows2d);
+        const header = parseFlipkartPoHeader(rows2d);
+        if (!rows.length) { reject(new Error('Could not find any priced article rows in this file.')); return; }
+        resolve({ platform: 'Flipkart', fileName: file.name, rows, header });
+      } catch (err) { reject(new Error('Could not read this file — use .xlsx, .xls, .csv or .pdf.')); }
+    };
+    reader.onerror = () => reject(new Error('Could not read this file.'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 // ── Flipkart "Items Received" store receiving report, used as its GRN ──
 // Flipkart doesn't issue a GRN report at all — the closest thing is this CSV
 // each store exports after physically receiving a PO ("Items Received"), which
@@ -9265,32 +9298,9 @@ function GenerateInvoiceFromPo({ salesInvoices, onSaveInvoice, onClose }) {
     const file = e.target.files[0];
     if (!file) return;
     setPoError(''); setParsed(null);
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    if (isPdf) {
-      // This app only ever sees a PDF purchase order from Zepto — Flipkart's
-      // export is always the .xlsx handled below.
-      extractPdfText(file).then((text) => {
-        const { rows, header } = parseZeptoPoText(text);
-        if (!rows.length) { setPoError('Could not find any priced article rows in this PDF.'); return; }
-        setParsed({ platform: 'Zepto', fileName: file.name, rows, header });
-        setPoNumber(header.poNumber || '');
-      }).catch(() => setPoError('Could not read this PDF.'));
-      e.target.value = '';
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const wb = XLSX.read(ev.target.result, { type: 'array' });
-        const rows2d = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
-        const rows = parsePoSheetRows(rows2d);
-        const header = parseFlipkartPoHeader(rows2d);
-        if (!rows.length) { setPoError('Could not find any priced article rows in this file.'); return; }
-        setParsed({ platform: 'Flipkart', fileName: file.name, rows, header });
-        setPoNumber(header.poNumber || '');
-      } catch (err) { setPoError('Could not read this file — use .xlsx, .xls, .csv or .pdf.'); }
-    };
-    reader.readAsArrayBuffer(file);
+    parsePoFile(file)
+      .then((p) => { setParsed(p); setPoNumber(p.header.poNumber || ''); })
+      .catch((err) => setPoError(err.message));
     e.target.value = '';
   };
 
@@ -9417,6 +9427,59 @@ function ManualInvoiceForm({ batchFinancials, salesInvoices, onSaveInvoice, onCl
   );
 }
 
+// Re-reads an already-generated invoice's own PO file to refresh its `rows`
+// (e.g. to backfill MRP on an invoice generated before that was captured) -
+// deliberately NOT delete-and-recreate, since that would mint a new invoice
+// id and silently orphan any payment already linked to this one via
+// linkedInvoiceId. Invoice number, date and id all stay exactly as they are;
+// only the article rows (and the amount computed from them) are replaced.
+function RefreshInvoiceRowsButton({ inv, onSaveInvoice }) {
+  const fileRef = useRef(null);
+  const [error, setError] = useState('');
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setError('');
+    parsePoFile(file)
+      .then((parsed) => {
+        const rows = parsed.rows.map((r) => ({ name: r.name, code: r.code, ean: r.ean || '', hsn: r.hsn || '', uom: r.uom || '', mrp: r.mrp || '', qty: r.qty, price: r.price, total: r.total }));
+        const amount = Math.round(rows.reduce((s, r) => s + (Number(r.total) || Number(r.price) * Number(r.qty) || 0), 0) * 100) / 100;
+        onSaveInvoice({
+          ...inv,
+          rows,
+          amount,
+          poFileName: parsed.fileName,
+          poDate: parsed.header.poDate || inv.poDate || '',
+          vendorName: parsed.header.vendorName || inv.vendorName || '',
+          vendorAddress: parsed.header.vendorAddress || inv.vendorAddress || '',
+          vendorGstin: parsed.header.vendorGstin || inv.vendorGstin || '',
+          vendorPhone: parsed.header.vendorPhone || inv.vendorPhone || '',
+          vendorEmail: parsed.header.vendorEmail || inv.vendorEmail || '',
+          buyerName: parsed.header.buyerName || inv.buyerName || '',
+          buyerAddress: parsed.header.buyerAddress || inv.buyerAddress || '',
+          buyerGstin: parsed.header.buyerGstin || inv.buyerGstin || '',
+        });
+      })
+      .catch((err) => setError(err.message));
+  };
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        onClick={() => fileRef.current && fileRef.current.click()}
+        title="Re-upload this invoice's PO to refresh its article rows (e.g. to add MRP to an invoice generated before that was captured) — invoice number and any payments already linked stay untouched"
+        style={{ background: 'none', border: 'none', color: LEAF, cursor: 'pointer', padding: 0, display: 'flex' }}
+      >
+        <RotateCcw size={14} />
+      </button>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleFile} style={{ display: 'none' }} />
+      {error && <span style={{ position: 'absolute', top: 18, right: 0, background: '#fff', border: `1px solid ${TOMATO}`, color: TOMATO, borderRadius: 6, padding: '4px 8px', fontSize: 10, whiteSpace: 'nowrap', zIndex: 5 }}>{error}</span>}
+    </span>
+  );
+}
+
 function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSaveInvoice, onDeleteInvoice }) {
   const [mode, setMode] = useState('closed'); // 'closed' | 'po' | 'manual'
   const [platformFilter, setPlatformFilter] = usePersistedState('fnv_invoices_platform', 'All');
@@ -9477,6 +9540,9 @@ function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSav
                         <ConfirmDeleteButton onConfirm={() => onDeleteInvoice(inv.id)} title={`Delete invoice ${inv.invoiceNumber}`} />
                         {inv.platform === 'Flipkart' && (inv.rows || []).length > 0 && (
                           <button onClick={() => downloadPacketSummary(inv)} title="Download Packet Summary (for Flipkart's vendor portal — use this when this invoice lands in Error)" style={{ background: 'none', border: 'none', color: AMBER, cursor: 'pointer', padding: 0, display: 'flex' }}><FileSpreadsheet size={14} /></button>
+                        )}
+                        {inv.platform === 'Flipkart' && (
+                          <RefreshInvoiceRowsButton inv={inv} onSaveInvoice={onSaveInvoice} />
                         )}
                       </div>
                     </Td>
