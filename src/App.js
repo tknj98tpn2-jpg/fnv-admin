@@ -1531,24 +1531,31 @@ function downloadItemsTemplate() {
 // field here already lives on the invoice's own `rows` (filled in at
 // "Generate invoice from PO" time), so this just re-shapes it.
 function downloadPacketSummary(inv) {
-  const rows = (inv.rows || []).map((r) => {
-    const eanNum = Number(r.ean);
-    return {
-      'FSN code': r.code || '',
-      'EAN code': r.ean && Number.isFinite(eanNum) ? eanNum : (r.ean || ''),
-      'Article Code': r.name || '',
-      Size: r.uom || 'pcs',
-      MRP: '',
-      'Unit Price': Number(r.price) || 0,
-      Qty: Number(r.qty) || 0,
-      'Tax  Percentage(%)': 0,
-      'Taxable Amt': Number(r.total) || 0,
-      'Inv Number': inv.invoiceNumber || '',
-      'PO Number': inv.poNumber || '',
-    };
-  });
+  const rows = (inv.rows || []).map((r) => ({
+    'FSN code': r.code || '',
+    // Kept as plain text, not a number - a 13-digit EAN stored as a number
+    // renders as scientific notation (8.90E+12) the moment the column isn't
+    // wide enough, which is exactly what made it unreadable before.
+    'EAN code': r.ean ? String(r.ean) : '',
+    'Article Code': r.name || '',
+    Size: r.uom || 'pcs',
+    MRP: r.mrp || '',
+    'Unit Price': Number(r.price) || 0,
+    Qty: Number(r.qty) || 0,
+    'Tax  Percentage(%)': 0,
+    'Taxable Amt': Number(r.total) || 0,
+    'Inv Number': inv.invoiceNumber || '',
+    'PO Number': inv.poNumber || '',
+  }));
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows);
+  // Belt-and-braces: explicitly mark the EAN column as text-formatted so no
+  // spreadsheet app re-interprets the string back into a number on its own.
+  const eanColRange = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+  for (let r = 1; r <= eanColRange.e.r; r += 1) {
+    const addr = XLSX.utils.encode_cell({ r, c: 1 });
+    if (ws[addr]) { ws[addr].t = 's'; ws[addr].z = '@'; }
+  }
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
   const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([wbout], { type: 'application/octet-stream' });
@@ -6050,6 +6057,7 @@ const PO_TOTAL_KEYS = ['totalamount', 'linetotal', 'total', 'amount', 'value'];
 const PO_EAN_KEYS = ['ean'];
 const PO_HSN_KEYS = ['hsnsaccode', 'hsncode', 'hsn'];
 const PO_UOM_KEYS = ['uom'];
+const PO_MRP_KEYS = ['mrp'];
 
 function parsePoSheetRows(rows) {
   let headerIdx = -1;
@@ -6074,10 +6082,11 @@ function parsePoSheetRows(rows) {
       const eanIdx = findColumnIndex(merged, PO_EAN_KEYS);
       const hsnIdx = findColumnIndex(merged, PO_HSN_KEYS);
       const uomIdx = findColumnIndex(merged, PO_UOM_KEYS);
+      const mrpIdx = findColumnIndex(merged, PO_MRP_KEYS);
       if (qtyIdx !== -1 && (priceIdx !== -1 || totalIdx !== -1) && (idIdx !== -1 || nameIdx !== -1)) {
         headerIdx = i;
         headerSpan = span;
-        cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx, ean: eanIdx, hsn: hsnIdx, uom: uomIdx };
+        cols = { code: idIdx, name: nameIdx, qty: qtyIdx, price: priceIdx, total: totalIdx, ean: eanIdx, hsn: hsnIdx, uom: uomIdx, mrp: mrpIdx };
         break;
       }
     }
@@ -6101,7 +6110,7 @@ function parsePoSheetRows(rows) {
     let price = cols.price === -1 ? 0 : num(cells[cols.price]);
     const total = cols.total === -1 ? 0 : num(cells[cols.total]);
     if (!price && total && qty) price = Math.round((total / qty) * 100) / 100;
-    if (qty > 0 && price > 0) out.push({ code, name, qty, price, total: total || Math.round(qty * price * 100) / 100, ean: cell(cells, cols.ean), hsn: cell(cells, cols.hsn), uom: cell(cells, cols.uom) });
+    if (qty > 0 && price > 0) out.push({ code, name, qty, price, total: total || Math.round(qty * price * 100) / 100, ean: cell(cells, cols.ean), hsn: cell(cells, cols.hsn), uom: cell(cells, cols.uom), mrp: cell(cells, cols.mrp) });
   }
   return out;
 }
@@ -9307,7 +9316,7 @@ function GenerateInvoiceFromPo({ salesInvoices, onSaveInvoice, onClose }) {
       buyerName: parsed.header.buyerName || '',
       buyerAddress: parsed.header.buyerAddress || '',
       buyerGstin: parsed.header.buyerGstin || '',
-      rows: parsed.rows.map((r) => ({ name: r.name, code: r.code, ean: r.ean || '', hsn: r.hsn || '', uom: r.uom || '', qty: r.qty, price: r.price, total: r.total })),
+      rows: parsed.rows.map((r) => ({ name: r.name, code: r.code, ean: r.ean || '', hsn: r.hsn || '', uom: r.uom || '', mrp: r.mrp || '', qty: r.qty, price: r.price, total: r.total })),
       batchIds: [],
     };
     onSaveInvoice(inv);
