@@ -5577,6 +5577,14 @@ function computeRecipeUnitCost(item, recipes, items, latestUnitPriceByItem) {
   return Math.round(total * 100) / 100;
 }
 
+// A handful of composite keys built below embed a raw item/product name and
+// are then used directly as a Firestore document id (packingProgress,
+// pricingConfig). A "/" in that name (e.g. "Chinese Fried Rice/Noodles Veggie
+// Mix") would otherwise split into extra path segments there, making the
+// write throw and silently fail to save — swapped for a visually-identical
+// stand-in that Firestore treats as an ordinary character.
+const sanitizeKeyPart = (s) => String(s || '').replace(/\//g, '⁄');
+
 // One entry per distinct article that has come through an indent — same product can have
 // several pack sizes (e.g. 500g "Baby Banana" vs 600g "Banana 3pc"), each priced separately.
 // Shared by the Pricing tab and the Profit & Loss tab so both agree on cost.
@@ -5588,11 +5596,11 @@ function buildPricingArticles(orders, items, purchases, city, configByKey, recip
   orders
     .filter((o) => o.packSize && o.packUnit)
     .forEach((o) => {
-      const key = `${city}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      const key = `${city}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
       // Pre-fix pricingConfig docs were saved without a city prefix at all, shared across
       // every city. Keeping this around lets a city inherit those old settings the first
       // time it prices this article, instead of silently resetting everyone to zero.
-      const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      const legacyKey = `${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
       if (map[key]) return;
       const item = items.find((it) => it.name === o.product);
       // itemId is the reliable match; when this order predates that field, its own
@@ -5649,8 +5657,8 @@ function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
   const batchOrders = orders.filter((o) => o.batchId === batch.id && !o.isAdvance);
   const batchCity = batch.city || CITIES[0];
   const rows = batchOrders.map((o) => {
-    const key = `${batchCity}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
-    const legacyKey = `${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+    const key = `${batchCity}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
+    const legacyKey = `${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
     const article = articlesByKey[key];
     const packSize = Number(o.packSize) || 1;
     const shortPacks = Math.min(Number(o.packQty) || 0, (Number(o.shortQty) || 0) / packSize);
@@ -6631,7 +6639,7 @@ function PackagingPanel({ orders, items, onAdvanceMany, packingProgress, onUpdat
       map[dateKey] = map[dateKey] || {};
       const hasPack = !!(o.packQty && o.packSize);
       const cityKey = o.city || CITIES[0];
-      const key = hasPack ? `${cityKey}__${dateKey}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}` : `${cityKey}__${dateKey}__${o.product}__${o.unit}`;
+      const key = hasPack ? `${cityKey}__${dateKey}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}` : `${cityKey}__${dateKey}__${sanitizeKeyPart(o.product)}__${o.unit}`;
       map[dateKey][key] = map[dateKey][key] || {
         key, product: o.product, articleName: o.articleName || o.product, unit: o.unit, qty: 0, platforms: new Set(),
         orderIds: [], pendingIds: [], hasPack, packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0,
@@ -7983,7 +7991,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
     const groups = {};
     dayOrders.forEach((o) => {
       const cityKey = o.city || CITIES[0];
-      const key = `${cityKey}__${date}__${o.product}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      const key = `${cityKey}__${date}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
       if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, rawCode: o.rawCode || '', rawEan: o.rawEan || '', packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0 };
       groups[key].targetPacks += Number(o.packQty) || 0;
     });
