@@ -622,6 +622,7 @@ export default function AdminPanel() {
   const [staff, setStaff] = useState([]);
   const [staffAttendance, setStaffAttendance] = useState([]);
   const [staffAdvances, setStaffAdvances] = useState([]);
+  const [staffPayroll, setStaffPayroll] = useState([]); // recorded salary payouts, one per staff member per month paid
   const [companyDetailsByCity, setCompanyDetailsByCity] = useState({});
   const [crateLog,      setCrateLog]      = useState([]);
   const [dispatchLog,   setDispatchLog]   = useState([]);
@@ -654,8 +655,8 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','barcodeFormats','barcodePrints','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, barcodePrints: setBarcodePrints, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','barcodeFormats','barcodePrints','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances','staffPayroll'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, barcodePrints: setBarcodePrints, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances, staffPayroll: setStaffPayroll };
 
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
@@ -908,6 +909,11 @@ export default function AdminPanel() {
   const clearAttendance = (staffId, date) => fbDelete('staffAttendance', `${staffId}__${date}`);
   const saveAdvance = (adv) => fbSetDoc('staffAdvances', adv.id, { ...adv, city: effectiveCity });
   const deleteAdvance = (id) => fbDelete('staffAdvances', id);
+  // One payout doc per staff member per month - id'd by staffId+month so paying
+  // the same person for the same month again (e.g. to correct the mode/UTR)
+  // overwrites that record rather than creating a second "paid" entry.
+  const savePayrollPayment = (p) => fbSetDoc('staffPayroll', `${p.staffId}__${p.month}`, { ...p, id: `${p.staffId}__${p.month}`, city: effectiveCity });
+  const deletePayrollPayment = (id) => fbDelete('staffPayroll', id);
 
   // ── Indent batches ──────────────────────────────────────
   const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, { ...batch, city: effectiveCity });
@@ -1122,6 +1128,7 @@ export default function AdminPanel() {
   const cityStaff = staff.filter((s) => (s.city || CITIES[0]) === effectiveCity);
   const cityStaffAttendance = staffAttendance.filter((a) => (a.city || CITIES[0]) === effectiveCity);
   const cityStaffAdvances = staffAdvances.filter((a) => (a.city || CITIES[0]) === effectiveCity);
+  const cityStaffPayroll = staffPayroll.filter((p) => (p.city || CITIES[0]) === effectiveCity);
   const pendingCount = cityOrders.filter((o) => o.status === 'pending').length;
   const totalSpend = cityPurchases.reduce((s, p) => s + p.cost, 0);
 
@@ -1324,12 +1331,15 @@ export default function AdminPanel() {
               staff={cityStaff}
               attendance={cityStaffAttendance}
               advances={cityStaffAdvances}
+              payroll={cityStaffPayroll}
               onSaveStaff={saveStaff}
               onDeleteStaff={deleteStaff}
               onMarkAttendance={markAttendance}
               onClearAttendance={clearAttendance}
               onSaveAdvance={saveAdvance}
               onDeleteAdvance={deleteAdvance}
+              onSavePayrollPayment={savePayrollPayment}
+              onDeletePayrollPayment={deletePayrollPayment}
             />
           )}
           {tab === 'packaging' && <PackagingPanel orders={cityOperationalOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
@@ -9761,7 +9771,7 @@ function computePayroll(person, monthStr, attendance, advances) {
   };
 }
 
-function StaffPanel({ staff, attendance, advances, onSaveStaff, onDeleteStaff, onMarkAttendance, onClearAttendance, onSaveAdvance, onDeleteAdvance }) {
+function StaffPanel({ staff, attendance, advances, payroll, onSaveStaff, onDeleteStaff, onMarkAttendance, onClearAttendance, onSaveAdvance, onDeleteAdvance, onSavePayrollPayment, onDeletePayrollPayment }) {
   const [view, setView] = useState('people');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const views = [
@@ -9792,7 +9802,7 @@ function StaffPanel({ staff, attendance, advances, onSaveStaff, onDeleteStaff, o
       {view === 'people' && <StaffPeopleTab staff={staff} onSaveStaff={onSaveStaff} onDeleteStaff={onDeleteStaff} />}
       {view === 'attendance' && <StaffAttendanceTab staff={staff} attendance={attendance} month={month} onMark={onMarkAttendance} onClear={onClearAttendance} />}
       {view === 'advances' && <StaffAdvancesTab staff={staff} advances={advances} month={month} onSave={onSaveAdvance} onDelete={onDeleteAdvance} />}
-      {view === 'payroll' && <StaffPayrollTab staff={staff} attendance={attendance} advances={advances} month={month} />}
+      {view === 'payroll' && <StaffPayrollTab staff={staff} attendance={attendance} advances={advances} payroll={payroll} month={month} onSavePayment={onSavePayrollPayment} onDeletePayment={onDeletePayrollPayment} />}
     </div>
   );
 }
@@ -9964,9 +9974,14 @@ function StaffAdvancesTab({ staff, advances, month, onSave, onDelete }) {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
 
-  const monthAdvances = advances.filter((a) => (a.date || '').startsWith(month)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const total = monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
   const nameOf = (id) => staff.find((s) => s.id === id)?.name || 'Unknown';
+  // Grouped by staff name (A-Z) so every advance for one person sits together,
+  // newest first within that person's own block - rather than interleaved by
+  // date across everyone, which made it hard to see one person's running total.
+  const monthAdvances = advances
+    .filter((a) => (a.date || '').startsWith(month))
+    .sort((a, b) => nameOf(a.staffId).localeCompare(nameOf(b.staffId)) || (b.date || '').localeCompare(a.date || ''));
+  const total = monthAdvances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
 
   const save = () => {
     if (!staffId || !amount) return;
@@ -10027,11 +10042,50 @@ function StaffAdvancesTab({ staff, advances, month, onSave, onDelete }) {
   );
 }
 
-function StaffPayrollTab({ staff, attendance, advances, month }) {
+const SALARY_PAYMENT_MODES = [{ key: 'cash', label: '💵 Cash' }, { key: 'upi', label: '📱 UPI' }, { key: 'bank', label: '🏦 Bank Transfer' }, { key: 'cheque', label: '📄 Cheque' }];
+
+function StaffPayrollTab({ staff, attendance, advances, payroll, month, onSavePayment, onDeletePayment }) {
   const active = staff.filter((s) => s.status !== 'inactive');
   const rows = active.map((p) => ({ person: p, ...computePayroll(p, month, attendance, advances) }));
   const totalNet = rows.reduce((s, r) => s + r.netPayable, 0);
   const totalAdvance = rows.reduce((s, r) => s + r.advanceTotal, 0);
+
+  const paidByStaff = useMemo(() => {
+    const map = {};
+    payroll.filter((p) => p.month === month).forEach((p) => { map[p.staffId] = p; });
+    return map;
+  }, [payroll, month]);
+
+  const [payModal, setPayModal] = useState(null); // the row being paid
+  const [payMode, setPayMode] = useState('cash');
+  const [payAmount, setPayAmount] = useState('');
+  const [payRef, setPayRef] = useState('');
+  const [payNote, setPayNote] = useState('');
+
+  const openPayModal = (r) => {
+    setPayModal(r);
+    setPayMode('cash');
+    setPayAmount(String(r.netPayable));
+    setPayRef('');
+    setPayNote('');
+  };
+  const closePayModal = () => setPayModal(null);
+
+  const confirmPay = () => {
+    if (!payModal || !payAmount) return;
+    onSavePayment({
+      staffId: payModal.person.id,
+      staffName: payModal.person.name,
+      month,
+      amount: Number(payAmount),
+      netPayable: payModal.netPayable,
+      mode: payMode,
+      reference: payRef.trim(),
+      note: payNote.trim(),
+      date: todayLocalDate(),
+    });
+    closePayModal();
+  };
 
   return (
     <div>
@@ -10043,26 +10097,80 @@ function StaffPayrollTab({ staff, attendance, advances, month }) {
         <p style={{ margin: '0 0 10px', fontSize: 12, color: MUTED }}>Salary is pro-rated per day of the month. Absent days aren't paid, half-days pay half, paid leave pays in full. Anyone who joined mid-month is only paid from their joining date.</p>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Staff</Th><Th>Salary</Th><Th>Absent</Th><Th>Half</Th><Th>Leave</Th><Th>Payable days</Th><Th>Earned</Th><Th>Advances</Th><Th>Net payable</Th></tr></thead>
+            <thead><tr><Th>Staff</Th><Th>Salary</Th><Th>Absent</Th><Th>Half</Th><Th>Leave</Th><Th>Payable days</Th><Th>Earned</Th><Th>Advances</Th><Th>Net payable</Th><Th>Payment</Th></tr></thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.person.id}>
-                  <Td style={{ fontWeight: 700 }}>{r.person.name}</Td>
-                  <Td>{money(r.person.monthlySalary)}</Td>
-                  <Td style={{ color: r.counts.absent > 0 ? TOMATO : MUTED, fontWeight: r.counts.absent > 0 ? 700 : 400 }}>{r.counts.absent || '—'}</Td>
-                  <Td style={{ color: r.counts.halfday > 0 ? AMBER : MUTED }}>{r.counts.halfday || '—'}</Td>
-                  <Td style={{ color: MUTED }}>{r.counts.leave || '—'}</Td>
-                  <Td>{r.payableDays} / {r.eligibleDays}</Td>
-                  <Td>{money(r.earned)}</Td>
-                  <Td style={{ color: r.advanceTotal > 0 ? AMBER : MUTED }}>{r.advanceTotal > 0 ? `− ${money(r.advanceTotal)}` : '—'}</Td>
-                  <Td style={{ fontWeight: 800, color: r.netPayable < 0 ? TOMATO : LEAF }}>{money(r.netPayable)}</Td>
-                </tr>
-              ))}
-              {rows.length === 0 && <tr><Td colSpan={9} style={{ color: MUTED, textAlign: 'center' }}>No active staff to pay.</Td></tr>}
+              {rows.map((r) => {
+                const paid = paidByStaff[r.person.id];
+                return (
+                  <tr key={r.person.id}>
+                    <Td style={{ fontWeight: 700 }}>{r.person.name}</Td>
+                    <Td>{money(r.person.monthlySalary)}</Td>
+                    <Td style={{ color: r.counts.absent > 0 ? TOMATO : MUTED, fontWeight: r.counts.absent > 0 ? 700 : 400 }}>{r.counts.absent || '—'}</Td>
+                    <Td style={{ color: r.counts.halfday > 0 ? AMBER : MUTED }}>{r.counts.halfday || '—'}</Td>
+                    <Td style={{ color: MUTED }}>{r.counts.leave || '—'}</Td>
+                    <Td>{r.payableDays} / {r.eligibleDays}</Td>
+                    <Td>{money(r.earned)}</Td>
+                    <Td style={{ color: r.advanceTotal > 0 ? AMBER : MUTED }}>{r.advanceTotal > 0 ? `− ${money(r.advanceTotal)}` : '—'}</Td>
+                    <Td style={{ fontWeight: 800, color: r.netPayable < 0 ? TOMATO : LEAF }}>{money(r.netPayable)}</Td>
+                    <Td>
+                      {paid ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div>
+                            <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: LEAF, display: 'flex', alignItems: 'center', gap: 4 }}><CheckCircle2 size={12} /> Paid {money(paid.amount)}</p>
+                            <p style={{ margin: '2px 0 0', fontSize: 10, color: MUTED }}>
+                              {SALARY_PAYMENT_MODES.find((m) => m.key === paid.mode)?.label || paid.mode}{paid.reference ? ` · ${paid.reference}` : ''}
+                            </p>
+                          </div>
+                          <ConfirmDeleteButton onConfirm={() => onDeletePayment(paid.id)} title={`Undo this payment to ${r.person.name} for ${month}`} />
+                        </div>
+                      ) : (
+                        <button onClick={() => openPayModal(r)} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: 7, padding: '7px 14px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                          Pay
+                        </button>
+                      )}
+                    </Td>
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && <tr><Td colSpan={10} style={{ color: MUTED, textAlign: 'center' }}>No active staff to pay.</Td></tr>}
             </tbody>
           </table>
         </div>
       </Panel>
+
+      {payModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 18, padding: 30, width: 440, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.22)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <p style={{ margin: 0, fontWeight: 800, fontSize: 18, color: INK }}>Pay {payModal.person.name}</p>
+              <button onClick={closePayModal} style={{ background: 'none', border: 'none', fontSize: 22, color: MUTED, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Salary for {month} · Net payable {money(payModal.netPayable)}</p>
+
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
+            <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} style={inputStyle} />
+
+            <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: MUTED }}>MODE OF PAYMENT</p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              {SALARY_PAYMENT_MODES.map((m) => (
+                <button key={m.key} onClick={() => setPayMode(m.key)} style={{ flex: '1 1 auto', padding: '9px 6px', borderRadius: 9, border: `1.5px solid ${payMode === m.key ? LEAF : LINE}`, background: payMode === m.key ? '#EAF3DE' : '#fff', color: payMode === m.key ? LEAF_DARK : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PAYMENT INFO / UTR NUMBER (OPTIONAL)</p>
+            <input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="e.g. UTR / transaction ID / cheque no." style={inputStyle} />
+
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>NOTE (OPTIONAL)</p>
+            <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Anything worth remembering about this payout" style={{ ...inputStyle, marginBottom: 20 }} />
+
+            <button onClick={confirmPay} disabled={!payAmount} style={{ width: '100%', background: !payAmount ? '#C9C2AE' : LEAF, color: '#fff', border: 'none', borderRadius: 11, padding: '13px 0', fontWeight: 800, fontSize: 15, cursor: !payAmount ? 'default' : 'pointer' }}>
+              Confirm payment{payAmount ? ` — ₹${Number(payAmount).toLocaleString('en-IN')}` : ''}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
