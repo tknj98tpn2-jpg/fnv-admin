@@ -1215,13 +1215,13 @@ export default function AdminPanel() {
           {isCityLocked ? (
             <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#fff' }}>{currentUser.city}</p>
           ) : (
-            <select
+            <SmartSelect
               value={selectedCity}
               onChange={(e) => setSelectedCity(e.target.value)}
               style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: RADIUS.md, padding: '7px 8px', fontSize: 13, fontWeight: 700 }}
             >
               {CITIES.map((c) => <option key={c} value={c} style={{ color: INK }}>{c}</option>)}
-            </select>
+            </SmartSelect>
           )}
         </div>
         <div style={{ padding: '10px 10px', flex: 1, overflowY: 'auto' }}>
@@ -2080,10 +2080,10 @@ function AddPurchaseModal({ vendor, items, defaultDate, onSave, onClose }) {
         )}
 
         <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>{stagedItems.length > 0 ? 'ADD ANOTHER ITEM' : 'ITEM'}</p>
-        <select value={itemId} onChange={(e) => setItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+        <SmartSelect value={itemId} onChange={(e) => setItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
           {itemOptions.length === 0 && <option value="">No items available</option>}
           {itemOptions.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
-        </select>
+        </SmartSelect>
         {vendorItems.length === 0 && items.length > 0 && (
           <p style={{ margin: '-6px 0 10px', fontSize: 11, color: MUTED }}>No items linked to {vendor.name} yet — showing all items. Link items below to narrow this list next time.</p>
         )}
@@ -2658,19 +2658,19 @@ function AliasChip({ alias }) {
 function AliasRow({ alias, onChange, onRemove }) {
   return (
     <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-      <select value={alias.channel} onChange={(e) => onChange({ ...alias, channel: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
+      <SmartSelect value={alias.channel} onChange={(e) => onChange({ ...alias, channel: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
         <option value="">Channel</option>
         {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-      </select>
+      </SmartSelect>
       <input placeholder="Item code" value={alias.code} onChange={(e) => onChange({ ...alias, code: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
       <input placeholder="EAN" value={alias.ean || ''} onChange={(e) => onChange({ ...alias, ean: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px' }} />
       <input placeholder="Pack size" type="number" value={alias.packSize} onChange={(e) => onChange({ ...alias, packSize: e.target.value })} style={{ width: 66, boxSizing: 'border-box', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }} />
-      <select value={alias.packUnit || 'kg'} onChange={(e) => onChange({ ...alias, packUnit: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
+      <SmartSelect value={alias.packUnit || 'kg'} onChange={(e) => onChange({ ...alias, packUnit: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}>
         <option value="kg">kg</option>
         <option value="g">g</option>
         <option value="pieces">pieces</option>
         <option value="pack">pack</option>
-      </select>
+      </SmartSelect>
       <button onClick={onRemove} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', padding: 2, flexShrink: 0 }}>
         <Trash2 size={13} />
       </button>
@@ -2720,15 +2720,15 @@ function ItemForm({ initial, onSave, onCancel }) {
         <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
           <div style={{ flex: 1 }}>
             <p style={label13}>UOM (unit it's purchased in)</p>
-            <select value={uom} onChange={(e) => setUom(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+            <SmartSelect value={uom} onChange={(e) => setUom(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
               {UOM_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
-            </select>
+            </SmartSelect>
           </div>
           <div style={{ flex: 1 }}>
             <p style={label13}>CATEGORY</p>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+            <SmartSelect value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
               {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </SmartSelect>
           </div>
         </div>
 
@@ -3065,17 +3065,17 @@ function CutProcessPanel({ items, recipes, orders, onAddRecipe, onDeleteRecipe, 
             Recipes describe how much of each item goes into one unit of a processed product.
           </p>
           <input placeholder="Recipe name (e.g. Pulao Veggie Mix)" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
-          <select value={outputItemId} onChange={(e) => setOutputItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+          <SmartSelect value={outputItemId} onChange={(e) => setOutputItemId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
             <option value="">Output item (finished product)</option>
             {items.map((it) => (
               <option key={it.id} value={it.id}>{it.name} ({it.uom})</option>
             ))}
-          </select>
+          </SmartSelect>
 
           <p style={{ margin: '6px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>INGREDIENTS (per 1 output unit)</p>
           {ingredients.map((row) => (
             <div key={row.key} style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center' }}>
-              <select
+              <SmartSelect
                 value={row.itemId}
                 onChange={(e) => updateIngredientRow(row.key, 'itemId', e.target.value)}
                 style={{ flex: 1, borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 4px' }}
@@ -3084,7 +3084,7 @@ function CutProcessPanel({ items, recipes, orders, onAddRecipe, onDeleteRecipe, 
                 {items.filter((it) => it.id !== outputItemId).map((it) => (
                   <option key={it.id} value={it.id}>{it.name}</option>
                 ))}
-              </select>
+              </SmartSelect>
               <input
                 placeholder="Qty"
                 type="number"
@@ -3092,7 +3092,7 @@ function CutProcessPanel({ items, recipes, orders, onAddRecipe, onDeleteRecipe, 
                 onChange={(e) => updateIngredientRow(row.key, 'qtyPerUnit', e.target.value)}
                 style={{ width: 52, boxSizing: 'border-box', padding: '6px 6px', borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12 }}
               />
-              <select
+              <SmartSelect
                 value={row.unit}
                 onChange={(e) => updateIngredientRow(row.key, 'unit', e.target.value)}
                 style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 2px' }}
@@ -3100,7 +3100,7 @@ function CutProcessPanel({ items, recipes, orders, onAddRecipe, onDeleteRecipe, 
                 <option value="g">g</option>
                 <option value="kg">kg</option>
                 <option value="piece">piece</option>
-              </select>
+              </SmartSelect>
               {ingredients.length > 1 && (
                 <button onClick={() => removeIngredientRow(row.key)} style={{ background: 'none', border: 'none', color: TOMATO, cursor: 'pointer', padding: 2 }}>
                   <Trash2 size={13} />
@@ -3258,20 +3258,20 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
           </p>
           <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
           <input placeholder="Phone / email" value={contact} onChange={(e) => setContact(e.target.value)} style={inputStyle} />
-          <select value={roleId} onChange={(e) => setRoleId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+          <SmartSelect value={roleId} onChange={(e) => setRoleId(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
             {roles.map((r) => (
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
-          </select>
+          </SmartSelect>
           <p style={{ margin: '4px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>LOGIN CREDENTIALS</p>
           <input placeholder="Username" value={username} onChange={(e) => { setUsername(e.target.value); setUsernameError(''); }} style={{ ...inputStyle, borderColor: usernameError ? TOMATO : LINE }} />
           {usernameError && <p style={{ margin: '-4px 0 8px', fontSize: 11, color: TOMATO }}>{usernameError}</p>}
           <input placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
           <p style={{ margin: '4px 0 6px', fontSize: 11, fontWeight: 700, color: MUTED }}>CITY ACCESS</p>
-          <select value={city} onChange={(e) => setCity(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
+          <SmartSelect value={city} onChange={(e) => setCity(e.target.value)} style={{ ...inputStyle, padding: '8px 6px' }}>
             <option value="All Cities">All Cities (Admin)</option>
             {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </SmartSelect>
           <button onClick={submitUser} style={{ width: '100%', background: LEAF, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             Add employee
           </button>
@@ -3324,16 +3324,16 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                     </Td>
                     <Td>
                       {isEditing ? (
-                        <select value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}>
+                        <SmartSelect value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}>
                           <option value="All Cities">All Cities</option>
                           {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
+                        </SmartSelect>
                       ) : (
                         <span style={{ fontWeight: u.city && u.city !== 'All Cities' ? 500 : 700, color: u.city && u.city !== 'All Cities' ? INK : LEAF_DARK }}>{u.city || 'All Cities'}</span>
                       )}
                     </Td>
                     <Td>
-                      <select
+                      <SmartSelect
                         value={u.roleId}
                         onChange={(e) => onUpdateUser(u.id, { roleId: e.target.value })}
                         style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 6px' }}
@@ -3341,7 +3341,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                         {roles.map((r) => (
                           <option key={r.id} value={r.id}>{r.name}</option>
                         ))}
-                      </select>
+                      </SmartSelect>
                     </Td>
                     <Td>
                       <button
@@ -4262,7 +4262,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
                       <Td>{r.unit || <span style={{ color: MUTED }}>—</span>}</Td>
                       <Td>{r.rawCategory || <span style={{ color: MUTED }}>—</span>}</Td>
                       <Td>
-                        <select
+                        <SmartSelect
                           value={r.mappedItemId}
                           onChange={(e) => setRowMapping(r.key, e.target.value)}
                           style={{ borderRadius: 6, border: `1px solid ${r.mappedItemId ? LINE : AMBER}`, fontSize: 12, padding: '5px 6px', minWidth: 160 }}
@@ -4272,7 +4272,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
                             <option key={it.id} value={it.id}>{it.name} ({it.id})</option>
                           ))}
                           <option value="__new__">+ Create new item "{r.rawName}"</option>
-                        </select>
+                        </SmartSelect>
                       </Td>
                       <Td>
                         {mappedItem && rowAlias ? (
@@ -4284,7 +4284,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
                               onChange={(e) => onUpdateAlias(mappedItem.id, rowAlias.id, { packSize: e.target.value })}
                               style={{ width: 58, boxSizing: 'border-box', padding: '5px 6px', borderRadius: 6, border: `1px solid ${packSize ? LINE : AMBER}`, fontSize: 12 }}
                             />
-                            <select
+                            <SmartSelect
                               value={rowAlias.packUnit || 'kg'}
                               onChange={(e) => onUpdateAlias(mappedItem.id, rowAlias.id, { packUnit: e.target.value })}
                               style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '5px 4px' }}
@@ -4292,7 +4292,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
                               <option value="kg">kg</option>
                               <option value="pieces">pieces</option>
                               <option value="pack">pack</option>
-                            </select>
+                            </SmartSelect>
                           </div>
                         ) : (
                           <span style={{ color: MUTED, fontSize: 11 }}>Map an item first</span>
@@ -4336,12 +4336,12 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           <input type="date" value={fulfilmentDate} onChange={(e) => setFulfilmentDate(e.target.value)} title="Fulfilment date (required)" style={{ ...inputStyle, border: `1px solid ${fulfilmentDate ? LINE : AMBER}` }} />
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <input placeholder="Quantity" type="number" value={qty} onChange={(e) => setQty(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
-            <select value={unit} onChange={(e) => setUnit(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px' }}>
+            <SmartSelect value={unit} onChange={(e) => setUnit(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '8px 6px' }}>
               <option value="kg">kg</option>
               <option value="dozen">dozen</option>
               <option value="bunch">bunch</option>
               <option value="crate">crate</option>
-            </select>
+            </SmartSelect>
           </div>
           {!fulfilmentDate && (
             <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: AMBER, margin: '0 0 8px' }}>
@@ -4972,7 +4972,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
 
         {/* Vendor selector */}
         <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SELECT VENDOR</p>
-        <select
+        <SmartSelect
           value={selectedVendorId}
           onChange={(e) => { setSelectedVendorId(e.target.value); setShowAllVendorItems(false); }}
           style={{ ...inputStyle, marginBottom: mappedVendors.length === 0 ? 4 : 10 }}
@@ -4981,7 +4981,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
           {dropdownVendors.map((v) => (
             <option key={v.id} value={v.id}>{v.name}</option>
           ))}
-        </select>
+        </SmartSelect>
         {mappedVendors.length === 0 ? (
           <p style={{ margin: '0 0 10px', fontSize: 11, color: AMBER }}>No vendor is linked to {it?.name} yet — showing every vendor. Link one in the Vendors section to shorten this list next time.</p>
         ) : !showAllVendorsInDropdown && (
@@ -5102,31 +5102,31 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
           <div>
             <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>VENDOR</p>
-            <select value={vendorFilterId} onChange={(e) => setVendorFilterId(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
+            <SmartSelect value={vendorFilterId} onChange={(e) => setVendorFilterId(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
               <option value="">All vendors</option>
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
+            </SmartSelect>
           </div>
           <div>
             <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
+            <SmartSelect value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
               {PURCHASE_CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </SmartSelect>
           </div>
           <div>
             <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SORT BY QUANTITY</p>
-            <select value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
+            <SmartSelect value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
               <option value="none">Default</option>
               <option value="asc">Low to high</option>
               <option value="desc">High to low</option>
-            </select>
+            </SmartSelect>
           </div>
           <div>
             <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
-            <select value={fulfilmentDateFilter} onChange={(e) => setFulfilmentDateFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
+            <SmartSelect value={fulfilmentDateFilter} onChange={(e) => setFulfilmentDateFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
               <option value="ALL">All Purchase</option>
               {availableFulfilmentDates.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
+            </SmartSelect>
           </div>
           <div>
             <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SEARCH ITEM</p>
@@ -5495,9 +5495,9 @@ function StockCountPanel({ items, stockCounts, purchases, dispatchLog, onRecord,
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
+          <SmartSelect value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
             {['ALL', ...CATEGORY_OPTIONS].map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </SmartSelect>
         </div>
         <div style={{ flex: 1, minWidth: 180 }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SEARCH ITEM</p>
@@ -6043,9 +6043,9 @@ function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate,
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
+          <SmartSelect value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0, padding: '8px 6px' }}>
             {categoriesPresent.map((c) => <option key={c} value={c}>{c === 'ALL' ? 'All' : c}</option>)}
-          </select>
+          </SmartSelect>
         </div>
       </div>
 
@@ -6939,24 +6939,24 @@ function PackagingPanel({ orders, items, onAdvanceMany, packingProgress, onUpdat
       <div style={{ display: 'flex', gap: 16, marginBottom: 18, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
-          <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
+          <SmartSelect value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
             <option value="All">All</option>
             {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
+          </SmartSelect>
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
+          <SmartSelect value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
             {categoriesPresent.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </SmartSelect>
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>SORT BY QUANTITY</p>
-          <select value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
+          <SmartSelect value={qtySort} onChange={(e) => setQtySort(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 160 }}>
             <option value="none">Default</option>
             <option value="asc">Low to high</option>
             <option value="desc">High to low</option>
-          </select>
+          </SmartSelect>
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
@@ -7224,16 +7224,16 @@ function DispatchPanel({ orders, crates, dispatchLog, indentBatches, onDispatchB
             <div style={{ display: 'flex', gap: 10, marginTop: 12, marginBottom: 4, flexWrap: 'wrap' }}>
               <div>
                 <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
-                <select value={activeChannel} onChange={(e) => changeChannel(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
+                <SmartSelect value={activeChannel} onChange={(e) => changeChannel(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 140 }}>
                   {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
+                </SmartSelect>
               </div>
               <div>
                 <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>STORE</p>
-                <select value={activeStore ? activeStore.value : ''} onChange={(e) => changeStore(e.target.value)} disabled={storeOptions.length === 0} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 220 }}>
+                <SmartSelect value={activeStore ? activeStore.value : ''} onChange={(e) => changeStore(e.target.value)} disabled={storeOptions.length === 0} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', width: 220 }}>
                   {storeOptions.length === 0 && <option value="">No stores yet</option>}
                   {storeOptions.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
+                </SmartSelect>
               </div>
               <div>
                 <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
@@ -7921,10 +7921,10 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
       )}
       <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
         <input placeholder="Search item or article..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, maxWidth: 260, marginTop: 0 }} />
-        <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '9px 8px' }}>
+        <SmartSelect value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 13, padding: '9px 8px' }}>
           <option value="ALL">All channels</option>
           {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
+        </SmartSelect>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '10px 0' }}>
         <button onClick={selectAll} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Select all</button>
@@ -7962,14 +7962,14 @@ function BarcodeMappingTab({ items, formats, orders, onMapFormat, onUpdateAliasB
                   <input value={valFor(r, 'code')} onChange={(e) => setVal(r, 'code', e.target.value)} onBlur={() => save(r)} style={{ ...cell, width: 130, fontFamily: 'monospace' }} />
                 </Td>
                 <Td>
-                  <select
+                  <SmartSelect
                     value={r.barcodeFormatId}
                     onChange={(e) => onMapFormat(r.itemId, r.aliasId, e.target.value)}
                     style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px' }}
                   >
                     <option value="">— No format (skipped on print) —</option>
                     {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                  </select>
+                  </SmartSelect>
                 </Td>
                 <Td>
                   {isDirty(r) && (
@@ -8538,15 +8538,15 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
-          <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+          <SmartSelect value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
             {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
+          </SmartSelect>
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CATEGORY</p>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+          <SmartSelect value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
             {['ALL', ...CATEGORY_OPTIONS].map((c) => <option key={c} value={c}>{c === 'ALL' ? 'All' : c}</option>)}
-          </select>
+          </SmartSelect>
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
@@ -8554,10 +8554,10 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
         </div>
         <div>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>LABEL SIZE</p>
-          <select value={labelSize} onChange={(e) => setLabelSize(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+          <SmartSelect value={labelSize} onChange={(e) => setLabelSize(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
             <option value="thermal5050">TVS LP-46 Neo — 50×50mm (2-up roll)</option>
             <option value="a4">A4 sheet — multiple per page</option>
-          </select>
+          </SmartSelect>
         </div>
       </div>
       {needsCompanyDetails && companyDetailsEmpty && (
@@ -8647,7 +8647,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
                       {a.shelfLifeDays != null && <p style={{ margin: '2px 0 0', fontSize: 10, color: MUTED }}>{a.shelfLifeDays}-day shelf life (remembered)</p>}
                     </Td>
                     <Td>
-                      <select
+                      <SmartSelect
                         value={a.barcodeFormatId || ''}
                         onChange={(e) => onUpdateAlias(a.itemId, platform, { barcodeFormatId: e.target.value }, a.packSize, a.packUnit, a.rawEan || a.rawCode)}
                         disabled={!a.itemId}
@@ -8656,7 +8656,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
                       >
                         <option value="">Not mapped</option>
                         {barcodeFormats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                      </select>
+                      </SmartSelect>
                     </Td>
                     <Td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -9694,9 +9694,9 @@ function ManualInvoiceForm({ batchFinancials, salesInvoices, onSaveInvoice, onCl
     <Panel style={{ maxWidth: 520, marginBottom: 16 }}>
       <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>New invoice (manual)</p>
       <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>CHANNEL</p>
-      <select value={platform} onChange={(e) => { setPlatform(e.target.value); setSelectedBatchIds([]); }} style={inputStyle}>
+      <SmartSelect value={platform} onChange={(e) => { setPlatform(e.target.value); setSelectedBatchIds([]); }} style={inputStyle}>
         {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-      </select>
+      </SmartSelect>
       <LastInvoiceNumbers salesInvoices={salesInvoices} />
       <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>INVOICE NUMBER</p>
       <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} style={inputStyle} />
@@ -9806,10 +9806,10 @@ function SalesInvoicesTab({ batchFinancials, salesInvoices, salesPayments, onSav
       <Panel>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
           <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Invoices</p>
-          <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ ...inputStyle, width: 'auto', marginBottom: 0 }}>
+          <SmartSelect value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={{ ...inputStyle, width: 'auto', marginBottom: 0 }}>
             <option value="All">All channels</option>
             {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
+          </SmartSelect>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -9938,9 +9938,9 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
         <Panel style={{ maxWidth: 480, marginBottom: 16 }}>
           <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Log a payment received</p>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
-          <select value={platform} onChange={(e) => { setPlatform(e.target.value); setLinkedId(''); setLinkType(salesInvoices.some((inv) => inv.platform === e.target.value) ? 'invoice' : 'batch'); }} style={inputStyle}>
+          <SmartSelect value={platform} onChange={(e) => { setPlatform(e.target.value); setLinkedId(''); setLinkType(salesInvoices.some((inv) => inv.platform === e.target.value) ? 'invoice' : 'batch'); }} style={inputStyle}>
             {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
+          </SmartSelect>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
@@ -9950,18 +9950,18 @@ function SalesPaymentsTab({ batchFinancials, salesInvoices, salesPayments, onSav
           {platformInvoices.length > 0 ? (
             <>
               <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AGAINST WHICH INVOICE</p>
-              <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
+              <SmartSelect value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
                 <option value="">— Not linked to a specific invoice —</option>
                 {platformInvoices.map((inv) => <option key={inv.id} value={inv.id}>{inv.invoiceNumber} (₹{Number(inv.amount).toLocaleString('en-IN')})</option>)}
-              </select>
+              </SmartSelect>
             </>
           ) : (
             <>
               <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AGAINST WHICH BATCH (optional)</p>
-              <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
+              <SmartSelect value={linkedId} onChange={(e) => setLinkedId(e.target.value)} style={inputStyle}>
                 <option value="">— Not linked to a specific batch —</option>
                 {platformBatches.map((bf) => <option key={bf.batch.id} value={bf.batch.id}>{bf.batch.id} (GRN ₹{bf.grnValue.toLocaleString('en-IN')})</option>)}
-              </select>
+              </SmartSelect>
             </>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -10117,10 +10117,10 @@ function StaffPeopleTab({ staff, onSaveStaff, onDeleteStaff }) {
         <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>MONTHLY SALARY (₹)</p>
         <input type="number" value={editing.monthlySalary} onChange={(e) => setEditing({ ...editing, monthlySalary: e.target.value })} style={inputStyle} />
         <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>STATUS</p>
-        <select value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })} style={inputStyle}>
+        <SmartSelect value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })} style={inputStyle}>
           <option value="active">Active</option>
           <option value="inactive">Inactive (left)</option>
-        </select>
+        </SmartSelect>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={save} style={{ background: LEAF, color: '#fff', border: 'none', borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save</button>
           <button onClick={() => setEditing(null)} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: RADIUS.md, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
@@ -10288,10 +10288,10 @@ function StaffAdvancesTab({ staff, advances, month, onSave, onDelete }) {
         <Panel style={{ maxWidth: 440, marginBottom: 16 }}>
           <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Record an advance</p>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>STAFF MEMBER</p>
-          <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={inputStyle}>
+          <SmartSelect value={staffId} onChange={(e) => setStaffId(e.target.value)} style={inputStyle}>
             <option value="">— Select —</option>
             {staff.filter((s) => s.status !== 'inactive').map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          </SmartSelect>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>DATE</p>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>AMOUNT (₹)</p>
@@ -10496,3 +10496,175 @@ const countBtnStyle = {
   cursor: 'pointer',
   color: INK,
 };
+
+// ---------------------------------------------------------------------------
+// SmartSelect: drop-in replacement for <select>. Long lists become a type-to-search box
+// that shows the best matches underneath; short fixed lists stay as a normal dropdown.
+// ---------------------------------------------------------------------------
+function ssCollectOptions(children, out = []) {
+  React.Children.forEach(children, (ch) => {
+    if (ch == null || ch === false || typeof ch === 'boolean') return;
+    if (ch.type === 'option') {
+      const kids = ch.props.children;
+      const label = Array.isArray(kids) ? kids.map((k) => (typeof k === 'string' || typeof k === 'number' ? k : '')).join('') : (kids == null ? '' : String(kids));
+      out.push({ value: ch.props.value != null ? String(ch.props.value) : label, label, disabled: !!ch.props.disabled });
+    } else if (ch.props && ch.props.children) {
+      ssCollectOptions(ch.props.children, out);
+    }
+  });
+  return out;
+}
+const ssNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9ऀ-ॿ]+/g, ' ').trim();
+function ssScore(label, q) {
+  const l = ssNorm(label);
+  if (!q) return 1;
+  if (l === q) return 1000;
+  if (l.startsWith(q)) return 900 - l.length * 0.1;
+  const words = l.split(' ');
+  const toks = q.split(' ').filter(Boolean);
+  let total = 0;
+  for (const t of toks) {
+    let best = 0;
+    if (words.some((w) => w === t)) best = 300;
+    else if (words.some((w) => w.startsWith(t))) best = 250;
+    else if (l.includes(t)) best = 150;
+    else {
+      // loose match: letters of the token appear in order inside one word (handles typos/short forms)
+      const hit = words.find((w) => {
+        if (w[0] !== t[0]) return false;
+        let k = 0;
+        for (let i = 0; i < w.length && k < t.length; i++) if (w[i] === t[k]) k++;
+        return k === t.length && t.length >= 3;
+      });
+      if (hit) best = 60;
+    }
+    if (!best) return 0;
+    total += best;
+  }
+  if (l.includes(q)) total += 100;
+  return total - l.length * 0.05;
+}
+function SmartSelect({ value, onChange, children, style, disabled, title, ...rest }) {
+  const options = useMemo(() => ssCollectOptions(children), [children]);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [hi, setHi] = useState(0);
+  const [rect, setRect] = useState(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+  const val = value == null ? '' : String(value);
+  const selected = options.find((o) => o.value === val);
+  const placeholderOpt = options.find((o) => o.value === '');
+
+  const useNative = options.length <= 6;
+  const results = useMemo(() => {
+    if (useNative) return [];
+    const q = ssNorm(query);
+    if (!q) return options;
+    return options
+      .filter((o) => o.value !== '')
+      .map((o) => ({ o, s: ssScore(o.label, q) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.o);
+  }, [options, query, useNative]);
+
+  const measure = () => {
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
+  };
+  useEffect(() => {
+    if (!open) return undefined;
+    measure();
+    const h = (e) => { if (listRef.current && e && e.target && listRef.current.contains(e.target)) return; measure(); };
+    window.addEventListener('scroll', h, true);
+    window.addEventListener('resize', h);
+    return () => { window.removeEventListener('scroll', h, true); window.removeEventListener('resize', h); };
+  }, [open]);
+  useEffect(() => {
+    if (open && listRef.current) {
+      const el = listRef.current.children[hi];
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    }
+  }, [hi, open]);
+
+  if (useNative) {
+    return <select value={value} onChange={onChange} style={style} disabled={disabled} title={title} {...rest}>{children}</select>;
+  }
+
+  const s = style || {};
+  const wrapKeys = ['flex', 'flexGrow', 'flexShrink', 'flexBasis', 'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'alignSelf', 'gridColumn', 'minWidth', 'maxWidth'];
+  const wrapStyle = { position: 'relative', display: 'block' };
+  const inputOwn = { ...s };
+  wrapKeys.forEach((k) => { if (s[k] !== undefined) { wrapStyle[k] = s[k]; delete inputOwn[k]; } });
+  const autoWidth = s.width == null || s.width === 'auto';
+  if (autoWidth) {
+    const longest = options.reduce((m, o) => Math.max(m, o.label.length), 8);
+    wrapStyle.display = 'inline-block';
+    if (s.flex === undefined) wrapStyle.width = Math.max(130, Math.min(260, longest * 7 + 36));
+    delete inputOwn.width;
+  } else {
+    wrapStyle.width = s.width;
+    delete inputOwn.width;
+  }
+  const choose = (o) => {
+    if (!o || o.disabled) return;
+    setOpen(false);
+    setQuery('');
+    if (onChange) onChange({ target: { value: o.value }, currentTarget: { value: o.value } });
+  };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHi((h) => Math.min(h + 1, Math.max(results.length - 1, 0))); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+    else if (e.key === 'Enter') { if (open) { e.preventDefault(); choose(results[hi]); } }
+    else if (e.key === 'Escape') { setOpen(false); setQuery(''); }
+  };
+  const shown = open ? query : (selected && selected.value !== '' ? selected.label : '');
+  const spaceBelow = rect ? window.innerHeight - rect.bottom : 300;
+  const openUp = rect && spaceBelow < 180 && rect.top > spaceBelow;
+  const maxH = Math.max(120, Math.min(260, (openUp ? rect.top : spaceBelow) - 12));
+  return (
+    <div style={wrapStyle}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={shown}
+        disabled={disabled}
+        title={title}
+        placeholder={placeholderOpt ? placeholderOpt.label : 'Search…'}
+        autoComplete="off"
+        onFocus={(e) => { setOpen(true); setQuery(''); setHi(0); measure(); if (e.target.select) e.target.select(); }}
+        onClick={() => { if (!open) { setOpen(true); setQuery(''); setHi(0); measure(); } }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); setHi(0); }}
+        onBlur={() => { setOpen(false); setQuery(''); }}
+        onKeyDown={onKey}
+        style={{ ...inputOwn, width: '100%', boxSizing: 'border-box', paddingRight: 22, textOverflow: 'ellipsis' }}
+      />
+      <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 10, color: '#6b6b60' }}>▾</span>
+      {open && rect && (
+        <div
+          ref={listRef}
+          style={{
+            position: 'fixed', left: rect.left, width: Math.max(rect.width, 180),
+            ...(openUp ? { bottom: window.innerHeight - rect.top + 2 } : { top: rect.bottom + 2 }),
+            maxHeight: maxH, overflowY: 'auto', background: '#fff', border: '1px solid #cfcab9', borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 100000, WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {results.length === 0 && <div style={{ padding: '10px 12px', fontSize: 13, color: '#8a8a7e' }}>No matches</div>}
+          {results.map((o, i) => (
+            <div
+              key={o.value + '|' + i}
+              onMouseDown={(e) => { e.preventDefault(); choose(o); }}
+              onMouseEnter={() => setHi(i)}
+              style={{
+                padding: '9px 12px', fontSize: 13, cursor: o.disabled ? 'not-allowed' : 'pointer', color: o.disabled ? '#aaa' : '#1f2a20',
+                background: i === hi ? '#e8efe6' : (o.value === val ? '#f4f1e8' : '#fff'), fontWeight: o.value === val ? 600 : 400,
+                borderBottom: '1px solid #f0ede2',
+              }}
+            >{o.label || '—'}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
