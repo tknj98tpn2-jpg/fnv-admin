@@ -5634,9 +5634,11 @@ const sanitizeKeyPart = (s) => String(s || '').replace(/\//g, '⁄');
 // has more than one distinct EAN/code behind it on this order list — every other, ordinary
 // article keeps the exact key (and therefore the same Firestore doc id) it always had, so
 // this never disturbs already-saved packing/pricing data for the common case.
-function disambiguateByArticle(orderList, baseKeyFor) {
+function disambiguateByArticle(orderList, baseKeyFor, idFn) {
   const normName = (o) => sanitizeKeyPart(String(o.articleName || '').trim().toLowerCase());
-  const idOf = (o) => sanitizeKeyPart(o.rawEan || o.rawCode || '');
+  // Flipkart/Zepto re-issue their own FSN/UUID "code" on a relisting, so for them only the
+  // EAN counts as the article's identity — never the code (see EAN_ONLY_PLATFORMS).
+  const idOf = idFn || ((o) => sanitizeKeyPart(o.rawEan || ((o.platform === 'Flipkart' || o.platform === 'Zepto') ? '' : (o.rawCode || ''))));
   const idsByBase = {};
   const namesByBase = {};
   orderList.forEach((o) => {
@@ -5656,6 +5658,47 @@ function disambiguateByArticle(orderList, baseKeyFor) {
   };
 }
 
+// The same physical article (same platform + item + EAN) can sit on orders that recorded a
+// different pack size — e.g. its mapping was edited from 0.30kg to 0.35kg between two indents —
+// and since the pack size is part of the pricing key, one article then showed up as several
+// near-identical rows on the Pricing sheet. This folds those back into ONE article, priced at
+// the pack size of its most recent order. Orders that carry no EAN (older ones) join the
+// article that has the same channel article name. The key stays in the exact existing format
+// (just built from that latest pack size), so an article that never changed pack size keeps
+// the very same key and saved pricing as before. `ownKeyFor` is the key an order would have had
+// on its own pack size — used to still find pricing saved against an older variant.
+function buildArticleKeyer(pricedOrders, city) {
+  const eanOnly = (p) => p === 'Flipkart' || p === 'Zepto';
+  const normName = (o) => String(o.articleName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const rawId = (o) => sanitizeKeyPart(o.rawEan || (eanOnly(o.platform) ? '' : (o.rawCode || '')));
+  const prefix = (o) => `${o.platform}__${sanitizeKeyPart(o.product)}`;
+  const idsByName = {};
+  pricedOrders.forEach((o) => {
+    const id = rawId(o); const n = normName(o);
+    if (id && n) { const k = `${prefix(o)}__${n}`; (idsByName[k] = idsByName[k] || new Set()).add(id); }
+  });
+  const idOf = (o) => {
+    const id = rawId(o);
+    if (id) return id;
+    const s = idsByName[`${prefix(o)}__${normName(o)}`];
+    return s && s.size === 1 ? Array.from(s)[0] : '';
+  };
+  const latest = {};
+  pricedOrders.forEach((o) => {
+    const id = idOf(o);
+    if (!id) return;
+    const g = `${prefix(o)}__${id}`;
+    const stamp = `${o.fulfilmentDate || ''}|${o.id || ''}`;
+    if (!latest[g] || stamp > latest[g].stamp) latest[g] = { stamp, packSize: o.packSize, packUnit: o.packUnit };
+  });
+  const canonPack = (o) => { const id = idOf(o); return (id && latest[`${prefix(o)}__${id}`]) || o; };
+  const baseFor = (o) => { const p = canonPack(o); return `${city}__${sanitizeKeyPart(o.product)}__${o.platform}__${p.packSize}__${p.packUnit}`; };
+  const keyFor = disambiguateByArticle(pricedOrders, baseFor, idOf);
+  const ownKeyFor = (o) => `${city}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
+  const stampOf = (o) => `${o.fulfilmentDate || ''}|${o.id || ''}`;
+  return { keyFor, ownKeyFor, stampOf };
+}
+
 // One entry per distinct article that has come through an indent — same product can have
 // several pack sizes (e.g. 500g "Baby Banana" vs 600g "Banana 3pc"), each priced separately.
 // Shared by the Pricing tab and the Profit & Loss tab so both agree on cost.
@@ -5665,14 +5708,25 @@ function buildPricingArticles(orders, items, purchases, city, configByKey, recip
   const latestUnitPriceByItem = buildLatestUnitPriceByItem(purchases);
   const map = {};
   const pricedOrders = orders.filter((o) => o.packSize && o.packUnit);
-  const keyer = disambiguateByArticle(pricedOrders, (o) => `${city}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`);
-  pricedOrders
+  const { keyFor, ownKeyFor, stampOf } = buildArticleKeyer(pricedOrders, city);
+  // Old variant keys (same article, an earlier pack size) per canonical key, so pricing
+  // already saved against one of them is still found rather than silently reset.
+  const altByKey = {};
+  pricedOrders.forEach((o) => {
+    const k = keyFor(o); const own = ownKeyFor(o);
+    if (own !== k) { (altByKey[k] = altByKey[k] || new Set()).add(own); }
+  });
+  // Newest order first, so the order that creates each article row (and so supplies its
+  // pack size and name) is its latest one — the same one the key was built from.
+  pricedOrders.slice().sort((a, b) => (stampOf(a) < stampOf(b) ? 1 : stampOf(a) > stampOf(b) ? -1 : 0))
     .forEach((o) => {
-      const key = keyer(o);
+      const key = keyFor(o);
       // Pre-fix pricingConfig docs were saved without a city prefix at all, shared across
       // every city. Keeping this around lets a city inherit those old settings the first
       // time it prices this article, instead of silently resetting everyone to zero.
-      const legacyKey = `${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      const plainLegacyKey = `${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
+      const altWithConfig = Array.from(altByKey[key] || []).find((k) => configByKey?.[k]);
+      const legacyKey = altWithConfig || plainLegacyKey;
       if (map[key]) return;
       const item = items.find((it) => it.name === o.product);
       // itemId is the reliable match; when this order predates that field, its own
@@ -5693,13 +5747,14 @@ function buildPricingArticles(orders, items, purchases, city, configByKey, recip
       // A base price fetched from the latest purchase is the default — but a specific
       // article's config can carry a manual override (e.g. before any purchase exists yet,
       // or to correct a one-off odd purchase price) which always wins when set.
-      const config = configByKey?.[key] || configByKey?.[legacyKey];
+      const config = configByKey?.[key] || configByKey?.[legacyKey] || configByKey?.[plainLegacyKey];
       const hasOverride = config?.basePriceOverride != null;
       const basePrice = hasOverride ? config.basePriceOverride : autoBasePrice;
       const alias = findAlias(item, o.platform, o.packSize, o.packUnit, o.rawEan || o.rawCode);
       map[key] = {
         key,
         legacyKey,
+        altKeys: Array.from(altByKey[key] || []),
         articleName: o.articleName || o.product,
         product: o.product,
         category: item?.category || '',
@@ -5731,7 +5786,7 @@ function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
   // Must reproduce the exact same keys buildPricingArticles assigned these same orders
   // (articlesByKey is keyed that way) — so the disambiguation runs over the same priced-
   // orders universe and the same base-key shape it used.
-  const keyer = disambiguateByArticle(orders.filter((o) => o.packSize && o.packUnit), (o) => `${batchCity}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`);
+  const { keyFor: keyer } = buildArticleKeyer(orders.filter((o) => o.packSize && o.packUnit), batchCity);
   const rows = batchOrders.map((o) => {
     const key = keyer(o);
     const legacyKey = `${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
@@ -5739,7 +5794,7 @@ function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
     const packSize = Number(o.packSize) || 1;
     const shortPacks = Math.min(Number(o.packQty) || 0, (Number(o.shortQty) || 0) / packSize);
     const effectivePacks = Math.max(0, Math.round(((Number(o.packQty) || 0) - shortPacks) * 100) / 100);
-    const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key] || configByKey[legacyKey]) : null;
+    const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key] || configByKey[article.legacyKey] || configByKey[legacyKey]) : null;
     const cost = finalPricePerPack == null ? null : Math.round(finalPricePerPack * effectivePacks * 100) / 100;
     return {
       orderId: o.id,
@@ -6318,6 +6373,9 @@ function valueFlipkartReceiving(receivingRows, poRows) {
 function extractPoNumber(rawText, fileName) {
   const m = rawText && String(rawText).match(/PO\s*Number\s*:?\s*([A-Za-z0-9-]+)/i);
   if (m) return m[1];
+  // Blinkit's newer PO schedule prints it bare, e.g. "CPCMP27-PO-4375987", with no "PO Number:" label.
+  const bm = rawText && String(rawText).match(/\b[A-Z0-9]+-PO-\d+\b/);
+  if (bm) return bm[0];
   return String(fileName || '').replace(/\.(xlsx|xls|csv|pdf)$/i, '').replace(/^purchase[_\s-]*order[_\s-]*/i, '').trim() || fileName || '';
 }
 
@@ -6347,6 +6405,87 @@ function parseGrnPdfText(text) {
   }
   return rows;
 }
+
+// ── Blinkit's newer PDF layouts (Oct 2026) ──────────────────────────────────
+// Blinkit (Hyperpure) changed both documents. The PO is now a "PO SCHEDULE":
+// Product No / ProductName / HSN / Scheduled Qty — it carries NO price at all
+// any more (the old PO had MRP, margin and price per unit). The GRN dropped the
+// UPC/MRP columns and became: Product No / Product Name / HSN / Qty Ord / Qty
+// Del / GRN Qty / Damaged Qty / PricePer Unit / UoM / GST Rate / Tax / Amount,
+// with a long product name wrapping onto 2-3 lines around the row's own numbers
+// (and the UoM sometimes wrapping too: "Per / piece"). Flattened text shreds
+// those wrapped names, so — like Zepto's GRN — rows are rebuilt from each
+// word's x/y position (extractPdfWords). The old regex parsers above still run
+// first, so PDFs in the previous layout keep working exactly as before.
+const BLINKIT_NUM_RE = /^-?[\d,]+(\.\d+)?$/;
+const blinkitNum = (s) => Number(String(s).replace(/,/g, '')) || 0;
+
+function parseBlinkitPoScheduleWords(pages) {
+  const rows = [];
+  pages.forEach((words) => {
+    // The column header's own "HSN" (sitting well right of the product-no column)
+    // marks where item rows begin on this page; no header means no table here.
+    const hsnHdr = words.filter((w) => w.text === 'HSN' && w.x > 300);
+    if (!hsnHdr.length) return;
+    const headerY = Math.min(...hsnHdr.map((w) => w.y));
+    const anchors = words
+      .filter((w) => /^\d{5,7}$/.test(w.text) && w.x < 110 && w.y > headerY + 3)
+      .sort((a, b) => a.y - b.y);
+    anchors.forEach((a, i) => {
+      const prevY = i > 0 ? anchors[i - 1].y : -Infinity;
+      const nextY = i + 1 < anchors.length ? anchors[i + 1].y : Infinity;
+      const band = words.filter((w) => {
+        if (w === a || Math.abs(w.y - a.y) > 9) return false;
+        // nearest anchor wins, so a wrapped name line goes to the row it hugs
+        return Math.abs(w.y - a.y) <= Math.abs(w.y - prevY) && Math.abs(w.y - a.y) <= Math.abs(w.y - nextY);
+      });
+      const name = band.filter((w) => w.x >= 110 && w.x < 400).sort((p, q) => p.y - q.y || p.x - q.x).map((w) => w.text).join(' ');
+      const qtyWord = band.filter((w) => w.x > 470 && BLINKIT_NUM_RE.test(w.text)).sort((p, q) => q.x - p.x)[0];
+      const qty = qtyWord ? blinkitNum(qtyWord.text) : 0;
+      if (name && qty > 0) rows.push({ code: a.text, name, qty, price: 0, total: 0 });
+    });
+  });
+  return rows;
+}
+
+function parseBlinkitGrnTableWords(pages) {
+  const rows = [];
+  pages.forEach((words) => {
+    // Header "HSN" (x ≈ 180) is distinct from the tax-summary table's own HSN
+    // column further down the page (x ≈ 50) — only the former starts the items.
+    const hsnHdr = words.filter((w) => w.text === 'HSN' && w.x > 150 && w.x < 260);
+    if (!hsnHdr.length) return;
+    const headerY = Math.min(...hsnHdr.map((w) => w.y));
+    // The items end at the lone "Total" line (not the header's "Total Tax").
+    const totals = words.filter((w) => w.text === 'Total' && w.x > 100 && w.x < 250 && w.y > headerY);
+    const footerY = totals.length ? Math.min(...totals.map((w) => w.y)) : Infinity;
+    const anchors = words
+      .filter((w) => /^\d{5,7}$/.test(w.text) && w.x < 70 && w.y > headerY && w.y < footerY)
+      .sort((a, b) => a.y - b.y);
+    anchors.forEach((a, i) => {
+      const prevY = i > 0 ? anchors[i - 1].y : -Infinity;
+      const nextY = i + 1 < anchors.length ? anchors[i + 1].y : Infinity;
+      const nums = words
+        .filter((w) => w !== a && Math.abs(w.y - a.y) < 2 && w.x >= 165 && BLINKIT_NUM_RE.test(w.text))
+        .sort((p, q) => p.x - q.x);
+      const hi = nums.findIndex((w) => /^\d{8}$/.test(w.text)); // HSN opens the numeric run
+      if (hi < 0) return;
+      const n = nums.slice(hi + 1); // ordered, delivered, GRN qty, damaged, price/unit, tax, amount
+      if (n.length < 7) return;
+      const qty = blinkitNum(n[2].text);
+      const price = blinkitNum(n[4].text);
+      const total = blinkitNum(n[6].text);
+      const name = words
+        .filter((w) => w.x >= 75 && w.x < 168 && w.y < footerY && Math.abs(w.y - a.y) <= 11
+          && Math.abs(w.y - a.y) <= Math.abs(w.y - prevY) && Math.abs(w.y - a.y) <= Math.abs(w.y - nextY))
+        .sort((p, q) => p.y - q.y || p.x - q.x)
+        .map((w) => w.text).join(' ');
+      if (qty > 0 && name) rows.push({ code: a.text, name, qty, price, total });
+    });
+  });
+  return rows;
+}
+
 
 // ── Zepto GRN report PDFs ──
 // Unlike Blinkit's, Zepto's GRN table has no item code column at all — the
@@ -8580,7 +8719,7 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
   const [openBatchId, setOpenBatchId] = useState(null);
   const configByKey = useMemo(() => { const m = {}; pricingConfig.forEach((x) => { m[x.id] = x; }); return m; }, [pricingConfig]);
   const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes), [orders, items, purchases, city, configByKey, recipes]);
-  const articlesByKey = useMemo(() => { const m = {}; articles.forEach((a) => { m[a.key] = a; }); return m; }, [articles]);
+  const articlesByKey = useMemo(() => { const m = {}; articles.forEach((a) => { m[a.key] = a; }); articles.forEach((a) => (a.altKeys || []).forEach((k) => { if (!m[k]) m[k] = a; })); return m; }, [articles]);
 
   // Advance indents are a buying heads-up only — the channel fixes their real
   // fulfilment date (and issues the real indent) later, so counting them here
@@ -8883,7 +9022,11 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
       if (batch.platform === 'Zepto') {
         extractPdfText(file).then((t) => { const parsed = parseZeptoPoText(t); finish(parsed.rows, file.name, t); }).catch(() => setPoError('Could not read this PDF.'));
       } else {
-        extractPdfText(file).then((t) => finish(parsePoPdfText(t), file.name, t)).catch(() => setPoError('Could not read this PDF.'));
+        extractPdfText(file).then(async (t) => {
+          let rows = parsePoPdfText(t);
+          if (!rows.length) rows = parseBlinkitPoScheduleWords(await extractPdfWords(file)); // Blinkit's newer PO schedule
+          finish(rows, file.name, t);
+        }).catch(() => setPoError('Could not read this PDF.'));
       }
       e.target.value = '';
       return;
@@ -8913,7 +9056,11 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
       if (batch.platform === 'Zepto') {
         extractPdfWords(file).then((pages) => finish(parseZeptoGrnWords(pages), file.name)).catch(() => setGrnError('Could not read this PDF.'));
       } else {
-        extractPdfText(file).then((t) => finish(parseGrnPdfText(t), file.name)).catch(() => setGrnError('Could not read this PDF.'));
+        extractPdfText(file).then(async (t) => {
+          let rows = parseGrnPdfText(t);
+          if (!rows.length) rows = parseBlinkitGrnTableWords(await extractPdfWords(file)); // Blinkit's newer GRN layout
+          finish(rows, file.name);
+        }).catch(() => setGrnError('Could not read this PDF.'));
       }
       e.target.value = '';
       return;
@@ -8951,7 +9098,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
   const comparison = useMemo(() => bf.poRows.map((po) => {
     const cr = matchChannelRow(po, bf.costRows, items);
     const ourCost = cr && cr.finalPricePerPack != null ? cr.finalPricePerPack : null;
-    const margin = ourCost == null ? null : Math.round((po.price - ourCost) * 100) / 100;
+    const margin = (ourCost == null || !po.price) ? null : Math.round((po.price - ourCost) * 100) / 100; // Blinkit's newer PO schedule has no price — no margin to show
     return { po, ourCost, margin, marginPct: ourCost ? Math.round((margin / ourCost) * 1000) / 10 : null };
   }), [bf.poRows, bf.costRows, items]);
   const unmatched = comparison.filter((x) => x.ourCost == null).length;
@@ -9038,7 +9185,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
                       <Td style={{ fontWeight: 700 }}>{x.po.name || x.po.code}</Td>
                       <Td>{x.po.qty}</Td>
                       <Td>{x.ourCost == null ? <span style={{ color: AMBER, fontSize: 12 }}>No match</span> : money(x.ourCost)}</Td>
-                      <Td>{money(x.po.price)}</Td>
+                      <Td>{x.po.price ? money(x.po.price) : '—'}</Td>
                       <Td style={{ fontWeight: 800, color: x.margin == null ? MUTED : (good ? LEAF : TOMATO) }}>{x.margin == null ? '-' : (x.margin >= 0 ? '+' : '') + money(x.margin)}</Td>
                       <Td style={{ color: x.marginPct == null ? MUTED : (good ? LEAF : TOMATO) }}>{x.marginPct == null ? '-' : x.marginPct + '%'}</Td>
                     </tr>
