@@ -6419,6 +6419,55 @@ function parseGrnPdfText(text) {
 const BLINKIT_NUM_RE = /^-?[\d,]+(\.\d+)?$/;
 const blinkitNum = (s) => Number(String(s).replace(/,/g, '')) || 0;
 
+// Hyperpure/Blinkit "PURCHASE ORDER" PDF (Margin/MRP shown as "-", so the regex parser can't match it)
+function parseHyperpurePoWords(pages) {
+  const out = [];
+  let prevAnchors = null;
+  (pages || []).forEach((words, pi) => {
+    const anchors = [];
+    words.forEach((w) => {
+      if (w.x < 62 && /^\d{5,7}$/.test(w.text)) {
+        const hsn = words.find((h) => Math.abs(h.y - w.y) < 4 && h.x > 180 && h.x < 230 && /^\d{8}$/.test(h.text));
+        if (hsn) anchors.push({ code: w.text, y: w.y, parts: [] });
+      }
+    });
+    if (!anchors.length) return;
+    anchors.sort((a, b) => a.y - b.y);
+    const firstY = anchors[0].y;
+    words.forEach((w) => {
+      if (w.x < 66 || w.x >= 190) return;
+      let a = null;
+      if (pi > 0 && prevAnchors && w.y < firstY - 9) a = prevAnchors[prevAnchors.length - 1];
+      else a = anchors.reduce((best, c) => (!best || Math.abs(c.y - w.y) < Math.abs(best.y - w.y) ? c : best), null);
+      if (a && Math.abs(a.y - w.y) <= 12 || (a && pi > 0 && w.y < firstY - 9)) a.parts.push(w);
+    });
+    anchors.forEach((a) => {
+      const line = words.filter((w) => Math.abs(w.y - a.y) < 4);
+      const num = (lo, hi) => line.filter((w) => w.x >= lo && w.x < hi && /^-?[\d,]+(\.\d+)?$/.test(w.text))[0];
+      const q = num(325, 385), p = num(385, 410), t = num(540, 700);
+      a.qty = q ? Number(q.text.replace(/,/g, '')) : 0;
+      a.price = p ? Number(p.text.replace(/,/g, '')) : 0;
+      a.total = t ? Number(t.text.replace(/,/g, '')) : 0;
+    });
+    // name = words ordered by page then y then x
+    anchors.forEach((a) => {
+      a.parts.sort((p, q) => (Math.abs(p.y - q.y) < 2 ? p.x - q.x : p.y - q.y));
+    });
+    if (prevAnchors) {
+      // continuation words were pushed onto the previous page's last anchor after it was emitted? handled below
+    }
+    anchors.forEach((a) => out.push(a));
+    prevAnchors = anchors;
+  });
+  return out
+    .map((a) => ({
+      code: a.code,
+      name: a.parts.map((w) => w.text).join(' ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim(),
+      qty: a.qty, price: a.price, total: a.total || a.qty * a.price,
+    }))
+    .filter((r) => r.name && r.qty > 0);
+}
+
 function parseBlinkitPoScheduleWords(pages) {
   const rows = [];
   pages.forEach((words) => {
@@ -9023,7 +9072,7 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
       } else {
         extractPdfText(file).then(async (t) => {
           let rows = parsePoPdfText(t);
-          if (!rows.length) rows = parseBlinkitPoScheduleWords(await extractPdfWords(file)); // Blinkit's newer PO schedule
+          if (!rows.length) { const w = await extractPdfWords(file); rows = parseHyperpurePoWords(w); if (!rows.length) rows = parseBlinkitPoScheduleWords(w); } // Blinkit's newer PO schedule
           finish(rows, file.name, t);
         }).catch(() => setPoError('Could not read this PDF.'));
       }
