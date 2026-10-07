@@ -6439,7 +6439,8 @@ function parseHyperpurePoWords(pages) {
       let a = null;
       if (pi > 0 && prevAnchors && w.y < firstY - 9) a = prevAnchors[prevAnchors.length - 1];
       else a = anchors.reduce((best, c) => (!best || Math.abs(c.y - w.y) < Math.abs(best.y - w.y) ? c : best), null);
-      if (a && Math.abs(a.y - w.y) <= 12 || (a && pi > 0 && w.y < firstY - 9)) a.parts.push(w);
+      const isCarry = pi > 0 && w.y < firstY - 9;
+      if (a && (isCarry || Math.abs(a.y - w.y) <= 12)) a.parts.push(w);
     });
     anchors.forEach((a) => {
       const line = words.filter((w) => Math.abs(w.y - a.y) < 4);
@@ -6453,9 +6454,6 @@ function parseHyperpurePoWords(pages) {
     anchors.forEach((a) => {
       a.parts.sort((p, q) => (Math.abs(p.y - q.y) < 2 ? p.x - q.x : p.y - q.y));
     });
-    if (prevAnchors) {
-      // continuation words were pushed onto the previous page's last anchor after it was emitted? handled below
-    }
     anchors.forEach((a) => out.push(a));
     prevAnchors = anchors;
   });
