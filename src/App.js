@@ -1331,7 +1331,7 @@ export default function AdminPanel() {
               onResetOldOrders={resetOldOrders}
             />
           )}
-          {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} onDeleteOldPurchases={removePurchasesByIds} onResetPurchaseNeeds={excludeOldOrdersFromPurchase} onRestoreExcluded={restoreExcludedOrders} />}
+          {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} allItems={items} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} onDeleteOldPurchases={removePurchasesByIds} onResetPurchaseNeeds={excludeOldOrdersFromPurchase} onRestoreExcluded={restoreExcludedOrders} />}
           {tab === 'stockcount' && <StockCountPanel items={cityItems} stockCounts={cityStockCounts} purchases={cityPurchases} dispatchLog={cityDispatchLog} onRecord={recordStockCount} onReset={resetStockCounts} />}
           {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} recipes={recipes} />}
           {tab === 'sales' && (
@@ -4691,7 +4691,7 @@ function printInvoice(inv) {
   openHtmlInPrintWindow(html);
 }
 
-function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedger, totalSpend, stockCounts, indentBatches, onAdd, onAddLedgerEntry, onSavePlacedOrder, onDeleteOldPurchases, onResetPurchaseNeeds, onRestoreExcluded }) {
+function PurchasePanel({ purchases, orders, items, allItems, recipes, vendors, vendorLedger, totalSpend, stockCounts, indentBatches, onAdd, onAddLedgerEntry, onSavePlacedOrder, onDeleteOldPurchases, onResetPurchaseNeeds, onRestoreExcluded }) {
   const [categoryFilter, setCategoryFilter] = usePersistedState('fnv_purchase_category', 'ALL');
   const [vendorFilterId, setVendorFilterId] = usePersistedState('fnv_purchase_vendor', '');
   const [qtySort, setQtySort] = usePersistedState('fnv_purchase_qtysort', 'none'); // 'none' | 'asc' | 'desc'
@@ -4803,9 +4803,64 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     return Array.from(dates).sort();
   }, [orders, indentBatches]);
 
-  const neededByProduct = useMemo(() => {
+  // Demand per buyable item. Orders for a processed (CUT) item are never added directly: they are
+  // broken down into their recipe ingredients (recursively). CUT items with no matching recipe are
+  // collected in `cutWithoutRecipe` and flagged instead of silently landing in the purchase list.
+  const neededData = useMemo(() => {
     const map = {};
+    const missing = {};
+    const nrm = (x) => String(x || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    // Matching key: lower-case letters/digits only, so "250 g" = "250g", "-" vs "–", extra spaces etc. never block a match.
+    const nk = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, '');
+    const loose = (x) => nk(String(x || '').replace(/\([^)]*\)/g, ''));
+    const cityIds = new Set(items.map((it) => it.id));
+    // Items are per-city but recipes are shared, so resolve recipe items across ALL cities.
+    const itemById = {};
+    const catByName = {};
+    (allItems || []).forEach((it) => { itemById[it.id] = it; catByName[nrm(it.name)] = it.category; });
+    items.forEach((it) => { itemById[it.id] = it; catByName[nrm(it.name)] = it.category; });
+    const recipesByOutput = {};
+    const indexRecipe = (key, r) => {
+      if (!key) return;
+      const arr = (recipesByOutput[key] = recipesByOutput[key] || []);
+      if (!arr.includes(r)) arr.push(r);
+    };
+    recipes.forEach((r) => {
+      const out = itemById[r.outputItemId];
+      if (out) { indexRecipe(nk(out.name), r); indexRecipe(loose(out.name), r); }
+      indexRecipe(nk(r.name), r);
+      indexRecipe(loose(r.name), r);
+    });
+    const pickRecipes = (name) => {
+      const all = recipesByOutput[nk(name)] || recipesByOutput[loose(name)] || [];
+      if (all.length === 0) return [];
+      // Prefer recipes made for this city's own item; otherwise reuse one other city's recipe (never sum duplicates across cities).
+      const local = all.filter((r) => cityIds.has(r.outputItemId));
+      if (local.length > 0) return local;
+      return all.filter((r) => r.outputItemId === all[0].outputItemId);
+    };
     const addDemand = (name, qty, unit) => { map[name] = map[name] || { needed: 0, unit }; map[name].needed += qty; };
+    const explode = (name, qty, unit, depth) => {
+      // ignore a recipe that lists the very item being expanded as an ingredient
+      const recs = depth < 5 ? pickRecipes(name).filter((r) => !(r.ingredients || []).some((ing) => itemById[ing.itemId] && loose(itemById[ing.itemId].name) === loose(name))) : [];
+      if (recs.length > 0) {
+        recs.forEach((recipe) => {
+          (recipe.ingredients || []).forEach((ing) => {
+            const ingItem = itemById[ing.itemId];
+            if (!ingItem) return;
+            const norm = normalizeIngredientQty(ing.qtyPerUnit * qty, ing.unit);
+            explode(ingItem.name, norm.value, norm.unit, depth + 1);
+          });
+        });
+        return;
+      }
+      if (catByName[nrm(name)] === 'CUT') {
+        missing[name] = missing[name] || { qty: 0, unit };
+        missing[name].qty += qty;
+        return;
+      }
+      addDemand(name, qty, unit);
+    };
     // An order counts toward "needing purchase" once it's actually been released to
     // Purchase Manager — orders with no batch (added manually) always count, since
     // there's no release step for those.
@@ -4815,23 +4870,11 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
       .filter((o) => !o.excludeFromPurchase)
       .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
       .filter((o) => fulfilmentDateFilter === 'ALL' || o.fulfilmentDate === fulfilmentDateFilter)
-      .forEach((o) => {
-        const matchingRecipes = recipes.filter((r) => items.find((it) => it.id === r.outputItemId)?.name === o.product);
-        if (matchingRecipes.length > 0) {
-          matchingRecipes.forEach((recipe) => {
-            recipe.ingredients.forEach((ing) => {
-              const ingItem = items.find((it) => it.id === ing.itemId);
-              if (!ingItem) return;
-              const norm = normalizeIngredientQty(ing.qtyPerUnit * o.qty, ing.unit);
-              addDemand(ingItem.name, norm.value, norm.unit);
-            });
-          });
-        } else {
-          addDemand(o.product, o.qty, o.unit);
-        }
-      });
-    return map;
-  }, [orders, recipes, items, indentBatches, fulfilmentDateFilter]);
+      .forEach((o) => explode(o.product, o.qty, o.unit, 0));
+    return { map, missing };
+  }, [orders, recipes, items, allItems, indentBatches, fulfilmentDateFilter]);
+  const neededByProduct = neededData.map;
+  const cutWithoutRecipe = neededData.missing;
 
   // Every order still counted as "needing purchase", regardless of the date
   // filter currently on screen — Reset clears the whole list, not just what's
@@ -4854,6 +4897,7 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
     const vendorItemIds = vendorFilterId ? new Set(vendors.find((v) => v.id === vendorFilterId)?.itemIds || []) : null;
     let result = items
       .filter((it) => neededByProduct[it.name])
+      .filter((it) => it.category !== 'CUT')
       .filter((it) => categoryFilter === 'ALL' || it.category === categoryFilter)
       .filter((it) => !vendorItemIds || vendorItemIds.has(it.id))
       .filter((it) => !itemSearch.trim() || it.name.toLowerCase().includes(itemSearch.trim().toLowerCase()))
@@ -5257,6 +5301,11 @@ function PurchasePanel({ purchases, orders, items, recipes, vendors, vendorLedge
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 18 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             <Panel>
+              {Object.keys(cutWithoutRecipe).length > 0 && (
+                <div style={{ background: '#FFF4D6', border: '1px solid #E8C766', color: '#6B4E00', borderRadius: 8, padding: '8px 10px', fontSize: 12, marginBottom: 12 }}>
+                  <strong>Recipe missing:</strong> these CUT items have orders but no recipe, so their raw material is not in this list — {Object.entries(cutWithoutRecipe).map(([n, v]) => `${n} (${Math.round(v.qty * 100) / 100} ${v.unit})`).join(', ')}. Add a recipe in Cut &amp; Process.
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
                 <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Items needing purchase ({filteredItems.length})</p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
