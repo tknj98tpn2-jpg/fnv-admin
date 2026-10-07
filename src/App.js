@@ -5635,7 +5635,7 @@ const sanitizeKeyPart = (s) => String(s || '').replace(/\//g, '⁄');
 // article keeps the exact key (and therefore the same Firestore doc id) it always had, so
 // this never disturbs already-saved packing/pricing data for the common case.
 function disambiguateByArticle(orderList, baseKeyFor, idFn) {
-  const normName = (o) => sanitizeKeyPart(String(o.articleName || '').trim().toLowerCase());
+  const normName = (o) => sanitizeKeyPart(String(o.articleName || '').trim().toLowerCase().replace(/\s+/g, ' '));
   // Flipkart/Zepto re-issue their own FSN/UUID "code" on a relisting, so for them only the
   // EAN counts as the article's identity — never the code (see EAN_ONLY_PLATFORMS).
   const idOf = idFn || ((o) => sanitizeKeyPart(o.rawEan || ((o.platform === 'Flipkart' || o.platform === 'Zepto') ? '' : (o.rawCode || ''))));
@@ -5653,7 +5653,8 @@ function disambiguateByArticle(orderList, baseKeyFor, idFn) {
     // article name — used when the EAN/code is missing or identical on both orders
     // (so it can't tell them apart) but the names plainly show two different articles.
     if (idsByBase[base] && idsByBase[base].size > 1) return `${base}__${idOf(o) || normName(o)}`;
-    if (namesByBase[base] && namesByBase[base].size > 1 && normName(o)) return `${base}__${normName(o)}`;
+    // (A caller-supplied idFn already encodes the name, so this fallback is only for the default id.)
+    if (!idFn && namesByBase[base] && namesByBase[base].size > 1 && normName(o)) return `${base}__${normName(o)}`;
     return base;
   };
 }
@@ -5668,30 +5669,28 @@ function disambiguateByArticle(orderList, baseKeyFor, idFn) {
 // the very same key and saved pricing as before. `ownKeyFor` is the key an order would have had
 // on its own pack size — used to still find pricing saved against an older variant.
 function buildArticleKeyer(pricedOrders, city) {
+  // An article is "the same one" when platform + item + the channel's own article name
+  // match — NOT the EAN, which can be missing on older orders or re-issued on a relisting
+  // (that is exactly what left one article split into several Pricing rows). Two articles
+  // that merely share an item but are named differently (Baby Banana vs Banana 3pc, Cabbage
+  // vs Baby Cabbage) stay apart. Only when an order has no article name at all does its EAN
+  // / code stand in as the identity.
   const eanOnly = (p) => p === 'Flipkart' || p === 'Zepto';
-  const normName = (o) => String(o.articleName || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const rawId = (o) => sanitizeKeyPart(o.rawEan || (eanOnly(o.platform) ? '' : (o.rawCode || '')));
-  const prefix = (o) => `${o.platform}__${sanitizeKeyPart(o.product)}`;
-  const idsByName = {};
-  pricedOrders.forEach((o) => {
-    const id = rawId(o); const n = normName(o);
-    if (id && n) { const k = `${prefix(o)}__${n}`; (idsByName[k] = idsByName[k] || new Set()).add(id); }
-  });
+  const norm = (v) => sanitizeKeyPart(String(v || '').trim().toLowerCase().replace(/\s+/g, ' '));
   const idOf = (o) => {
-    const id = rawId(o);
-    if (id) return id;
-    const s = idsByName[`${prefix(o)}__${normName(o)}`];
-    return s && s.size === 1 ? Array.from(s)[0] : '';
+    const n = norm(o.articleName);
+    if (n) return `n:${n}`;
+    const e = sanitizeKeyPart(o.rawEan || (eanOnly(o.platform) ? '' : (o.rawCode || '')));
+    return e ? `e:${e}` : `p:${norm(o.product)}`;
   };
+  const prefix = (o) => `${o.platform}__${sanitizeKeyPart(o.product)}`;
   const latest = {};
   pricedOrders.forEach((o) => {
-    const id = idOf(o);
-    if (!id) return;
-    const g = `${prefix(o)}__${id}`;
+    const g = `${prefix(o)}__${idOf(o)}`;
     const stamp = `${o.fulfilmentDate || ''}|${o.id || ''}`;
     if (!latest[g] || stamp > latest[g].stamp) latest[g] = { stamp, packSize: o.packSize, packUnit: o.packUnit };
   });
-  const canonPack = (o) => { const id = idOf(o); return (id && latest[`${prefix(o)}__${id}`]) || o; };
+  const canonPack = (o) => latest[`${prefix(o)}__${idOf(o)}`] || o;
   const baseFor = (o) => { const p = canonPack(o); return `${city}__${sanitizeKeyPart(o.product)}__${o.platform}__${p.packSize}__${p.packUnit}`; };
   const keyFor = disambiguateByArticle(pricedOrders, baseFor, idOf);
   const ownKeyFor = (o) => `${city}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}`;
