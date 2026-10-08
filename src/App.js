@@ -4832,7 +4832,8 @@ function PurchasePanel({ purchases, orders, items, allItems, recipes, vendors, v
       indexRecipe(loose(r.name), r);
     });
     const pickRecipes = (name) => {
-      const all = recipesByOutput[nk(name)] || recipesByOutput[loose(name)] || [];
+      // the bracket-less fallback only applies to processed (CUT) items, so a raw "PUMPKIN" is never swapped for the "PUMPKIN (CUT)" recipe
+      const all = recipesByOutput[nk(name)] || (catByName[nrm(name)] === 'CUT' ? recipesByOutput[loose(name)] : null) || [];
       if (all.length === 0) return [];
       // Prefer recipes made for this city's own item; otherwise reuse one other city's recipe (never sum duplicates across cities).
       const local = all.filter((r) => cityIds.has(r.outputItemId));
@@ -4842,7 +4843,7 @@ function PurchasePanel({ purchases, orders, items, allItems, recipes, vendors, v
     const addDemand = (name, qty, unit) => { map[name] = map[name] || { needed: 0, unit }; map[name].needed += qty; };
     const explode = (name, qty, unit, depth) => {
       // ignore a recipe that lists the very item being expanded as an ingredient
-      const recs = depth < 5 ? pickRecipes(name).filter((r) => !(r.ingredients || []).some((ing) => itemById[ing.itemId] && loose(itemById[ing.itemId].name) === loose(name))) : [];
+      const recs = depth < 5 ? pickRecipes(name).filter((r) => !(r.ingredients || []).some((ing) => itemById[ing.itemId] && nk(itemById[ing.itemId].name) === nk(name))) : [];
       if (recs.length > 0) {
         recs.forEach((recipe) => {
           (recipe.ingredients || []).forEach((ing) => {
