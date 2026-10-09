@@ -481,6 +481,7 @@ const PERMISSION_SECTIONS = [
   { key: 'staff', label: 'Staff' },
   { key: 'attendance', label: 'Attendance (mobile app)' },
   { key: 'packaging', label: 'Packaging' },
+  { key: 'workorder', label: 'Work Order' },
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'crates', label: 'Crates & boxes' },
   { key: 'barcodelabels', label: 'Barcode Labels' },
@@ -522,6 +523,7 @@ const NAV = [
   { key: 'sales', label: 'Sales', icon: Wallet },
   { key: 'staff', label: 'Staff', icon: UserCheck },
   { key: 'packaging', label: 'Packaging', icon: PackageCheck },
+  { key: 'workorder', label: 'Work Order', icon: ClipboardList },
   { key: 'dispatch', label: 'Dispatch', icon: Truck },
   { key: 'crates', label: 'Crates & boxes', icon: Boxes },
   { key: 'barcodelabels', label: 'Barcode Labels', icon: Barcode },
@@ -676,6 +678,7 @@ export default function AdminPanel() {
   const [gradingRecords, setGradingRecords] = useState([]); // per-item quality grading entries (Grade A / Grade B / Dump split)
   const [barcodePrints, setBarcodePrints] = useState([]); // running "how many labels printed" total per article/date/platform, for the Printed badge
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
+  const [packingAssignments, setPackingAssignments] = useState({}); // { [targetKey]: { assignedTo, assignedToName } } — set from the mobile Packaging tab
   const [dbReady,       setDbReady]       = useState(false);
   const [selectedCity,  setSelectedCity]  = usePersistedState('fnv_selected_city', CITIES[0]);
   const [currentUser,   setCurrentUser]   = useState(null);
@@ -735,7 +738,13 @@ export default function AdminPanel() {
       setPackingProgress(map);
     });
 
-    return () => { unsubs.forEach((u) => u()); unsub2(); unsub2b(); unsub3(); };
+    const unsub4 = onSnapshot(collection(db, 'packingAssignments'), (snap) => {
+      const map = {};
+      snap.docs.forEach((d) => { map[d.id] = d.data(); });
+      setPackingAssignments(map);
+    });
+
+    return () => { unsubs.forEach((u) => u()); unsub2(); unsub2b(); unsub3(); unsub4(); };
   }, []);
   // ──────────────────────────────────────────────────────
 
@@ -773,7 +782,11 @@ export default function AdminPanel() {
   // values until now. This is the single source of truth for what a logged-in
   // user's sidebar and page routing are allowed to show.
   const currentRole = currentUser ? roles.find((r) => r.id === currentUser.roleId) : null;
-  const visibleNav = NAV.filter((n) => (n.key === 'staff' ? hasSensitivePermission(currentRole?.permissions, 'staff') : hasPermission(currentRole?.permissions, n.key)));
+  const visibleNav = NAV.filter((n) => {
+    if (n.key === 'staff') return hasSensitivePermission(currentRole?.permissions, 'staff');
+    if (n.key === 'workorder') return isAdminRoleName(currentRole) || hasSensitivePermission(currentRole?.permissions, 'workorder');
+    return hasPermission(currentRole?.permissions, n.key);
+  });
   // If the active tab isn't one this user's role can see — because their role
   // was just restricted, or a stale tab carried over from a previous session —
   // drop them onto the first section they do have access to instead of leaving
@@ -970,6 +983,8 @@ export default function AdminPanel() {
   // count — an order that ends up with zero packed (fully short) never becomes
   // dispatchable; its whole quantity is recorded as short right away instead of sitting
   // in "packed" with nothing to send.
+  const assignPackingTask = (key, userId, userName) => fbSetDoc('packingAssignments', key, { assignedTo: userId, assignedToName: userName, city: effectiveCity });
+  const unassignPackingTask = (key) => fbDelete('packingAssignments', key);
   const updatePackedQty = (key, packedQty, shortQty, orderIds, targetPacks) => {
     fbSetDoc('packingProgress', key, { packedQty, shortQty });
     const resolved = targetPacks > 0 && (packedQty + shortQty) >= targetPacks;
@@ -1382,6 +1397,7 @@ export default function AdminPanel() {
           )}
           {tab === 'packaging' && <PackagingPanel orders={cityOperationalOrders} items={cityItems} onAdvanceMany={advanceMany} packingProgress={packingProgress} onUpdatePackedQty={updatePackedQty} />}
           {tab === 'dispatch' && <DispatchPanel orders={cityOperationalOrders} items={cityItems} crates={cityCrates} dispatchLog={cityDispatchLog} indentBatches={cityIndentBatches} onDispatchBatch={dispatchBatch} />}
+          {tab === 'workorder' && <WorkOrderView orders={cityOperationalOrders} packingProgress={packingProgress} packingAssignments={packingAssignments} users={users} roles={roles} currentUser={currentUser} onAssign={assignPackingTask} onUnassign={unassignPackingTask} />}
           {tab === 'crates' && <CratesPanel crates={cityCrates} log={cityCrateLog} onAdjust={adjustCrates} />}
           {tab === 'barcodelabels' && (
             <BarcodeLabelsPanel
@@ -3421,7 +3437,7 @@ function UsersRolesPanel({ users, roles, onAddUser, onUpdateUser, onDeleteUser, 
                       <Td key={s.key} style={{ textAlign: 'center' }}>
                         <input
                           type="checkbox"
-                          checked={['staff', 'advanceindent'].includes(s.key) ? hasSensitivePermission(r.permissions, s.key) : hasPermission(r.permissions, s.key)}
+                          checked={['staff', 'advanceindent', 'workorder'].includes(s.key) ? hasSensitivePermission(r.permissions, s.key) : hasPermission(r.permissions, s.key)}
                           onChange={(e) => onToggleRolePermission(r.id, s.key, e.target.checked)}
                         />
                       </Td>
@@ -4888,11 +4904,6 @@ function PurchasePanel({ purchases, orders, items, allItems, recipes, vendors, v
       .filter((o) => !o.batchId || releasedBatchIds.has(o.batchId))
       .map((o) => o.id);
   }, [orders, indentBatches]);
-  // Orders currently hidden from the purchase list — whether from a manual
-  // Reset or the auto-exclude on a new indent upload. Restoring is safe: a
-  // truly-fulfilled item won't reappear (stock already covers it), only a
-  // still-unmet need does.
-  const excludedOrderIds = useMemo(() => orders.filter((o) => o.excludeFromPurchase && o.status !== 'dispatched').map((o) => o.id), [orders]);
 
   const filteredItems = useMemo(() => {
     const vendorItemIds = vendorFilterId ? new Set(vendors.find((v) => v.id === vendorFilterId)?.itemIds || []) : null;
@@ -5186,15 +5197,6 @@ function PurchasePanel({ purchases, orders, items, allItems, recipes, vendors, v
             <button onClick={clearFilters} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer', paddingBottom: 8 }}>Clear filters</button>
           )}
           <div style={{ flex: 1 }} />
-          {excludedOrderIds.length > 0 && (
-            <button
-              onClick={() => onRestoreExcluded(excludedOrderIds)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              title="Bring back orders currently hidden from this list (from a Reset, or a different-platform indent upload)"
-            >
-              Restore {excludedOrderIds.length} hidden
-            </button>
-          )}
           <button
             onClick={() => setConfirmingPurchaseReset((x) => !x)}
             style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: TOMATO, border: `1px solid ${TOMATO}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -6923,6 +6925,127 @@ function PackagingRow({ target, progress, onSave, onAdvanceMany }) {
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Work Order: the packing articles assigned to each staff member (assignments are made in Packaging).
+// A staff member with this permission only ever sees their OWN assigned articles; the Admin role sees every
+// staff member's list and can reassign / unassign.
+// ---------------------------------------------------------------------------
+const isAdminRoleName = (role) => !!role && String(role.name || '').trim().toLowerCase() === 'admin';
+function buildWorkOrderTargets(orders, packingProgress, packingAssignments) {
+  const open = orders.filter((o) => o.status !== 'dispatched');
+  const keyer = disambiguateByArticle(open, (o) => {
+    const dateKey = o.fulfilmentDate || 'No date';
+    const hasPack = !!(o.packQty && o.packSize);
+    const cityKey = o.city || CITIES[0];
+    return hasPack ? `${cityKey}__${dateKey}__${sanitizeKeyPart(o.product)}__${o.platform}__${o.packSize}__${o.packUnit}` : `${cityKey}__${dateKey}__${sanitizeKeyPart(o.product)}__${o.unit}`;
+  });
+  const map = {};
+  open.forEach((o) => {
+    const key = keyer(o);
+    if (!packingAssignments[key]) return; // only articles somebody has been assigned
+    const hasPack = !!(o.packQty && o.packSize);
+    const t = (map[key] = map[key] || { key, date: o.fulfilmentDate || 'No date', product: o.product, articleName: o.articleName || o.product, unit: o.unit, qty: 0, platforms: new Set(), hasPack, packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0, pendingIds: [] });
+    t.qty += o.qty;
+    t.platforms.add(o.platform);
+    if (hasPack) t.targetPacks += o.packQty;
+    if (o.status === 'pending') t.pendingIds.push(o.id);
+  });
+  return Object.values(map).map((t) => {
+    const progress = packingProgress[t.key] || { packedQty: 0, shortQty: 0 };
+    const a = packingAssignments[t.key];
+    const target = t.hasPack ? t.targetPacks : t.qty;
+    const done = t.hasPack ? progress.packedQty : (t.pendingIds.length === 0 ? t.qty : 0);
+    const isComplete = t.hasPack ? (progress.packedQty > 0 && progress.packedQty + progress.shortQty >= t.targetPacks) : (t.pendingIds.length === 0);
+    return { ...t, target, done, shortQty: progress.shortQty || 0, isComplete, assignedTo: a.assignedTo, assignedToName: a.assignedToName || '' };
+  });
+}
+function WorkOrderView({ orders, packingProgress, packingAssignments, users, roles, currentUser, onAssign, onUnassign }) {
+  const myRole = currentUser ? roles.find((r) => r.id === currentUser.roleId) : null;
+  const isAdmin = isAdminRoleName(myRole);
+  const [dateFilter, setDateFilter] = usePersistedState('fnv_workorder_date', '');
+  const [staffFilter, setStaffFilter] = useState('');
+  const all = useMemo(() => buildWorkOrderTargets(orders, packingProgress, packingAssignments), [orders, packingProgress, packingAssignments]);
+  // Non-admins are filtered down to their own id here — nobody else's assignments ever reach the screen.
+  const visible = useMemo(() => all
+    .filter((t) => (isAdmin ? true : !!currentUser && t.assignedTo === currentUser.id))
+    .filter((t) => !dateFilter || t.date === dateFilter)
+    .filter((t) => !isAdmin || !staffFilter || t.assignedTo === staffFilter),
+  [all, isAdmin, currentUser, dateFilter, staffFilter]);
+  const dates = useMemo(() => Array.from(new Set(all.filter((t) => isAdmin || (currentUser && t.assignedTo === currentUser.id)).map((t) => t.date))).sort(), [all, isAdmin, currentUser]);
+  const assignees = useMemo(() => {
+    const okRoleIds = new Set(roles.filter((r) => r.permissions?.workorder === true).map((r) => r.id)); // anyone whose role has Work Order permission
+    return users.filter((u) => u.status === 'active' && okRoleIds.has(u.roleId));
+  }, [users, roles]);
+  const nameOf = (id, fallback) => (users.find((u) => u.id === id)?.name) || fallback || 'Unknown';
+  const qtyText = (t, n) => (t.hasPack ? `${n} pack${n === 1 ? '' : 's'}` : `${Math.round(n * 100) / 100} ${t.unit || ''}`);
+  const sortOpenFirst = (arr) => arr.slice().sort((a, b) => (a.isComplete === b.isComplete ? String(a.date).localeCompare(String(b.date)) : a.isComplete ? 1 : -1));
+
+  const row = (t) => (
+    <div key={t.key} style={{ borderTop: `1px solid ${LINE}`, padding: '9px 0', opacity: t.isComplete ? 0.6 : 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>{t.articleName || t.product}</div>
+          <div style={{ fontSize: 11, color: MUTED }}>{[...t.platforms].join(' + ')}{t.hasPack ? ` · ${t.rawUnit || `${t.packSize}${t.packUnit}/pack`}` : ''} · {t.date}</div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: t.isComplete ? LEAF : TOMATO }}>{qtyText(t, t.target)}</div>
+          <div style={{ fontSize: 11, color: MUTED }}>{t.isComplete ? 'Done' : `Packed ${qtyText(t, t.done)}`}{t.shortQty > 0 ? ` · ${t.shortQty} short` : ''}</div>
+        </div>
+      </div>
+      {isAdmin && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+          <SmartSelect value={t.assignedTo} onChange={(e) => { const u = users.find((x) => x.id === e.target.value); if (u) onAssign(t.key, u.id, u.name); }} style={{ flex: 1, borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 8px', background: '#fff' }}>
+            {[...assignees, ...(assignees.some((u) => u.id === t.assignedTo) ? [] : [{ id: t.assignedTo, name: nameOf(t.assignedTo, t.assignedToName) }])].map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </SmartSelect>
+          <button onClick={() => onUnassign(t.key)} style={{ background: 'none', border: `1px solid ${LINE}`, color: TOMATO, borderRadius: 8, fontSize: 11, fontWeight: 700, padding: '6px 10px', cursor: 'pointer' }}>Unassign</button>
+        </div>
+      )}
+    </div>
+  );
+
+  // Admin: one block per staff member.
+  const staffBlocks = isAdmin
+    ? Object.values(visible.reduce((m, t) => { (m[t.assignedTo] = m[t.assignedTo] || { id: t.assignedTo, name: nameOf(t.assignedTo, t.assignedToName), rows: [] }).rows.push(t); return m; }, {})).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+  const staffOptions = Array.from(new Map(all.map((t) => [t.assignedTo, nameOf(t.assignedTo, t.assignedToName)])).entries());
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 14, color: INK }}>{isAdmin ? `Work Orders — all staff (${visible.length})` : `My work order (${visible.filter((t) => !t.isComplete).length} to pack)`}</div>
+        <div style={{ fontSize: 11, color: MUTED, marginTop: 4 }}>{isAdmin ? 'Which article has been given to which staff member to pack, with progress. Assign articles from Packaging.' : 'Articles assigned to you for packing. Pack them from the Packaging section.'}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <SmartSelect value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', background: '#fff' }}>
+          <option value="">All dates</option>
+          {dates.map((d) => <option key={d} value={d}>{d}</option>)}
+        </SmartSelect>
+        {isAdmin && (
+          <SmartSelect value={staffFilter} onChange={(e) => setStaffFilter(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '8px 8px', background: '#fff' }}>
+            <option value="">All staff</option>
+            {staffOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </SmartSelect>
+        )}
+      </div>
+      {isAdmin ? staffBlocks.map((b) => (
+        <div key={b.id} style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: INK }}>{b.name}</div>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 700 }}>{b.rows.filter((t) => t.isComplete).length} / {b.rows.length} done</div>
+          </div>
+          {sortOpenFirst(b.rows).map(row)}
+        </div>
+      )) : (
+        <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+          {sortOpenFirst(visible).map(row)}
+        </div>
+      )}
+      {visible.length === 0 && <div style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>{isAdmin ? 'No articles have been assigned yet.' : 'Nothing is assigned to you right now.'}</div>}
+    </div>
+  );
+}
+
 function PackagingPanel({ orders, items, onAdvanceMany, packingProgress, onUpdatePackedQty }) {
   const [platformFilter, setPlatformFilter] = usePersistedState('fnv_packaging_platform', 'All');
   const [categoryFilter, setCategoryFilter] = usePersistedState('fnv_packaging_category', 'All');
@@ -7191,6 +7314,51 @@ function DispatchFillDetail({ batch, orders, onBack }) {
   );
 }
 
+
+// "Short items" view for Dispatch: every article Packaging marked short (e.g. indent 100, packed 90 -> 10 short),
+// grouped channel-wise for the chosen fulfilment date.
+function ShortItemsView({ orders, dispatchDate, setDispatchDate, compact }) {
+  const shortOrders = useMemo(
+    () => orders.filter((o) => (o.shortQty || 0) > 0 && (!dispatchDate || o.fulfilmentDate === dispatchDate)),
+    [orders, dispatchDate],
+  );
+  const channels = PLATFORMS.map((p) => ({ platform: p, rows: shortOrders.filter((o) => o.platform === p).slice().sort((a, b) => String(a.articleName || a.product).localeCompare(String(b.articleName || b.product))) })).filter((c) => c.rows.length > 0);
+  const dateRow = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+      <input type="date" value={dispatchDate} onChange={(e) => setDispatchDate(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, fontSize: 12, padding: '7px 8px', fontWeight: 700, background: '#fff' }} />
+      {dispatchDate !== todayLocalDate() && <button onClick={() => setDispatchDate(todayLocalDate())} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Today</button>}
+      {dispatchDate && <button onClick={() => setDispatchDate('')} style={{ background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>All dates</button>}
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 12 : 18 }}>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 14, color: INK, marginBottom: 4 }}>Short items ({shortOrders.length})</div>
+        <div style={{ fontSize: 11, color: MUTED, marginBottom: 10 }}>Articles marked short in Packaging — ordered in the indent but not fully packed — channel-wise{dispatchDate ? ` for ${dispatchDate}` : ' (all dates)'}.</div>
+        {dateRow}
+      </div>
+      {channels.map((c) => (
+        <div key={c.platform} style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: INK, marginBottom: 8 }}>{c.platform} <span style={{ color: MUTED, fontWeight: 600 }}>· {c.rows.length} short</span></div>
+          {c.rows.map((o) => (
+            <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: `1px solid ${LINE}`, padding: '8px 0' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>{o.articleName || o.product}</div>
+                <div style={{ fontSize: 11, color: MUTED }}>{orderStore(o) ? `${orderStore(o)} · ` : ''}{o.fulfilmentDate || ''} · {o.id}</div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: 11, color: MUTED }}>Ordered {renderIndentQty(o, o.qty)}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: TOMATO }}>{renderIndentQty(o, o.shortQty)} short</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      {channels.length === 0 && <div style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No short items{dispatchDate ? ` on ${dispatchDate}` : ''}.</div>}
+    </div>
+  );
+}
+
 function DispatchPanel({ orders, crates, dispatchLog, indentBatches, onDispatchBatch }) {
   const packed = useMemo(() => orders
     .filter((o) => o.status === 'packed')
@@ -7251,6 +7419,7 @@ function DispatchPanel({ orders, crates, dispatchLog, indentBatches, onDispatchB
         {tabBtn('history', 'Dispatch history', dispatchLog.length)}
         {tabBtn('all', 'All dispatched', dispatched.length)}
         {tabBtn('fills', 'Dispatch Fills', indentBatches.length)}
+        {tabBtn('short', 'Short items', orders.filter((o) => (o.shortQty || 0) > 0).length)}
       </div>
 
       {view === 'dispatch' && (
@@ -7359,6 +7528,8 @@ function DispatchPanel({ orders, crates, dispatchLog, indentBatches, onDispatchB
           </div>
         </Panel>
       )}
+
+      {view === 'short' && <Panel><ShortItemsView orders={orders} dispatchDate={dispatchDate} setDispatchDate={setDispatchDate} /></Panel>}
 
       {view === 'fills' && (
         selectedFillBatchId ? (
@@ -8283,13 +8454,17 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
   // plain useState would forget the chosen channel on every such round trip
   // and silently snap back to Blinkit.
   const [platform, setPlatform] = usePersistedState('fnv_barcode_print_platform', PLATFORMS[0]);
+  // Typing in the search box looks across EVERY channel for that day and ranks the best matches first.
+  const [search, setSearch] = useState('');
+  const searchTerm = ssNorm(search);
+  const searching = !!searchTerm;
   // Blinkit's own indent only ever supplies its internal item code, never a real
   // retail UPC — so the printed barcode/QR graphic uses the UPC entered for this
   // article when there is one, falling back to the item code so nothing prints
   // blank. Flipkart's own code is already a genuine EAN, so this never applies to
   // it. Shared by the actual print output and the layout editor's live preview,
   // so the two can never show a different number than what actually prints.
-  const barcodeValueFor = (a) => (platform === 'Blinkit' && a.upc) ? a.upc : a.code;
+  const barcodeValueFor = (a) => (a.platform === 'Blinkit' && a.upc) ? a.upc : a.code;
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [date, setDate] = useState(todayLocalDate());
   const [selectedKeys, setSelectedKeys] = useState(new Set());
@@ -8303,7 +8478,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
   const [editingArticleKey, setEditingArticleKey] = useState(null);
 
   const allArticles = useMemo(() => {
-    const dayOrders = orders.filter((o) => o.platform === platform && o.fulfilmentDate === date && o.packQty && o.packSize);
+    const dayOrders = orders.filter((o) => (searching || o.platform === platform) && o.fulfilmentDate === date && o.packQty && o.packSize);
     const groups = {};
     const keyer = disambiguateByArticle(dayOrders, (o) => {
       const cityKey = o.city || CITIES[0];
@@ -8311,13 +8486,13 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
     });
     dayOrders.forEach((o) => {
       const key = keyer(o);
-      if (!groups[key]) groups[key] = { key, product: o.product, articleName: o.articleName || o.product, rawCode: o.rawCode || '', rawEan: o.rawEan || '', packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0 };
+      if (!groups[key]) groups[key] = { key, platform: o.platform, product: o.product, articleName: o.articleName || o.product, rawCode: o.rawCode || '', rawEan: o.rawEan || '', packSize: o.packSize, packUnit: o.packUnit, rawUnit: o.rawUnit || '', targetPacks: 0 };
       groups[key].targetPacks += Number(o.packQty) || 0;
     });
     return Object.values(groups)
       .map((g) => {
         const item = items.find((it) => it.name === g.product);
-        const alias = findAlias(item, platform, g.packSize, g.packUnit, g.rawEan || g.rawCode);
+        const alias = findAlias(item, g.platform, g.packSize, g.packUnit, g.rawEan || g.rawCode);
         const progress = packingProgress[g.key] || { packedQty: 0 };
         // The indent is the trustworthy source for what actually shipped this
         // time — a saved alias only fills in where the channel's own file left
@@ -8326,12 +8501,18 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
         return { ...g, itemId: item?.id || '', aliasId: alias?.id || '', category: item?.category || '', code: g.rawEan || g.rawCode || alias?.ean || alias?.code || '', upc: alias?.upc || '', labelName: alias?.labelName || '', labelUom: alias?.labelUom || '', barcodeFormatId: alias?.barcodeFormatId || '', layoutOverride: alias?.layoutOverride || null, shelfLifeDays: alias?.shelfLifeDays, packedQty: progress.packedQty || 0 };
       })
       .sort((a, b) => a.articleName.localeCompare(b.articleName));
-  }, [orders, items, packingProgress, platform, date]);
+  }, [orders, items, packingProgress, platform, date, searching]);
 
-  const articles = useMemo(
-    () => allArticles.filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter),
-    [allArticles, categoryFilter]
-  );
+  const articles = useMemo(() => {
+    const byCategory = allArticles.filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter);
+    if (!searchTerm) return byCategory;
+    return byCategory
+      .map((a) => ({ a, s: ssScore(`${a.articleName} ${a.product} ${a.labelName || ''} ${a.code || ''} ${a.platform}`, searchTerm) }))
+      .filter((x) => x.s > 0)
+      .sort((x, y) => y.s - x.s)
+      .map((x) => x.a);
+  }, [allArticles, categoryFilter, searchTerm]);
+  const showUpcCol = articles.some((a) => a.platform === 'Blinkit');
 
   useEffect(() => {
     setSelectedKeys(new Set());
@@ -8363,7 +8544,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
   const rowDirty = (a) => a.key in nameOverrides || a.key in uomOverrides || a.key in codeOverrides || a.key in upcOverrides;
   const saveRow = (a) => {
     if (!a.itemId) return;
-    onUpdateAlias(a.itemId, platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim(), upc: upcFor(a).trim() }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
+    onUpdateAlias(a.itemId, a.platform, { ean: codeFor(a).trim(), labelName: nameFor(a).trim(), labelUom: uomFor(a).trim(), upc: upcFor(a).trim() }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
     setNameOverrides((n) => { const c = { ...n }; delete c[a.key]; return c; });
     setUomOverrides((u) => { const c = { ...u }; delete c[a.key]; return c; });
     setCodeOverrides((c) => { const d = { ...c }; delete d[a.key]; return d; });
@@ -8377,7 +8558,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
   const commitBestBefore = (a, value) => {
     if (!value || !a.itemId) return;
     const days = diffDaysBetween(date, value);
-    onUpdateAlias(a.itemId, platform, { shelfLifeDays: days }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
+    onUpdateAlias(a.itemId, a.platform, { shelfLifeDays: days }, a.packSize, a.packUnit, a.rawEan || a.rawCode);
   };
 
   // A checked "Company Details" box on a format only decides WHETHER that section
@@ -8409,7 +8590,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `bartender_labels_${platform}_${date}.csv`;
+    a.download = `bartender_labels_${searching ? 'search' : platform}_${date}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -8417,7 +8598,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
   };
 
   const printLabels = (onlyArticles) => {
-    const toPrint = (onlyArticles || articles.filter((a) => selectedKeys.has(a.key))).filter((a) => (platform === 'Blinkit' && a.upc) || a.code);
+    const toPrint = (onlyArticles || articles.filter((a) => selectedKeys.has(a.key))).filter((a) => (a.platform === 'Blinkit' && a.upc) || a.code);
     if (toPrint.length === 0) { alert('Select at least one article that has a code before printing.'); return; }
     const isThermal = labelSize === 'thermal5050';
     // The TVS LP-46 Neo's 2-up roll is two 50mm labels side by side (100mm total),
@@ -8559,7 +8740,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
         .lbl-qr { margin-top: 3px; }
       `;
 
-    const html = `<!DOCTYPE html><html><head><title>Barcode Labels — ${platform} — ${date}</title>
+    const html = `<!DOCTYPE html><html><head><title>Barcode Labels — ${searching ? 'All channels' : platform} — ${date}</title>
       <style>${isThermal ? thermalStyle : a4Style}</style></head>
       <body><div class="grid">${labelsHtml}</div>
       <script>window.onload = function() { window.print(); };</script>
@@ -8569,7 +8750,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
     w.document.write(html);
     w.document.close();
     if (onRecordPrint) {
-      onRecordPrint(toPrint.map((a) => ({ key: a.key, date, platform, itemName: nameFor(a), qty: Math.max(1, Math.round(qtyFor(a))) })));
+      onRecordPrint(toPrint.map((a) => ({ key: a.key, date, platform: a.platform, itemName: nameFor(a), qty: Math.max(1, Math.round(qtyFor(a))) })));
     }
   };
 
@@ -8577,7 +8758,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
   const editingFormat = editingArticle ? barcodeFormats.find((f) => f.id === editingArticle.barcodeFormatId) : null;
   const saveArticleLayout = (layout, ownCustomFields) => {
     if (!editingArticle.itemId) return;
-    onUpdateAlias(editingArticle.itemId, platform, { layoutOverride: { ...layout, ownCustomFields: ownCustomFields || [] } }, editingArticle.packSize, editingArticle.packUnit, editingArticle.rawEan || editingArticle.rawCode);
+    onUpdateAlias(editingArticle.itemId, editingArticle.platform, { layoutOverride: { ...layout, ownCustomFields: ownCustomFields || [] } }, editingArticle.packSize, editingArticle.packUnit, editingArticle.rawEan || editingArticle.rawCode);
   };
 
   return (
@@ -8587,6 +8768,13 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
       <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>Pulls every article from that day's indent automatically — as soon as it's mapped, not once it's packed. Adjust quantities if needed before printing.</p>
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>SEARCH (ALL CHANNELS)</p>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Type an article name…" style={{ ...inputStyle, marginBottom: 0, width: 220 }} />
+            {searching && <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', color: TOMATO, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Clear</button>}
+          </div>
+        </div>
+        <div style={{ opacity: searching ? 0.45 : 1 }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: MUTED }}>PLATFORM</p>
           <SmartSelect value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
             {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
@@ -8616,7 +8804,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
         </div>
       )}
       {articles.length === 0 ? (
-        <p style={{ color: MUTED, fontSize: 13 }}>No packed articles found for {platform} on {date}.</p>
+        <p style={{ color: MUTED, fontSize: 13 }}>{searching ? `No article matching "${search}" in any channel on ${date}.` : `No packed articles found for ${platform} on ${date}.`}</p>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
@@ -8625,7 +8813,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Barcode (EAN)</Th>{platform === 'Blinkit' && <Th>UPC Code</Th>}<Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
+              <thead><tr><Th /><Th>Article</Th><Th>UOM</Th><Th>Barcode (EAN)</Th>{showUpcCol && <Th>UPC Code</Th>}<Th /><Th>Best Before</Th><Th>Format</Th><Th>Labels to print</Th></tr></thead>
               <tbody>
                 {articles.map((a) => {
                   const rowFormat = barcodeFormats.find((f) => f.id === a.barcodeFormatId);
@@ -8640,6 +8828,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
                         onBlur={() => saveRow(a)}
                         style={{ fontSize: 13, width: 160, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
+                      {searching && <div style={{ fontSize: 10, fontWeight: 800, color: AMBER, marginTop: 3 }}>{a.platform}</div>}
                       {printedFor(a) > 0 && (
                         <span style={{ display: 'inline-block', marginTop: 4, background: 'rgba(47,82,51,0.12)', color: LEAF, fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '2px 8px' }}>
                           Printed {printedFor(a)}
@@ -8663,16 +8852,16 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
                         style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
                       />
                     </Td>
-                    {platform === 'Blinkit' && (
+                    {showUpcCol && (
                       <Td>
-                        <input
+                        {a.platform === 'Blinkit' && <input
                           value={upcFor(a)}
                           onChange={(e) => setUpcOverrides((u) => ({ ...u, [a.key]: e.target.value }))}
                           onBlur={() => saveRow(a)}
                           placeholder="No UPC yet"
                           title="Blinkit's indent only gives its own item code — enter the article's real UPC here so the printed barcode is scannable at retail"
                           style={{ fontFamily: 'monospace', fontSize: 12, width: 130, padding: '5px 6px', borderRadius: 6, border: `1px solid ${LINE}`, boxSizing: 'border-box' }}
-                        />
+                        />}
                       </Td>
                     )}
                     <Td>
@@ -8699,7 +8888,7 @@ function BarcodePrintTab({ items, orders, packingProgress, barcodeFormats, barco
                     <Td>
                       <SmartSelect
                         value={a.barcodeFormatId || ''}
-                        onChange={(e) => onUpdateAlias(a.itemId, platform, { barcodeFormatId: e.target.value }, a.packSize, a.packUnit, a.rawEan || a.rawCode)}
+                        onChange={(e) => onUpdateAlias(a.itemId, a.platform, { barcodeFormatId: e.target.value }, a.packSize, a.packUnit, a.rawEan || a.rawCode)}
                         disabled={!a.itemId}
                         title={!a.itemId ? 'This article isn\'t mapped to an item yet — map it in Orders first' : ''}
                         style={{ borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 12, padding: '6px 6px', background: a.itemId ? '#fff' : '#F6F3EA', color: a.itemId ? INK : MUTED }}
