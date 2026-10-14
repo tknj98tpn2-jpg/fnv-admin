@@ -674,6 +674,9 @@ export default function AdminPanel() {
   const [dispatchLog,   setDispatchLog]   = useState([]);
   const [stockCounts,   setStockCounts]   = useState([]); // nightly closing-stock entries, one per item per date
   const [pricingConfig, setPricingConfig] = useState([]); // editable per-article pricing inputs (grading %, margins, etc.)
+  const [itemPrices, setItemPrices] = useState([]); // unit price history entered on the Purchase page
+  const [plSnapshots, setPlSnapshots] = useState([]); // frozen per-batch cost (P&L), written at 5 PM on the supply date
+  const [dataLoaded, setDataLoaded] = useState(false); // every collection has delivered its first snapshot
   const [grnReports,    setGrnReports]    = useState([]); // uploaded GRN (goods received note) files per channel
   const [gradingRecords, setGradingRecords] = useState([]); // per-item quality grading entries (Grade A / Grade B / Dump split)
   const [barcodePrints, setBarcodePrints] = useState([]); // running "how many labels printed" total per article/date/platform, for the Printed badge
@@ -702,13 +705,16 @@ export default function AdminPanel() {
       setDbReady(true);
     })();
 
-    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','grnReports','gradingRecords','barcodeFormats','barcodePrints','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances','staffPayroll'];
-    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, barcodePrints: setBarcodePrints, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances, staffPayroll: setStaffPayroll };
+    const cols = ['items','orders','purchases','recipes','roles','users','vendors','vendorLedger','placedOrders','indentBatches','crateLog','dispatchLog','stockCounts','pricingConfig','itemUnitPrice','plSnapshots','grnReports','gradingRecords','barcodeFormats','barcodePrints','salesInvoices','salesPayments','staff','staffAttendance','staffAdvances','staffPayroll'];
+    const setters = { items: setItems, orders: setOrders, purchases: setPurchases, recipes: setRecipes, roles: setRoles, users: setUsers, vendors: setVendors, vendorLedger: setVendorLedger, placedOrders: setPlacedOrders, indentBatches: setIndentBatches, crateLog: setCrateLog, dispatchLog: setDispatchLog, stockCounts: setStockCounts, pricingConfig: setPricingConfig, itemUnitPrice: setItemPrices, plSnapshots: setPlSnapshots, grnReports: setGrnReports, gradingRecords: setGradingRecords, barcodeFormats: setBarcodeFormats, barcodePrints: setBarcodePrints, salesInvoices: setSalesInvoices, salesPayments: setSalesPayments, staff: setStaff, staffAttendance: setStaffAttendance, staffAdvances: setStaffAdvances, staffPayroll: setStaffPayroll };
 
+    const loadedCols = new Set();
     const unsubs = cols.map((col) =>
       onSnapshot(collection(db, col), (snap) => {
         const data = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
         setters[col](data);
+        loadedCols.add(col);
+        if (loadedCols.size === cols.length) setDataLoaded(true);
       })
     );
 
@@ -801,6 +807,15 @@ export default function AdminPanel() {
   const fbUpdate = (col, id, patch)  => updateDoc(doc(db, col, id), patch);
   const fbDelete = (col, id)         => deleteDoc(doc(db, col, id));
   const fbSetDoc = (col, id, obj)    => setDoc(doc(db, col, id), obj);
+
+  // Unit prices (entered on the Purchase page) behave like 1-unit purchases for pricing only.
+  const pricingPurchases = useMemo(
+    () => [...purchases.filter((p) => (p.city || CITIES[0]) === effectiveCity), ...itemPricesAsPurchases(itemPrices.filter((r) => (r.city || CITIES[0]) === effectiveCity))],
+    [purchases, itemPrices, effectiveCity]
+  );
+  // P&L cost freeze: at 5:00 PM on a batch's supply date its per-article cost is written once and then never moves.
+  useBatchCostFreeze(dataLoaded, { indentBatches, orders, items, purchases, itemPrices, pricingConfig, recipes }, plSnapshots, (snap) => fbSetDoc('plSnapshots', snap.id, snap));
+  const plSnapshotsById = useMemo(() => { const m = {}; plSnapshots.forEach((s) => { m[s.id] = s; }); return m; }, [plSnapshots]);
 
   // ── Items ───────────────────────────────────────────────
   const addItem      = (item) => fbSetDoc('items', item.id, { ...item, city: effectiveCity });
@@ -1348,12 +1363,14 @@ export default function AdminPanel() {
           )}
           {tab === 'purchase' && <PurchasePanel purchases={cityPurchases} orders={cityOrders} items={cityItems} allItems={items} recipes={recipes} vendors={cityVendors} vendorLedger={cityVendorLedger} totalSpend={totalSpend} stockCounts={cityStockCounts} indentBatches={cityIndentBatches} onAdd={addPurchase} onAddLedgerEntry={addLedgerEntry} onSavePlacedOrder={savePlacedOrder} onDeleteOldPurchases={removePurchasesByIds} onResetPurchaseNeeds={excludeOldOrdersFromPurchase} onRestoreExcluded={restoreExcludedOrders} />}
           {tab === 'stockcount' && <StockCountPanel items={cityItems} stockCounts={cityStockCounts} purchases={cityPurchases} dispatchLog={cityDispatchLog} onRecord={recordStockCount} onReset={resetStockCounts} />}
-          {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} purchases={cityPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} recipes={recipes} />}
+          {tab === 'pricing' && <PricingPanel orders={cityOrders} items={cityItems} allItems={items} purchases={pricingPurchases} pricingConfig={pricingConfig} city={effectiveCity} onUpdate={updatePricingConfig} recipes={recipes} />}
           {tab === 'sales' && (
             <SalesPanel
               items={cityItems}
+              allItems={items}
+              plSnapshots={plSnapshotsById}
               orders={cityOrders}
-              purchases={cityPurchases}
+              purchases={pricingPurchases}
               pricingConfig={pricingConfig}
               dispatchLog={cityDispatchLog}
               grnReports={cityGrnReports}
@@ -5599,23 +5616,50 @@ function computeFinalPrice(basePrice, config) {
   return Math.round((graded * (1 + vendorMarginPercent / 100) + packaging + labour + transportation) * 100) / 100;
 }
 
-function buildLatestUnitPriceByItem(purchases) {
+// ── Unit price (entered on the Purchase page) + as-of pricing + P&L freeze ──
+// localStamp: local wall-clock 'YYYY-MM-DDTHH:mm:ss' (sorts correctly as a string and
+// compares against purchase dates, which are local 'YYYY-MM-DD').
+function localStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+// A batch's cost is frozen at this time on its supply (fulfilment) date.
+const PL_FREEZE_TIME = '17:00:00';
+
+// Unit price records behave like a 1-unit purchase for pricing purposes only.
+// They are merged into the list handed to the pricing functions and never touch
+// the real purchases / vendor ledger.
+function itemPricesAsPurchases(itemPrices) {
+  return (itemPrices || [])
+    .filter((r) => Number(r.unitPrice) > 0)
+    .map((r) => ({ type: 'unitprice', itemId: r.itemId || null, item: r.itemName || '', qty: 1, cost: Number(r.unitPrice), date: r.date || String(r.at || '').slice(0, 10), at: r.at || '', city: r.city }));
+}
+
+function pickPriceInfo(latest, itemId, name) {
+  const a = itemId ? latest.byId[itemId] : null;
+  const b = name ? latest.byName[String(name).trim().toLowerCase()] : null;
+  return !a ? b : (!b ? a : (a.date >= b.date ? a : b));
+}
+
+// asOf ({ date, stamp }) ignores anything entered after that moment — used to rebuild the
+// prices that were in force at the P&L freeze time of a given supply day.
+function buildLatestUnitPriceByItem(purchases, asOf) {
   // Two maps, not one — an order created before itemId was tracked only has a
   // name to look up by, so a *newer* purchase (which does carry itemId) must
-  // still be reachable through its name. Every purchase that has a name is
-  // recorded in byName regardless of whether it also has an itemId, so the
-  // two maps independently reflect the true latest purchase either way could
-  // find; buildPricingArticles then takes whichever of the two is newer.
-  // The name key is normalized (trimmed, lowercased) since it's a fallback for
-  // when itemId isn't available — a stray case or whitespace difference
-  // between how an order and a purchase recorded the same item's name
-  // shouldn't silently break the match the way an exact-string key would.
+  // still be reachable through its name. The name key is normalized (trimmed,
+  // lowercased). The newest entry wins; on the same day a unit price entered on the
+  // Purchase page (it carries a time) beats a time-less vendor purchase.
   const byId = {};
   const byName = {};
   purchases
     .filter((p) => p.type !== 'requirement' && p.qty > 0)
     .forEach((p) => {
-      const entry = { date: p.date || '', unitPrice: p.cost / p.qty };
+      if (p.type === 'unitprice' && !(p.cost > 0)) return;
+      if (asOf) {
+        if (p.at) { if (p.at > asOf.stamp) return; } else if ((p.date || '') > asOf.date) return;
+      }
+      const entry = { date: p.at || p.date || '', unitPrice: p.cost / p.qty, src: p.type === 'unitprice' ? 'unitprice' : 'purchase' };
       if (p.itemId) {
         if (!byId[p.itemId] || entry.date >= byId[p.itemId].date) byId[p.itemId] = entry;
       }
@@ -5628,9 +5672,7 @@ function buildLatestUnitPriceByItem(purchases) {
 }
 
 // Resolves an item by its channel alias's EAN/code — used when an order's own
-// itemId is missing (an older order predating that field), so the fallback is
-// still an unambiguous identifier chain (order's EAN/code -> item's alias ->
-// item) rather than a fragile match on the product's display name.
+// itemId is missing (an older order predating that field).
 function resolveItemIdByChannelCode(items, channel, ean, code) {
   const target = (ean || code || '').toString().trim().toLowerCase();
   if (!target) return null;
@@ -5642,30 +5684,99 @@ function resolveItemIdByChannelCode(items, channel, ean, code) {
   return null;
 }
 
-// A Cut & Process item (e.g. "Cauliflower Florets") is never itself bought from a
-// vendor — only its raw ingredients are (e.g. whole Cauliflower) — so its cost has
-// to come from its recipe rather than from a direct purchase record. This sums
-// each ingredient's own latest purchase price (kg or piece, matching how recipe
-// quantities are normalized) times the quantity the recipe uses per one output
-// unit. Returns null (rather than a partial total) if the item has no recipe, or
-// if any ingredient has never been purchased — a partial sum would understate the
-// true cost and look like a real price rather than an incomplete one.
-function computeRecipeUnitCost(item, recipes, items, latestUnitPriceByItem) {
-  if (!item) return null;
-  const recipe = recipes.find((r) => r.outputItemId === item.id);
-  if (!recipe || !recipe.ingredients?.length) return null;
+// A Cut & Process item (e.g. "Cauliflower Florets") is never bought from a vendor — only its
+// raw ingredients are — so its cost comes from its recipe: each ingredient's latest unit price
+// (a nested CUT ingredient is costed from its own recipe) times the quantity the recipe uses
+// per one output unit. Returns null (never a partial total) when there is no recipe or any
+// ingredient has no price yet. Recipes are shared across cities while items are per-city, so
+// the recipe is found by output item id first, then by name.
+function computeRecipeUnitCost(item, recipes, items, latest, allItems, depth) {
+  const d = depth || 0;
+  if (!item || d > 4) return null;
+  const nk = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9ऀ-ॿ]+/g, '');
+  const loose = (s) => nk(String(s || '').replace(/\([^)]*\)/g, ''));
+  const byId = {};
+  (allItems || []).forEach((it) => { byId[it.id] = it; });
+  (items || []).forEach((it) => { byId[it.id] = it; });
+  const isCut = item.category === 'CUT';
+  let cands = (recipes || []).filter((r) => r.outputItemId === item.id);
+  if (cands.length === 0) {
+    cands = (recipes || []).filter((r) => {
+      const out = byId[r.outputItemId];
+      const names = [out && out.name, r.name];
+      return names.some((n) => nk(n) && nk(n) === nk(item.name)) || (isCut && names.some((n) => loose(n) && loose(n) === loose(item.name)));
+    });
+  }
+  // a recipe that lists the item itself as an ingredient can never cost it
+  cands = cands.filter((r) => (r.ingredients || []).length > 0 && !(r.ingredients || []).some((ing) => byId[ing.itemId] && nk(byId[ing.itemId].name) === nk(item.name)));
+  const recipe = cands[0];
+  if (!recipe) return null;
   let total = 0;
   for (const ing of recipe.ingredients) {
-    const ingItem = items.find((it) => it.id === ing.itemId);
-    const byId = ing.itemId ? latestUnitPriceByItem.byId[ing.itemId] : null;
-    const byName = ingItem ? latestUnitPriceByItem.byName[ingItem.name.trim().toLowerCase()] : null;
-    const info = !byId ? byName : (!byName ? byId : (byId.date >= byName.date ? byId : byName));
-    if (!info) return null; // this ingredient has never been purchased - can't give a complete cost yet
+    const ingItem = byId[ing.itemId];
+    if (!ingItem) return null;
+    const info = pickPriceInfo(latest, ingItem.id, ingItem.name);
+    let unitPrice = info ? info.unitPrice : null;
+    if (unitPrice == null) unitPrice = computeRecipeUnitCost(ingItem, recipes, items, latest, allItems, d + 1);
+    if (unitPrice == null) return null; // this ingredient has no price yet - can't give a complete cost
     const normalized = normalizeIngredientQty(ing.qtyPerUnit, ing.unit);
-    total += normalized.value * info.unitPrice;
+    total += normalized.value * unitPrice;
   }
   return Math.round(total * 100) / 100;
 }
+
+// ── P&L cost freeze ──
+const batchSupplyDate = (b, orders) => (orders.find((o) => o.batchId === b.id && o.fulfilmentDate) || {}).fulfilmentDate || '';
+
+// Rebuilds one batch's per-order final price per pack using only prices that were entered by
+// the freeze time of its supply date (the packaging/labour/etc. config is the saved one).
+function computeBatchFreeze(b, ctx) {
+  const date = batchSupplyDate(b, ctx.orders);
+  const bCity = b.city || CITIES[0];
+  const inCity = (x) => (x.city || CITIES[0]) === bCity;
+  const cOrders = ctx.orders.filter(inCity);
+  const cItems = ctx.items.filter(inCity);
+  const cPurch = [...ctx.purchases.filter(inCity), ...itemPricesAsPurchases(ctx.itemPrices.filter(inCity))];
+  const configByKey = {};
+  ctx.pricingConfig.forEach((c) => { configByKey[c.id] = c; });
+  const asOf = { date, stamp: `${date}T${PL_FREEZE_TIME}` };
+  const arts = buildPricingArticles(cOrders, cItems, cPurch, bCity, configByKey, ctx.recipes, ctx.items, asOf);
+  const byKey = {};
+  arts.forEach((a) => { byKey[a.key] = a; });
+  arts.forEach((a) => (a.altKeys || []).forEach((k) => { if (!byKey[k]) byKey[k] = a; }));
+  const costs = computeBatchArticleCosts(b, cOrders, byKey, configByKey);
+  const prices = {};
+  costs.rows.forEach((r) => { prices[r.orderId] = r.finalPricePerPack == null ? null : r.finalPricePerPack; });
+  return { snap: { id: b.id, batchId: b.id, city: bCity, supplyDate: date, cutoff: asOf.stamp, takenAt: localStamp(), prices }, pricedCount: costs.pricedCount };
+}
+
+// Writes each batch's frozen cost once its freeze time has passed (checked every minute while
+// the app is open), but only after every collection has loaded so a half-loaded app can never
+// freeze wrong numbers.
+function useBatchCostFreeze(ready, ctx, plSnapshots, writeSnapshot) {
+  const doneRef = useRef(new Set());
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((x) => x + 1), 60000);
+    return () => clearInterval(t);
+  }, []);
+  const { indentBatches, orders, items, purchases, itemPrices, pricingConfig, recipes } = ctx;
+  useEffect(() => {
+    if (!ready) return;
+    const now = localStamp();
+    const have = new Set(plSnapshots.map((s) => s.id));
+    indentBatches.filter((b) => !b.isAdvance).forEach((b) => {
+      if (have.has(b.id) || doneRef.current.has(b.id)) return;
+      const date = batchSupplyDate(b, orders);
+      if (!date || now < `${date}T${PL_FREEZE_TIME}`) return;
+      doneRef.current.add(b.id);
+      const { snap, pricedCount } = computeBatchFreeze(b, { orders, items, purchases, itemPrices, pricingConfig, recipes });
+      if (pricedCount > 0) writeSnapshot(snap);
+    });
+  }, [ready, tick, indentBatches, orders, items, purchases, itemPrices, pricingConfig, recipes, plSnapshots]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+
 
 // A handful of composite keys built below embed a raw item/product name and
 // are then used directly as a Firestore document id (packingProgress,
@@ -5755,8 +5866,8 @@ function buildArticleKeyer(pricedOrders, city) {
 // Shared by the Pricing tab and the Profit & Loss tab so both agree on cost.
 // The key is prefixed with city so that two cities selling the same product/platform/pack
 // combo never share the same pricing config (grading %, margins, etc. stay per-city).
-function buildPricingArticles(orders, items, purchases, city, configByKey, recipes) {
-  const latestUnitPriceByItem = buildLatestUnitPriceByItem(purchases);
+function buildPricingArticles(orders, items, purchases, city, configByKey, recipes, allItems, asOf) {
+  const latestUnitPriceByItem = buildLatestUnitPriceByItem(purchases, asOf);
   const map = {};
   const pricedOrders = orders.filter((o) => o.packSize && o.packUnit);
   const { keyFor, ownKeyFor, stampOf } = buildArticleKeyer(pricedOrders, city);
@@ -5785,16 +5896,16 @@ function buildPricingArticles(orders, items, purchases, city, configByKey, recip
       // item's channel alias — only when neither is available does name matching
       // (case/whitespace-insensitive) become the last resort.
       const resolvedItemId = o.itemId || resolveItemIdByChannelCode(items, o.platform, o.rawEan, o.rawCode);
-      const byIdInfo = resolvedItemId ? latestUnitPriceByItem.byId[resolvedItemId] : null;
-      const byNameInfo = latestUnitPriceByItem.byName[o.product?.trim().toLowerCase() || ''];
-      const unitPriceInfo = !byIdInfo ? byNameInfo : (!byNameInfo ? byIdInfo : (byIdInfo.date >= byNameInfo.date ? byIdInfo : byNameInfo));
-      // A Cut & Process item is never purchased directly, so when no purchase-based
-      // price exists at all, fall back to what its own recipe says it costs to make.
-      const recipeUnitCost = unitPriceInfo ? null : computeRecipeUnitCost(item, recipes || [], items, latestUnitPriceByItem);
-      const autoBasePrice = unitPriceInfo
-        ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100
-        : (recipeUnitCost != null ? Math.round(recipeUnitCost * o.packSize * 100) / 100 : null);
-      const autoBasePriceSource = unitPriceInfo ? 'purchase' : (recipeUnitCost != null ? 'recipe' : null);
+      const unitPriceInfo = pickPriceInfo(latestUnitPriceByItem, resolvedItemId, o.product);
+      // A Cut & Process item is never bought directly: its price always comes from its recipe's
+      // ingredient prices when that can be worked out completely (otherwise any purchase price
+      // is used, and with none the price stays empty).
+      const isCutItem = item?.category === 'CUT';
+      const recipeUnitCost = (isCutItem || !unitPriceInfo) ? computeRecipeUnitCost(item, recipes || [], items, latestUnitPriceByItem, allItems) : null;
+      const autoBasePrice = recipeUnitCost != null
+        ? Math.round(recipeUnitCost * o.packSize * 100) / 100
+        : (unitPriceInfo ? Math.round(unitPriceInfo.unitPrice * o.packSize * 100) / 100 : null);
+      const autoBasePriceSource = recipeUnitCost != null ? 'recipe' : (unitPriceInfo ? unitPriceInfo.src : null);
       // A base price fetched from the latest purchase is the default — but a specific
       // article's config can carry a manual override (e.g. before any purchase exists yet,
       // or to correct a one-off odd purchase price) which always wins when set.
@@ -5831,7 +5942,7 @@ function buildPricingArticles(orders, items, purchases, city, configByKey, recip
 // batch's total climb from "day one" partial toward a complete figure as purchases happen).
 // Quantity marked short at packing time is subtracted from the pack count before costing
 // it, so a shortfall we never actually bought or sent out doesn't get counted as spend.
-function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
+function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey, snapshot) {
   const batchOrders = orders.filter((o) => o.batchId === batch.id && !o.isAdvance);
   const batchCity = batch.city || CITIES[0];
   // Must reproduce the exact same keys buildPricingArticles assigned these same orders
@@ -5845,7 +5956,10 @@ function computeBatchArticleCosts(batch, orders, articlesByKey, configByKey) {
     const packSize = Number(o.packSize) || 1;
     const shortPacks = Math.min(Number(o.packQty) || 0, (Number(o.shortQty) || 0) / packSize);
     const effectivePacks = Math.max(0, Math.round(((Number(o.packQty) || 0) - shortPacks) * 100) / 100);
-    const finalPricePerPack = article ? computeFinalPrice(article.basePrice, configByKey[key] || configByKey[article.legacyKey] || configByKey[legacyKey]) : null;
+    // Once a batch's cost is frozen (snapshot taken at its freeze time) the frozen per-pack price is used,
+    // so later price edits never move that batch's P&L. An order that had no price at freeze time stays live.
+    const frozenPrice = snapshot && snapshot.prices && snapshot.prices[o.id] != null ? Number(snapshot.prices[o.id]) : null;
+    const finalPricePerPack = frozenPrice != null ? frozenPrice : (article ? computeFinalPrice(article.basePrice, configByKey[key] || configByKey[article.legacyKey] || configByKey[legacyKey]) : null);
     const cost = finalPricePerPack == null ? null : Math.round(finalPricePerPack * effectivePacks * 100) / 100;
     return {
       orderId: o.id,
@@ -5981,7 +6095,7 @@ function PricingRow({ article, config, onUpdate }) {
             <button onClick={resetBasePrice} style={{ background: 'none', border: 'none', color: LEAF, fontWeight: 700, fontSize: 10, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>use purchase price</button>
           </p>
         ) : (
-          <p style={{ margin: '3px 0 0', fontSize: 10, color: MUTED }}>{article.autoBasePrice == null ? 'No purchase yet' : (article.autoBasePriceSource === 'recipe' ? 'From recipe (ingredient cost)' : 'From latest purchase')}</p>
+          <p style={{ margin: '3px 0 0', fontSize: 10, color: MUTED }}>{article.autoBasePrice == null ? 'No purchase yet' : (article.autoBasePriceSource === 'recipe' ? 'From recipe (ingredient cost)' : (article.autoBasePriceSource === 'unitprice' ? 'From unit price (Purchase page)' : 'From latest purchase'))}</p>
         )}
       </Td>
       <Td>{cellInput(grading, setGrading, 'gradingPercent')}</Td>
@@ -6024,7 +6138,7 @@ function downloadPricingSheet(rows) {
   URL.revokeObjectURL(url);
 }
 
-function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate, recipes }) {
+function PricingPanel({ orders, items, allItems, purchases, pricingConfig, city, onUpdate, recipes }) {
   const [search, setSearch] = useState('');
   const [channelFilter, setChannelFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
@@ -6035,7 +6149,7 @@ function PricingPanel({ orders, items, purchases, pricingConfig, city, onUpdate,
     return map;
   }, [pricingConfig]);
 
-  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes), [orders, items, purchases, city, configByKey, recipes]);
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes, allItems), [orders, items, purchases, city, configByKey, recipes, allItems]);
 
   const categoriesPresent = useMemo(() => ['ALL', ...Array.from(new Set(articles.map((a) => a.category).filter(Boolean)))], [articles]);
 
@@ -8999,18 +9113,18 @@ function grnValueForBatch(batchId, grnReports, items, articlesByKey, configByKey
   return { value: Math.round(value * 100) / 100, pricedRows, unpricedRows };
 }
 
-function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onDeleteGrn, onUpdateIndentBatch, recipes }) {
+function SalesPanel({ items, allItems, plSnapshots, orders, purchases, pricingConfig, dispatchLog, grnReports, indentBatches, salesInvoices, salesPayments, city, onSaveInvoice, onDeleteInvoice, onSavePayment, onDeletePayment, onUploadGrn, onDeleteGrn, onUpdateIndentBatch, recipes }) {
   const [view, setView] = useState('overview');
   const [openBatchId, setOpenBatchId] = useState(null);
   const configByKey = useMemo(() => { const m = {}; pricingConfig.forEach((x) => { m[x.id] = x; }); return m; }, [pricingConfig]);
-  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes), [orders, items, purchases, city, configByKey, recipes]);
+  const articles = useMemo(() => buildPricingArticles(orders, items, purchases, city, configByKey, recipes, allItems), [orders, items, purchases, city, configByKey, recipes, allItems]);
   const articlesByKey = useMemo(() => { const m = {}; articles.forEach((a) => { m[a.key] = a; }); articles.forEach((a) => (a.altKeys || []).forEach((k) => { if (!m[k]) m[k] = a; })); return m; }, [articles]);
 
   // Advance indents are a buying heads-up only — the channel fixes their real
   // fulfilment date (and issues the real indent) later, so counting them here
   // would double-count the same goods in Sales, P&L and receivables.
   const batchFinancials = useMemo(() => indentBatches.filter((b) => !b.isAdvance).map((b) => {
-    const costs = computeBatchArticleCosts(b, orders, articlesByKey, configByKey);
+    const costs = computeBatchArticleCosts(b, orders, articlesByKey, configByKey, (plSnapshots || {})[b.id]);
     const grn = grnValueForBatch(b.id, grnReports, items, articlesByKey, configByKey, city, b.platform);
     // Fulfilment date lives on each order (set once, at indent-upload time), not
     // on the batch document itself — every order in one indent shares the same
@@ -9043,7 +9157,7 @@ function SalesPanel({ items, orders, purchases, pricingConfig, dispatchLog, grnR
       netProfit: grn.value > 0 ? Math.round((grn.value - costs.totalCost) * 100) / 100 : null,
       invoice: salesInvoices.find((inv) => (inv.batchIds || []).includes(b.id)),
     };
-  }), [indentBatches, orders, articlesByKey, configByKey, city, grnReports, salesInvoices, items]);
+  }), [indentBatches, orders, articlesByKey, configByKey, city, grnReports, salesInvoices, items, plSnapshots]);
 
   const openBatch = openBatchId ? batchFinancials.find((bf) => bf.batch.id === openBatchId) : null;
   if (openBatch) {
