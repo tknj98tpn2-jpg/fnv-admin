@@ -6019,7 +6019,7 @@ function fillRateColor(rate) {
   return TOMATO;
 }
 
-function PricingRow({ article, config, onUpdate }) {
+function PricingRow({ article, config, onUpdate, selected, onToggleSelect }) {
   const [grading, setGrading] = useState(String(config?.gradingPercent ?? 0));
   const [vendorMargin, setVendorMargin] = useState(String(config?.vendorMarginPercent ?? 0));
   const [packaging, setPackaging] = useState(String(config?.packaging ?? 0));
@@ -6073,7 +6073,8 @@ function PricingRow({ article, config, onUpdate }) {
   );
 
   return (
-    <tr>
+    <tr style={{ background: selected ? '#F3F8EC' : 'transparent' }}>
+      <Td><input type="checkbox" checked={!!selected} onChange={onToggleSelect} /></Td>
       <Td style={{ fontWeight: 700 }}>{article.articleName}</Td>
       <Td>{article.code || <span style={{ color: MUTED }}>—</span>}</Td>
       <Td>{article.rawUnit || `${article.packSize}${article.packUnit}/pack`}</Td>
@@ -6142,6 +6143,9 @@ function PricingPanel({ orders, items, allItems, purchases, pricingConfig, city,
   const [search, setSearch] = useState('');
   const [channelFilter, setChannelFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [selectedKeys, setSelectedKeys] = useState(() => new Set());
+  const [bulkMargin, setBulkMargin] = useState('');
+  const [bulkDone, setBulkDone] = useState('');
 
   const configByKey = useMemo(() => {
     const map = {};
@@ -6157,6 +6161,26 @@ function PricingPanel({ orders, items, allItems, purchases, pricingConfig, city,
     .filter((a) => !search.trim() || a.articleName.toLowerCase().includes(search.trim().toLowerCase()))
     .filter((a) => channelFilter === 'ALL' || a.platform === channelFilter)
     .filter((a) => categoryFilter === 'ALL' || a.category === categoryFilter);
+
+  const toggleKey = (key) => setSelectedKeys((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  const allFilteredSelected = filteredArticles.length > 0 && filteredArticles.every((a) => selectedKeys.has(a.key));
+  const toggleAllFiltered = () => setSelectedKeys((prev) => {
+    const n = new Set(prev);
+    if (allFilteredSelected) filteredArticles.forEach((a) => n.delete(a.key)); else filteredArticles.forEach((a) => n.add(a.key));
+    return n;
+  });
+  const selectedArticles = articles.filter((a) => selectedKeys.has(a.key));
+  const bulkValid = bulkMargin.trim() !== '' && Number.isFinite(Number(bulkMargin)) && Number(bulkMargin) >= 0;
+  // Sets ONLY the vendor margin % on each selected article — every other saved value stays as it is.
+  const applyBulkMargin = () => {
+    if (!bulkValid || selectedArticles.length === 0) return;
+    const v = Number(bulkMargin);
+    selectedArticles.forEach((a) => onUpdate(a.key, { vendorMarginPercent: v }, a.legacyKey));
+    setBulkDone(`Margin ${v}% applied to ${selectedArticles.length} article${selectedArticles.length !== 1 ? 's' : ''}`);
+    setSelectedKeys(new Set());
+    setBulkMargin('');
+    setTimeout(() => setBulkDone(''), 4000);
+  };
 
   const rowsForExport = filteredArticles.map((a) => {
     const c = configByKey[a.key] || configByKey[a.legacyKey];
@@ -6215,19 +6239,46 @@ function PricingPanel({ orders, items, allItems, purchases, pricingConfig, city,
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', background: selectedArticles.length > 0 ? '#EEF5E6' : '#F7F5EE', border: `1px solid ${selectedArticles.length > 0 ? LEAF : LINE}`, borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>MARGIN % (BULK)</p>
+          <input
+            type="number"
+            placeholder="e.g. 8"
+            value={bulkMargin}
+            onChange={(e) => setBulkMargin(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0, width: 110 }}
+          />
+        </div>
+        <button
+          onClick={applyBulkMargin}
+          disabled={!bulkValid || selectedArticles.length === 0}
+          style={{ background: bulkValid && selectedArticles.length > 0 ? LEAF : LINE, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: bulkValid && selectedArticles.length > 0 ? 'pointer' : 'default' }}
+        >
+          Save margin to {selectedArticles.length} selected
+        </button>
+        <button onClick={toggleAllFiltered} style={{ background: '#fff', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          {allFilteredSelected ? 'Unselect shown' : `Select all shown (${filteredArticles.length})`}
+        </button>
+        {selectedArticles.length > 0 && (
+          <button onClick={() => setSelectedKeys(new Set())} style={{ background: 'none', color: MUTED, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '9px 4px' }}>Clear selection</button>
+        )}
+        <span style={{ fontSize: 12, color: bulkDone ? LEAF : MUTED, fontWeight: 700, paddingBottom: 10 }}>{bulkDone || (selectedArticles.length === 0 ? 'Tick articles below, enter a margin %, then save' : `${selectedArticles.length} selected`)}</span>
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            <Th>Product name</Th><Th>Channel code (SKU)</Th><Th>UOM</Th><Th>Base price</Th><Th>Grading %</Th><Th>Vendor margin %</Th><Th>Packaging</Th><Th>Labour</Th><Th>Transportation</Th><Th>Final price</Th>
+            <Th><input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} title="Select all shown" /></Th><Th>Product name</Th><Th>Channel code (SKU)</Th><Th>UOM</Th><Th>Base price</Th><Th>Grading %</Th><Th>Vendor margin %</Th><Th>Packaging</Th><Th>Labour</Th><Th>Transportation</Th><Th>Final price</Th>
           </tr>
         </thead>
         <tbody>
           {filteredArticles.map((a) => (
-            <PricingRow key={a.key} article={a} config={configByKey[a.key] || configByKey[a.legacyKey]} onUpdate={onUpdate} />
+            <PricingRow key={a.key} article={a} config={configByKey[a.key] || configByKey[a.legacyKey]} onUpdate={onUpdate} selected={selectedKeys.has(a.key)} onToggleSelect={() => toggleKey(a.key)} />
           ))}
           {filteredArticles.length === 0 && (
-            <tr><Td colSpan={10} style={{ textAlign: 'center', color: MUTED }}>No indent-imported articles match this filter.</Td></tr>
+            <tr><Td colSpan={11} style={{ textAlign: 'center', color: MUTED }}>No indent-imported articles match this filter.</Td></tr>
           )}
         </tbody>
       </table>
