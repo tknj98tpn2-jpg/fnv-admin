@@ -9354,11 +9354,37 @@ function SalesOverviewTab({ batchFinancials, grnReports, salesInvoices, salesPay
 }
 
 function SalesBatchesTab({ batchFinancials, onOpen }) {
-  const sorted = [...batchFinancials].sort((a, b) => String(b.batch.id).localeCompare(String(a.batch.id)));
+  const [channel, setChannel] = useState('ALL');
+  const [dateOrder, setDateOrder] = useState('desc'); // 'desc' = newest fulfilment date first
+  const sorted = batchFinancials
+    .filter((bf) => channel === 'ALL' || bf.batch.platform === channel)
+    .sort((a, b) => {
+      const da = a.fulfilmentDate || '', db2 = b.fulfilmentDate || '';
+      const c = da === db2 ? String(a.batch.id).localeCompare(String(b.batch.id)) : da.localeCompare(db2);
+      return dateOrder === 'desc' ? -c : c;
+    });
   return (
     <Panel>
       <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Indents - cost, PO and profit</p>
       <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Each indent runs the same course: cost from purchases, then the PO tells us what they will pay, then the GRN confirms what they took. Open one to see it article by article.</p>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>CHANNEL</p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {['ALL', ...PLATFORMS].map((p) => (
+              <button key={p} onClick={() => setChannel(p)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${channel === p ? LEAF : LINE}`, background: channel === p ? LEAF : '#fff', color: channel === p ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{p === 'ALL' ? 'All' : p}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: MUTED, fontWeight: 700 }}>FULFILMENT DATE</p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[['desc', 'Newest first ↓'], ['asc', 'Oldest first ↑']].map(([k, label]) => (
+              <button key={k} onClick={() => setDateOrder(k)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${dateOrder === k ? LEAF : LINE}`, background: dateOrder === k ? LEAF : '#fff', color: dateOrder === k ? '#fff' : INK, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{label}</button>
+            ))}
+          </div>
+        </div>
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><Th>Indent</Th><Th>Channel</Th><Th>Fulfilment date</Th><Th>Indent cost</Th><Th>PO value</Th><Th>PO number</Th><Th>Sales (GRN)</Th><Th /></tr></thead>
@@ -9382,7 +9408,7 @@ function SalesBatchesTab({ batchFinancials, onOpen }) {
                 </tr>
               );
             })}
-            {sorted.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>No indent batches yet.</Td></tr>}
+            {sorted.length === 0 && <tr><Td colSpan={8} style={{ color: MUTED, textAlign: 'center' }}>{batchFinancials.length === 0 ? 'No indent batches yet.' : 'No indents match this channel.'}</Td></tr>}
           </tbody>
         </table>
       </div>
