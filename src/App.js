@@ -681,6 +681,7 @@ export default function AdminPanel() {
   const [gradingRecords, setGradingRecords] = useState([]); // per-item quality grading entries (Grade A / Grade B / Dump split)
   const [barcodePrints, setBarcodePrints] = useState([]); // running "how many labels printed" total per article/date/platform, for the Printed badge
   const [packingProgress, setPackingProgress] = useState({}); // { [targetKey]: packedPacks }
+  const [indentHistory, setIndentHistory] = useState([]); // permanent copy of every uploaded indent — powers the Dashboard trends
   const [packingAssignments, setPackingAssignments] = useState({}); // { [targetKey]: { assignedTo, assignedToName } } — set from the mobile Packaging tab
   const [dbReady,       setDbReady]       = useState(false);
   const [selectedCity,  setSelectedCity]  = usePersistedState('fnv_selected_city', CITIES[0]);
@@ -750,7 +751,15 @@ export default function AdminPanel() {
       setPackingAssignments(map);
     });
 
-    return () => { unsubs.forEach((u) => u()); unsub2(); unsub2b(); unsub3(); unsub4(); };
+    // Indent history — kept apart from the main collection list (and with its
+    // own error handler) so a problem reading it can never hold up app loading.
+    const unsub5 = onSnapshot(
+      collection(db, 'indentHistory'),
+      (snap) => setIndentHistory(snap.docs.map((d) => ({ ...d.data(), id: d.id }))),
+      () => setIndentHistory([])
+    );
+
+    return () => { unsubs.forEach((u) => u()); unsub2(); unsub2b(); unsub3(); unsub4(); unsub5(); };
   }, []);
   // ──────────────────────────────────────────────────────
 
@@ -989,6 +998,9 @@ export default function AdminPanel() {
 
   // ── Indent batches ──────────────────────────────────────
   const createIndentBatch = (batch) => fbSetDoc('indentBatches', batch.id, { ...batch, city: effectiveCity });
+  // Permanent per-indent record for the Dashboard's trend charts. Never removed
+  // when orders/indents are deleted, so history survives routine clean-ups.
+  const recordIndentHistory = (h) => fbSetDoc('indentHistory', h.id, { ...h, city: effectiveCity, savedAt: new Date().toISOString() }).catch(() => {});
   const updateIndentBatch = (batchId, patch) => fbUpdate('indentBatches', batchId, patch);
   // An article is only ever fully resolved two ways: fully packed, or packed+short
   // adding up to the full target — there's no partial/unresolved state that reaches
@@ -1336,7 +1348,7 @@ export default function AdminPanel() {
 
         <div style={{ padding: isNarrow ? SPACE.lg : SPACE.xxl, flex: 1, overflowY: 'auto' }}>
           {tab === 'dashboard' && (
-            <Dashboard orders={cityOrders} purchases={cityPurchases} items={cityItems} crates={cityCrates} pendingCount={pendingCount} totalSpend={totalSpend} visibleNav={visibleNav} onGo={setTab} />
+            <Dashboard orders={cityOrders} items={cityItems} indentHistory={indentHistory.filter((h) => (h.city || CITIES[0]) === effectiveCity)} />
           )}
           {tab === 'items' && <ItemsPanel items={cityItems} onAdd={addItem} onAddBulk={addItemsBulk} onMapChannel={mapChannelField} onUpdate={updateItem} onDelete={deleteItem} />}
           {tab === 'vendors' && (
@@ -1363,6 +1375,7 @@ export default function AdminPanel() {
               onEnsureAlias={ensureAliasForCode}
               onUpdateAlias={updateAliasById}
               onCreateIndentBatch={createIndentBatch}
+              onRecordIndentHistory={recordIndentHistory}
               onToggleReleaseBatch={toggleReleaseBatch}
               onExcludeOldFromPurchase={excludeOldOrdersFromPurchase}
               onResetOldOrders={resetOldOrders}
@@ -1458,17 +1471,8 @@ export default function AdminPanel() {
   );
 }
 
-function Metric({ label, value, color }) {
-  return (
-    <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: RADIUS.lg, boxShadow: SHADOW_SM, padding: `${SPACE.md}px ${SPACE.lg}px`, flex: 1 }}>
-      <p style={{ margin: `0 0 ${SPACE.xs}px`, fontSize: 11, color: TEXT_SECONDARY, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</p>
-      <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: color || INK, fontVariantNumeric: 'tabular-nums' }}>{value}</p>
-    </div>
-  );
-}
-
-function Th({ children }) {
-  return <th style={{ textAlign: 'left', fontSize: 11, color: TEXT_SECONDARY, fontWeight: 700, padding: `0 ${SPACE.md}px ${SPACE.sm}px`, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${LINE}` }}>{children}</th>;
+function Th({ children, style }) {
+  return <th style={{ textAlign: 'left', fontSize: 11, color: TEXT_SECONDARY, fontWeight: 700, padding: `0 ${SPACE.md}px ${SPACE.sm}px`, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${LINE}`, ...style }}>{children}</th>;
 }
 function Td({ children, style }) {
   return <td style={{ padding: `${SPACE.md}px ${SPACE.md}px`, fontSize: 13, color: INK, borderTop: `1px solid ${LINE}`, ...style }}>{children}</td>;
@@ -1507,59 +1511,389 @@ function StatusPill({ status }) {
   return <span style={{ background: s.bg, color: s.color, fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999 }}>{s.label}</span>;
 }
 
-function Dashboard({ orders, purchases, items, crates, pendingCount, totalSpend, visibleNav, onGo }) {
-  const dispatchedToday = orders.filter((o) => o.status === 'dispatched').length;
-  const canSee = (key) => visibleNav.some((n) => n.key === key);
+// ── Indent trends dashboard ─────────────────────────────────────────────
+// Article-wise indent history per channel, built from:
+//   • indentHistory docs — a permanent copy of every uploaded indent, kept
+//     even when its orders are later deleted (orders get cleared regularly);
+//   • any current orders whose indent pre-dates that history (so older
+//     indents still in the system show up too).
+// Quantities are in the channel's own packs, exactly as the indent lists them.
+// Advance indents are buying heads-ups, not real demand, so they're skipped.
+const TREND_BASELINE_INDENTS = 7;   // "usual" = average of the previous 7 indent days
+const TREND_MOVE_PCT = 20;          // ±20% vs usual counts as rising / falling
+const TREND_DROP_PCT = 50;          // −50% or worse (or stopped) counts as a sudden drop
+
+function trendArticleKey(ean, name) {
+  const e = String(ean || '').trim();
+  return e ? `ean:${e}` : `name:${String(name || '').trim().toLowerCase()}`;
+}
+
+function buildIndentTrends(history, orders, platform, items) {
+  // date -> articleKey -> packs
+  const byDate = {};
+  const meta = {};
+  const add = (date, key, name, category, packs) => {
+    if (!date || !key || !(packs > 0)) return;
+    byDate[date] = byDate[date] || {};
+    byDate[date][key] = Math.round(((byDate[date][key] || 0) + packs) * 100) / 100;
+    const m = meta[key];
+    if (!m || date >= m.lastSeen) meta[key] = { name: name || m?.name || '', category: category || m?.category || '', lastSeen: date };
+  };
+  const historyBatchIds = new Set();
+  history.forEach((h) => {
+    if (h.platform !== platform || h.isAdvance) return;
+    historyBatchIds.add(h.batchId || h.id);
+    (h.articles || []).forEach((a) => add(h.date, a.k, a.n, a.c, Number(a.q) || 0));
+  });
+  orders.forEach((o) => {
+    if (o.platform !== platform || o.isAdvance || !o.fulfilmentDate) return;
+    if (o.batchId && historyBatchIds.has(o.batchId)) return;
+    const item = items.find((it) => it.id === o.itemId);
+    const name = o.articleName || o.product;
+    add(o.fulfilmentDate, trendArticleKey(o.rawEan, name), name, o.rawCategory || item?.category || '', Number(o.packQty) || 0);
+  });
+
+  const dates = Object.keys(byDate).sort();
+  const totals = dates.map((d) => Math.round(Object.values(byDate[d]).reduce((s, v) => s + v, 0) * 100) / 100);
+  const latestIdx = dates.length - 1;
+  const baseIdx = dates.slice(Math.max(0, latestIdx - TREND_BASELINE_INDENTS), Math.max(0, latestIdx)).map((_, i) => Math.max(0, latestIdx - TREND_BASELINE_INDENTS) + i);
+
+  const articles = Object.keys(meta).map((key) => {
+    const series = dates.map((d) => byDate[d][key] || 0);
+    const latest = latestIdx >= 0 ? series[latestIdx] : 0;
+    const prev = latestIdx >= 1 ? series[latestIdx - 1] : 0;
+    const usual = baseIdx.length ? baseIdx.reduce((s, i) => s + series[i], 0) / baseIdx.length : 0;
+    const change = latest - usual;
+    const pct = usual > 0 ? (change / usual) * 100 : (latest > 0 ? null : 0);
+    let status = 'steady';
+    if (!baseIdx.length) status = 'steady';
+    else if (usual === 0 && latest > 0) status = 'new';
+    else if (usual > 0 && (latest === 0 || pct <= -TREND_DROP_PCT)) status = 'drop';
+    else if (pct !== null && pct <= -TREND_MOVE_PCT && Math.abs(change) >= 1) status = 'falling';
+    else if (pct !== null && pct >= TREND_MOVE_PCT && Math.abs(change) >= 1) status = 'rising';
+    return { key, ...meta[key], series, latest, prev, usual: Math.round(usual * 10) / 10, change: Math.round(change * 10) / 10, pct, status };
+  }).filter((a) => a.series.some((v) => v > 0));
+
+  const latestTotal = latestIdx >= 0 ? totals[latestIdx] : 0;
+  const usualTotal = baseIdx.length ? baseIdx.reduce((s, i) => s + totals[i], 0) / baseIdx.length : 0;
+  return { dates, totals, articles, latestDate: dates[latestIdx] || '', latestTotal, usualTotal: Math.round(usualTotal * 10) / 10, hasBaseline: baseIdx.length > 0 };
+}
+
+const TREND_STATUS = {
+  rising:  { label: 'Rising',      color: LEAF,     bg: '#EAF3DE' },
+  falling: { label: 'Falling',     color: AMBER,    bg: '#FBEFDC' },
+  drop:    { label: 'Sudden drop', color: TOMATO,   bg: '#F3E7E2' },
+  new:     { label: 'New',         color: '#1B5E8C', bg: '#E6F1FB' },
+  steady:  { label: 'Steady',      color: MUTED,    bg: '#F1EFE6' },
+};
+
+const fmtTrendDate = (d) => {
+  const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return d || '';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${Number(m[3])} ${months[Number(m[2]) - 1]}`;
+};
+const fmtPct = (p) => (p === null || p === undefined ? '—' : `${p > 0 ? '+' : ''}${Math.round(p)}%`);
+
+function TrendSparkline({ series, color, width = 120, height = 30 }) {
+  if (!series.length) return null;
+  const max = Math.max(1, ...series);
+  const step = series.length > 1 ? width / (series.length - 1) : 0;
+  const pts = series.map((v, i) => [series.length > 1 ? i * step : width / 2, height - 3 - (v / max) * (height - 6)]);
+  const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const [lx, ly] = pts[pts.length - 1];
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }} aria-hidden="true">
+      <path d={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={lx} cy={ly} r="2.8" fill={color} />
+    </svg>
+  );
+}
+
+// Bar per indent day with a dashed "usual" line; hover a bar for its value.
+function TrendBarChart({ dates, values, usual, color = LEAF, height = 200, highlightLast = true }) {
+  const [hover, setHover] = useState(null);
+  // Draw at the container's real width so labels stay readable on a phone.
+  const boxRef = useRef(null);
+  const [boxW, setBoxW] = useState(720);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return undefined;
+    const measure = () => setBoxW(Math.max(260, Math.round(el.getBoundingClientRect().width) || 720));
+    measure();
+    if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure); }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const W = boxW;
+  const H = boxW < 500 ? Math.round(height * 0.85) : height;
+  const padL = 36, padR = 8, padT = 14, padB = 26;
+  const max = Math.max(1, usual || 0, ...values);
+  const niceMax = (() => { const p = Math.pow(10, Math.floor(Math.log10(max))); return Math.ceil(max / p) * p; })();
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const n = values.length;
+  const slot = n ? innerW / n : innerW;
+  const barW = Math.max(3, Math.min(34, slot * 0.68));
+  const y = (v) => padT + innerH - (v / niceMax) * innerH;
+  const ticks = [0, niceMax / 2, niceMax];
+  const labelEvery = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(innerW / 64))));
+  return (
+    <div ref={boxRef} style={{ position: 'relative', width: '100%' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Indent per day">
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke={LINE} strokeWidth="1" />
+            <text x={padL - 6} y={y(t) + 4} textAnchor="end" fontSize="10" fill={MUTED}>{Math.round(t)}</text>
+          </g>
+        ))}
+        {values.map((v, i) => {
+          const x = padL + i * slot + (slot - barW) / 2;
+          const isLast = highlightLast && i === n - 1;
+          return (
+            <g key={dates[i]} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onClick={() => setHover(i)}>
+              <rect x={padL + i * slot} y={padT} width={slot} height={innerH} fill="transparent" />
+              <rect x={x} y={y(v)} width={barW} height={Math.max(0, padT + innerH - y(v))} rx="3" fill={color} opacity={hover === null ? (isLast ? 1 : 0.55) : (hover === i ? 1 : 0.35)} />
+              {(i % labelEvery === 0 || i === n - 1) && (
+                <text x={padL + i * slot + slot / 2} y={H - 8} textAnchor="middle" fontSize="10" fill={isLast ? INK : MUTED} fontWeight={isLast ? 700 : 400}>{fmtTrendDate(dates[i])}</text>
+              )}
+            </g>
+          );
+        })}
+        {usual > 0 && (
+          <g>
+            <line x1={padL} x2={W - padR} y1={y(usual)} y2={y(usual)} stroke={INK} strokeWidth="1.2" strokeDasharray="5 4" opacity="0.6" />
+            <rect x={padL + 2} y={y(usual) - 15} width={62} height={13} rx="3" fill="#fff" opacity="0.85" />
+            <text x={padL + 5} y={y(usual) - 5} fontSize="10" fill={INK} opacity="0.85">usual {Math.round(usual * 10) / 10}</text>
+          </g>
+        )}
+      </svg>
+      {hover !== null && values[hover] !== undefined && (
+        <div style={{ position: 'absolute', top: 0, left: `${((padL + hover * slot + slot / 2) / W) * 100}%`, transform: 'translateX(-50%)', background: INK, color: '#fff', fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 6, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+          {fmtTrendDate(dates[hover])}: {values[hover]} packs
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrendStat({ label, value, sub, color = INK, onClick, active }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{ flex: '1 1 150px', textAlign: 'left', background: '#fff', border: `1px solid ${active ? color : LINE}`, boxShadow: active ? `0 0 0 1px ${color}` : 'none', borderRadius: RADIUS.lg, padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', minWidth: 0 }}
+    >
+      <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, color: MUTED, textTransform: 'uppercase' }}>{label}</p>
+      <p style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 800, color }}>{value}</p>
+      {sub && <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{sub}</p>}
+    </button>
+  );
+}
+
+function Dashboard({ orders, items, indentHistory = [] }) {
+  const [channel, setChannel] = usePersistedState('fnv_dash_channel', PLATFORMS[0]);
+  const activeChannel = PLATFORMS.includes(channel) ? channel : PLATFORMS[0];
+  const [range, setRange] = usePersistedState('fnv_dash_range', 14);
+  const [filter, setFilter] = useState('moving');
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('change');
+  const [openKey, setOpenKey] = useState(null);
+
+  const trends = useMemo(() => buildIndentTrends(indentHistory, orders, activeChannel, items), [indentHistory, orders, activeChannel, items]);
+  const shownFrom = Math.max(0, trends.dates.length - Number(range || 14));
+  const shownDates = trends.dates.slice(shownFrom);
+  const shownTotals = trends.totals.slice(shownFrom);
+
+  const counts = useMemo(() => {
+    const c = { rising: 0, falling: 0, drop: 0, new: 0, steady: 0 };
+    trends.articles.forEach((a) => { c[a.status] += 1; });
+    return c;
+  }, [trends]);
+
+  const totalPct = trends.usualTotal > 0 ? ((trends.latestTotal - trends.usualTotal) / trends.usualTotal) * 100 : null;
+  const drops = trends.articles.filter((a) => a.status === 'drop').sort((a, b) => a.change - b.change);
+
+  const q = search.trim().toLowerCase();
+  const rows = trends.articles
+    .filter((a) => {
+      if (q && !String(a.name).toLowerCase().includes(q)) return false;
+      if (filter === 'all') return true;
+      if (filter === 'moving') return a.status !== 'steady';
+      if (filter === 'falling') return a.status === 'falling' || a.status === 'drop';
+      return a.status === filter;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name') return String(a.name).localeCompare(String(b.name));
+      if (sortBy === 'latest') return b.latest - a.latest;
+      // biggest movers first, by % (new/stopped articles rank by absolute change)
+      const score = (x) => (x.pct === null ? 999 : Math.abs(x.pct)) * 1000 + Math.abs(x.change);
+      return score(b) - score(a);
+    });
+
+  const chipBtn = (active, color = INK) => ({
+    background: active ? color : '#fff', color: active ? '#fff' : INK, border: `1px solid ${active ? color : LINE}`,
+    borderRadius: 999, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+  });
+  const filterTabs = [
+    ['moving', `Changing (${trends.articles.length - counts.steady})`],
+    ['rising', `Rising (${counts.rising})`],
+    ['falling', `Falling (${counts.falling + counts.drop})`],
+    ['drop', `Sudden drop (${counts.drop})`],
+    ['new', `New (${counts.new})`],
+    ['all', `All (${trends.articles.length})`],
+  ];
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
-        <Metric label="Active items" value={items.length} />
-        <Metric label="Pending orders" value={pendingCount} color={AMBER} />
-        <Metric label="Dispatched" value={dispatchedToday} color={LEAF} />
-        <Metric label="Purchase spend" value={`₹${totalSpend.toLocaleString('en-IN')}`} color={TOMATO} />
-        <Metric label="Crates in stock" value={crates.crates} />
-        <Metric label="Boxes in stock" value={crates.boxes} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Recent orders</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <tbody>
-              {orders.slice(0, 5).map((o) => (
-                <tr key={o.id}>
-                  <Td style={{ borderTop: 'none' }}>{o.id}</Td>
-                  <Td style={{ borderTop: 'none' }}>{o.articleName || o.product} · {o.qty}{o.unit}</Td>
-                  <Td style={{ borderTop: 'none' }}><StatusPill status={o.status} /></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Header: channel + range */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div>
+          <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: INK }}>Indent trends — article wise</p>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>
+            {trends.latestDate ? <>Latest indent: <b style={{ color: INK }}>{fmtTrendDate(trends.latestDate)}</b> · compared with the average of the previous {TREND_BASELINE_INDENTS} indent days</> : 'No indents yet for this channel'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 4, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 999, padding: 3 }}>
+            {PLATFORMS.map((p) => (
+              <button key={p} onClick={() => { setChannel(p); setOpenKey(null); }} style={{ ...chipBtn(activeChannel === p, LEAF_DARK), border: 'none' }}>{p}</button>
+            ))}
           </div>
-          <button onClick={() => onGo('orders')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, display: canSee('orders') ? 'inline-flex' : 'none' }}>
-            View all orders →
-          </button>
-        </Panel>
-        <Panel>
-          <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>Recent purchases</p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <tbody>
-              {purchases.slice(0, 5).map((p) => (
-                <tr key={p.id}>
-                  <Td style={{ borderTop: 'none' }}>{p.item}</Td>
-                  <Td style={{ borderTop: 'none' }}>{p.supplier}</Td>
-                  <Td style={{ borderTop: 'none' }}>₹{p.cost.toLocaleString('en-IN')}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-          <button onClick={() => onGo('purchase')} style={{ marginTop: 8, background: 'none', border: 'none', color: LEAF, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, display: canSee('purchase') ? 'inline-flex' : 'none' }}>
-            View all purchases →
-          </button>
-        </Panel>
+          <select value={range} onChange={(e) => setRange(Number(e.target.value))} style={{ borderRadius: 8, border: `1px solid ${LINE}`, padding: '7px 8px', fontSize: 12, background: '#fff', color: INK }}>
+            {[7, 14, 30, 60].map((n) => <option key={n} value={n}>Last {n} indents</option>)}
+          </select>
+        </div>
       </div>
+
+      {trends.dates.length === 0 ? (
+        <Panel>
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: INK }}>No {activeChannel} indent history yet</p>
+          <p style={{ margin: '6px 0 0', fontSize: 12, color: MUTED, lineHeight: 1.6 }}>
+            Upload {activeChannel} indents from the Orders page. Every uploaded indent is saved here permanently (even if its orders are deleted later), and after a few indent days this page shows which articles are rising or falling.
+          </p>
+        </Panel>
+      ) : (
+        <>
+          {/* Summary tiles (click to filter the article list) */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+            <TrendStat
+              label={`Total indent · ${fmtTrendDate(trends.latestDate)}`}
+              value={trends.latestTotal}
+              sub={trends.hasBaseline ? <>usual {trends.usualTotal} · <b style={{ color: totalPct === null ? MUTED : totalPct >= 0 ? LEAF : TOMATO }}>{fmtPct(totalPct)}</b></> : 'need 2+ indent days to compare'}
+            />
+            <TrendStat label="Rising" value={counts.rising} color={LEAF} sub={`≥ +${TREND_MOVE_PCT}% vs usual`} onClick={() => setFilter('rising')} active={filter === 'rising'} />
+            <TrendStat label="Falling" value={counts.falling + counts.drop} color={AMBER} sub={`≤ −${TREND_MOVE_PCT}% vs usual`} onClick={() => setFilter('falling')} active={filter === 'falling'} />
+            <TrendStat label="Sudden drop" value={counts.drop} color={TOMATO} sub={`≤ −${TREND_DROP_PCT}% or stopped`} onClick={() => setFilter('drop')} active={filter === 'drop'} />
+            <TrendStat label="New articles" value={counts.new} color="#1B5E8C" sub="not in recent indents" onClick={() => setFilter('new')} active={filter === 'new'} />
+          </div>
+
+          {/* Sudden-drop alert strip */}
+          {drops.length > 0 && (
+            <div style={{ background: '#FFF6F3', border: `1px solid ${TOMATO}`, borderRadius: RADIUS.lg, padding: '12px 14px', marginBottom: 16 }}>
+              <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 800, color: TOMATO, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertCircle size={14} /> Sudden drop on {fmtTrendDate(trends.latestDate)} — {drops.length} article{drops.length === 1 ? '' : 's'}
+              </p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {drops.slice(0, 12).map((a) => (
+                  <button key={a.key} onClick={() => { setFilter('drop'); setOpenKey(a.key); }} style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 999, padding: '4px 10px', fontSize: 11, color: INK, cursor: 'pointer' }}>
+                    <b>{a.name}</b> <span style={{ color: TOMATO, fontWeight: 700 }}>{a.usual} → {a.latest}</span>
+                  </button>
+                ))}
+                {drops.length > 12 && <span style={{ fontSize: 11, color: MUTED, alignSelf: 'center' }}>+{drops.length - 12} more</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Total indent chart */}
+          <Panel style={{ marginBottom: 16 }}>
+            <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 14, color: INK }}>{activeChannel} total indent per day (packs)</p>
+            <TrendBarChart dates={shownDates} values={shownTotals} usual={trends.usualTotal} color={LEAF} />
+          </Panel>
+
+          {/* Article table */}
+          <Panel>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>Articles</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 10px', background: '#fff' }}>
+                  <Search size={13} color={MUTED} />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search article" style={{ border: 'none', outline: 'none', fontSize: 12, width: 140, background: 'transparent' }} />
+                </div>
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ borderRadius: 8, border: `1px solid ${LINE}`, padding: '7px 8px', fontSize: 12, background: '#fff', color: INK }}>
+                  <option value="change">Sort: biggest change</option>
+                  <option value="latest">Sort: latest indent</option>
+                  <option value="name">Sort: name A–Z</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              {filterTabs.map(([key, text]) => (
+                <button key={key} onClick={() => setFilter(key)} style={chipBtn(filter === key, LEAF_DARK)}>{text}</button>
+              ))}
+            </div>
+            {!trends.hasBaseline && (
+              <p style={{ margin: '0 0 10px', fontSize: 12, color: AMBER }}>Only one {activeChannel} indent day so far — rising/falling shows from the second indent day onward.</p>
+            )}
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
+                  <tr>
+                    <Th>Article</Th>
+                    <Th>Trend (last {shownDates.length})</Th>
+                    <Th style={{ textAlign: 'right' }}>Usual</Th>
+                    <Th style={{ textAlign: 'right' }}>Latest</Th>
+                    <Th style={{ textAlign: 'right' }}>Change</Th>
+                    <Th>Status</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((a) => {
+                    const st = TREND_STATUS[a.status];
+                    const isOpen = openKey === a.key;
+                    const spark = a.series.slice(shownFrom);
+                    return (
+                      <React.Fragment key={a.key}>
+                        <tr onClick={() => setOpenKey(isOpen ? null : a.key)} style={{ cursor: 'pointer', background: isOpen ? '#F6F3EA' : 'transparent' }}>
+                          <Td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <ChevronRight size={13} color={MUTED} style={{ transform: isOpen ? 'rotate(90deg)' : 'none', flexShrink: 0 }} />
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>{a.name}</div>
+                                {a.category && <div style={{ fontSize: 11, color: MUTED }}>{a.category}</div>}
+                              </div>
+                            </div>
+                          </Td>
+                          <Td><TrendSparkline series={spark} color={st.color === MUTED ? INK : st.color} /></Td>
+                          <Td style={{ textAlign: 'right', color: MUTED }}>{trends.hasBaseline ? a.usual : '—'}</Td>
+                          <Td style={{ textAlign: 'right', fontWeight: 800, color: INK }}>{a.latest}</Td>
+                          <Td style={{ textAlign: 'right', fontWeight: 700, color: a.change > 0 ? LEAF : a.change < 0 ? TOMATO : MUTED, whiteSpace: 'nowrap' }}>
+                            {trends.hasBaseline ? <>{a.change > 0 ? '▲' : a.change < 0 ? '▼' : ''} {a.pct === null ? 'new' : fmtPct(a.pct)}</> : '—'}
+                          </Td>
+                          <Td><span style={{ background: st.bg, color: st.color, fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>{st.label}</span></Td>
+                        </tr>
+                        {isOpen && (
+                          <tr>
+                            <td colSpan={6} style={{ padding: '6px 12px 16px', background: '#FBFAF6', borderBottom: `1px solid ${LINE}` }}>
+                              <p style={{ margin: '6px 0 4px', fontSize: 12, color: MUTED }}>
+                                {a.name} — indent per day (packs). Previous indent: <b style={{ color: INK }}>{a.prev}</b> · usual: <b style={{ color: INK }}>{a.usual}</b> · latest: <b style={{ color: INK }}>{a.latest}</b>
+                              </p>
+                              <TrendBarChart dates={shownDates} values={spark} usual={a.usual} color={st.color === MUTED ? LEAF : st.color} height={170} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                  {rows.length === 0 && (
+                    <tr><td colSpan={6} style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No articles match this filter.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </>
+      )}
     </div>
   );
 }
@@ -4128,7 +4462,7 @@ function OrdersListPanel({ orders, indentBatches, onDelete, onDeleteOrders }) {
   );
 }
 
-function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onToggleReleaseBatch, onExcludeOldFromPurchase, onResetOldOrders }) {
+function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddItem, onEnsureAlias, onUpdateAlias, onCreateIndentBatch, onRecordIndentHistory, onToggleReleaseBatch, onExcludeOldFromPurchase, onResetOldOrders }) {
   const [platform, setPlatform] = useState('Blinkit');
   const [product, setProduct] = useState('');
   const [qty, setQty] = useState('');
@@ -4282,6 +4616,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
     const batchId = `BATCH-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     const orderIdBase = Date.now().toString(36).toUpperCase().slice(-5);
     let orderSeq = 0;
+    const historyMap = {};
     pendingIndent.rows.forEach((r) => {
       if (!isRowReady(r) || !selectedRowKeys.has(r.key)) {
         remaining.push(r);
@@ -4329,9 +4664,27 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
         });
         compiledMap[key].qty += storeQty;
       });
+      // Indent history (Dashboard trends): this article's total packs in this indent.
+      const rowPacks = storeEntries.reduce((s, [, p]) => s + (p > 0 ? Number(p) : 0), 0);
+      if (rowPacks > 0) {
+        const hk = trendArticleKey(r.rawEan, r.rawName);
+        if (!historyMap[hk]) historyMap[hk] = { k: hk, n: r.rawName, c: r.rawCategory || '', q: 0 };
+        historyMap[hk].q = Math.round((historyMap[hk].q + rowPacks) * 100) / 100;
+      }
     });
     const compiled = Object.values(compiledMap);
     if (compiled.length > 0) {
+      if (onRecordIndentHistory && Object.keys(historyMap).length > 0) {
+        onRecordIndentHistory({
+          id: batchId,
+          batchId,
+          platform: pendingIndent.platform,
+          fileName: pendingIndent.fileName,
+          date: pendingIndent.fulfilmentDate || '',
+          isAdvance: !!pendingIndent.isAdvance,
+          articles: Object.values(historyMap),
+        });
+      }
       onCreateIndentBatch({
         id: batchId,
         platform: pendingIndent.platform,
