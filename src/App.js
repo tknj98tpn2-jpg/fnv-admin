@@ -4236,12 +4236,14 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
       ...prev,
       rows: prev.rows.map((r) => {
         if (r.key !== key) return r;
-        if (value === '__new__') {
+        // "__new__:<CATEGORY>" — the user picks the new item's category
+        // themselves; the indent's own category is never copied into Items.
+        if (String(value).startsWith('__new__:')) {
           const newItem = {
             id: `IT-${Date.now().toString(36).toUpperCase().slice(-5)}`,
             name: r.rawName,
             uom: r.unit || 'kg',
-            category: normalizeCategory(r.rawCategory),
+            category: String(value).slice('__new__:'.length),
             aliases: [{ id: newAliasId(), channel: prev.platform, code: r.rawCode || '', ean: r.rawEan || '', packSize: '', packUnit: 'kg' }],
           };
           onAddItem(newItem);
@@ -4582,7 +4584,9 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
                           {items.map((it) => (
                             <option key={it.id} value={it.id}>{it.name} ({it.id})</option>
                           ))}
-                          <option value="__new__">+ Create new item "{r.rawName}"</option>
+                          {CATEGORY_OPTIONS.map((c) => (
+                            <option key={c} value={`__new__:${c}`}>{`+ Create new item "${r.rawName}" in ${c}`}</option>
+                          ))}
                         </SmartSelect>
                       </Td>
                       <Td>
