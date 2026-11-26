@@ -1097,11 +1097,18 @@ export default function AdminPanel() {
   // (which keeps the order but stops counting it). This is permanent: the
   // batch's own PO data goes with it, and it drops out of Sales' Indents & P&L
   // list entirely, since that list is built from indentBatches.
-  const resetOldOrders = (orderIds, batchIds) => {
-    const b = writeBatch(db);
-    orderIds.forEach((id) => b.delete(doc(db, 'orders', id)));
-    batchIds.forEach((id) => b.delete(doc(db, 'indentBatches', id)));
-    b.commit();
+  // Firestore caps one write batch at 500 operations, so large deletes (e.g.
+  // "Delete all" across thousands of orders) are committed in chunks.
+  const resetOldOrders = async (orderIds, batchIds) => {
+    const refs = [
+      ...orderIds.map((id) => doc(db, 'orders', id)),
+      ...batchIds.map((id) => doc(db, 'indentBatches', id)),
+    ];
+    for (let i = 0; i < refs.length; i += 450) {
+      const b = writeBatch(db);
+      refs.slice(i, i + 450).forEach((r) => b.delete(r));
+      await b.commit();
+    }
   };
   const advanceMany   = (ids, next) => { const b = writeBatch(db); ids.forEach((id) => b.update(doc(db,'orders',id), { status: next })); b.commit(); };
   // Uploading a fresh indent means today's real requirement has moved on — an
@@ -3545,6 +3552,12 @@ const KNOWN_INDENT_HEADERS = new Set([
   'storename', 'storeid', 'subcategory', 'vendername', 'city', 'cc', 'bb', 'rr',
 ]);
 
+// True for a summary label like "Total", "Total Result", "Grand Total" or "Sum".
+function isTotalLabel(v) {
+  const t = String(v || '').toLowerCase().trim();
+  return /^(grand\s*)?total\b/.test(t) || /\btotal\s*(result|qty|quantity|indent)?$/.test(t) || t === 'sum';
+}
+
 // When there's no single qty column (e.g. Flipkart lists one column per dark
 // store), returns { "<store column header>": qty } for every leftover numeric
 // column with a positive value, or null when there is none.
@@ -3554,6 +3567,9 @@ function sumUnknownNumericColumns(rowObj, headers) {
     if (!h) return;
     const norm = h.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (KNOWN_INDENT_HEADERS.has(norm)) return;
+    // Summary columns (e.g. Flipkart's "Total Result" / "Grand Total") repeat the
+    // per-store figures — counting them would double the indent and add a fake store.
+    if (isTotalLabel(h)) return;
     const v = rowObj[h];
     if (v === '' || v === null || v === undefined) return;
     const num = Number(v);
@@ -3590,7 +3606,9 @@ function parseIndentRows(json, platform) {
       const rawStore = String(pickField(r, ['storename', 'store']) || '').trim();
       return { key: `row-${idx}-${rawName}`, rawName, rawCode, rawEan, qty, unit, rawCategory, storeQtys, rawStore };
     })
-    .filter((r) => r.rawName && r.qty > 0);
+    // Drop the summary row at the bottom of a raw indent (Flipkart's per-store
+    // totals): it has no article name/FSN/EAN, or is labelled "Total".
+    .filter((r) => r.rawName && r.qty > 0 && !isTotalLabel(r.rawName) && !isTotalLabel(r.rawCode));
 
   // Fold "one row per (article, store)" back into "one row per article" with a
   // per-store quantity map — matching the shape Flipkart's per-store-column
@@ -3703,7 +3721,7 @@ function ReleaseBatchRow({ batch: b, orders, onToggleReleaseBatch, onDeleteBatch
   );
 }
 
-function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete, defaultOpen }) {
+function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete, defaultOpen, selectable, selected, onToggleSelect }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [openArticles, setOpenArticles] = useState(() => new Set());
 
@@ -3735,9 +3753,20 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete
         onClick={() => setOpen((x) => !x)}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', cursor: 'pointer', background: open ? '#F6F3EA' : '#fff' }}
       >
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {selectable && (
+            <input
+              type="checkbox"
+              checked={!!selected}
+              onClick={(e) => e.stopPropagation()}
+              onChange={onToggleSelect}
+              style={{ width: 18, height: 18, accentColor: TOMATO, cursor: 'pointer', flexShrink: 0 }}
+            />
+          )}
+          <div>
           <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: INK }}>{label}</p>
           {subtitle && <p style={{ margin: '2px 0 0', fontSize: 11, color: MUTED }}>{subtitle}</p>}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {badge}
@@ -3807,7 +3836,19 @@ function OrderBatchGroup({ label, subtitle, badge, orders: groupOrders, onDelete
   );
 }
 
-function OrdersListPanel({ orders, indentBatches, onDelete }) {
+// Previous calendar month as a "YYYY-MM" prefix (e.g. on 26 Nov 2026 → "2026-10"),
+// plus a readable name for the confirmation text.
+function previousMonthInfo() {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const name = d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  return { prefix, name };
+}
+
+const MANUAL_GROUP_KEY = '__manual__';
+
+function OrdersListPanel({ orders, indentBatches, onDelete, onDeleteOrders }) {
   const grouped = useMemo(() => {
     const byBatch = {};
     const manual = [];
@@ -3828,9 +3869,161 @@ function OrdersListPanel({ orders, indentBatches, onDelete }) {
     return { batchGroups, manual: [...manual, ...orphaned] };
   }, [orders, indentBatches]);
 
+  // Delete menu: null (closed) | 'menu' | 'select' | 'lastMonth' | 'all'
+  const [deleteMode, setDeleteMode] = useState(null);
+  const [selectedGroups, setSelectedGroups] = useState(() => new Set());
+  const [typedConfirm, setTypedConfirm] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState('');
+
+  const closeDelete = () => { setDeleteMode(null); setSelectedGroups(new Set()); setTypedConfirm(''); };
+  const toggleGroup = (key) => setSelectedGroups((prev) => {
+    const n = new Set(prev);
+    if (n.has(key)) n.delete(key); else n.add(key);
+    return n;
+  });
+
+  const lastMonth = previousMonthInfo();
+  // An indent batch's date is its purchase date, falling back to its orders'
+  // fulfilment date; a manually added order uses its own fulfilment date.
+  const lastMonthTarget = useMemo(() => {
+    const inMonth = (d) => !!d && String(d).startsWith(lastMonth.prefix);
+    const batchIds = [];
+    const orderIds = [];
+    grouped.batchGroups.forEach(({ batch, orders: os }) => {
+      const date = batch.purchaseDate || os[0]?.fulfilmentDate || '';
+      if (inMonth(date)) { batchIds.push(batch.id); os.forEach((o) => orderIds.push(o.id)); }
+    });
+    grouped.manual.forEach((o) => { if (inMonth(o.fulfilmentDate)) orderIds.push(o.id); });
+    return { batchIds, orderIds };
+  }, [grouped, lastMonth.prefix]);
+
+  const selectedTarget = useMemo(() => {
+    const batchIds = [];
+    const orderIds = [];
+    grouped.batchGroups.forEach(({ batch, orders: os }) => {
+      if (selectedGroups.has(batch.id)) { batchIds.push(batch.id); os.forEach((o) => orderIds.push(o.id)); }
+    });
+    if (selectedGroups.has(MANUAL_GROUP_KEY)) grouped.manual.forEach((o) => orderIds.push(o.id));
+    return { batchIds, orderIds };
+  }, [grouped, selectedGroups]);
+
+  const allTarget = useMemo(() => ({
+    orderIds: orders.map((o) => o.id),
+    batchIds: grouped.batchGroups.map(({ batch }) => batch.id),
+  }), [orders, grouped]);
+
+  const runDelete = async (target) => {
+    if (!target.orderIds.length && !target.batchIds.length) return;
+    setDeleting(true);
+    setDeleteMsg('');
+    try {
+      await onDeleteOrders(target.orderIds, target.batchIds);
+      setDeleteMsg(`${target.orderIds.length} order${target.orderIds.length === 1 ? '' : 's'} deleted.`);
+      closeDelete();
+    } catch (err) {
+      setDeleteMsg('Some orders could not be deleted. Please check your internet and try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const btn = (bg, color, border) => ({ background: bg, color, border: border || 'none', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
+  const dangerBtn = (disabled) => ({ ...btn(TOMATO, '#fff'), opacity: disabled ? 0.5 : 1, cursor: disabled ? 'not-allowed' : 'pointer' });
+  const cancelBtn = btn('#fff', INK, `1px solid ${LINE}`);
+  const box = { border: `1px solid ${TOMATO}`, background: '#FFF6F3', borderRadius: 10, padding: '12px 14px', marginBottom: 12 };
+  const plural = (n) => `${n} order${n === 1 ? '' : 's'}`;
+
   return (
     <Panel>
-      <p style={{ margin: '0 0 12px', fontWeight: 700, fontSize: 14, color: INK }}>All orders ({orders.length})</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: INK }}>All orders ({orders.length})</p>
+        {orders.length > 0 && (
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => { setDeleteMsg(''); setDeleteMode(deleteMode ? null : 'menu'); setSelectedGroups(new Set()); setTypedConfirm(''); }}
+              style={{ ...btn('#fff', TOMATO, `1px solid ${TOMATO}`), display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+            {deleteMode === 'menu' && (
+              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 20, minWidth: 220, overflow: 'hidden' }}>
+                {[
+                  ['select', 'DELETE SELECTED'],
+                  ['lastMonth', 'DELETE LAST MONTH ORDERS'],
+                  ['all', 'DELETE ALL'],
+                ].map(([mode, text]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setDeleteMode(mode)}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', background: '#fff', border: 'none', borderBottom: `1px solid ${LINE}`, padding: '11px 14px', fontSize: 12, fontWeight: 700, color: TOMATO, cursor: 'pointer' }}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {deleteMsg && <p style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 700, color: deleteMsg.includes('could not') ? TOMATO : LEAF_DARK }}>{deleteMsg}</p>}
+
+      {deleteMode === 'select' && (
+        <div style={box}>
+          <p style={{ margin: '0 0 8px', fontSize: 12, color: INK }}>
+            Tick the orders below that you want to delete. <b>{selectedGroups.size}</b> selected ({plural(selectedTarget.orderIds.length)}).
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button disabled={deleting || selectedGroups.size === 0} onClick={() => runDelete(selectedTarget)} style={dangerBtn(deleting || selectedGroups.size === 0)}>
+              {deleting ? 'Deleting…' : `Delete selected (${selectedGroups.size})`}
+            </button>
+            <button onClick={closeDelete} style={cancelBtn}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {deleteMode === 'lastMonth' && (
+        <div style={box}>
+          {lastMonthTarget.orderIds.length === 0 ? (
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: INK }}>There are no orders from <b>{lastMonth.name}</b>.</p>
+          ) : (
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: INK }}>
+              This will permanently delete <b>{plural(lastMonthTarget.orderIds.length)}</b> from <b>{lastMonth.name}</b> ({lastMonthTarget.batchIds.length} indent{lastMonthTarget.batchIds.length === 1 ? '' : 's'}). Are you sure?
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {lastMonthTarget.orderIds.length > 0 && (
+              <button disabled={deleting} onClick={() => runDelete(lastMonthTarget)} style={dangerBtn(deleting)}>
+                {deleting ? 'Deleting…' : `Yes, delete ${lastMonth.name} orders`}
+              </button>
+            )}
+            <button onClick={closeDelete} style={cancelBtn}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {deleteMode === 'all' && (
+        <div style={box}>
+          <p style={{ margin: '0 0 8px', fontSize: 12, color: INK }}>
+            This will permanently delete <b>all {plural(orders.length)}</b> in this city. This cannot be undone.
+            <br />Type <b>DELETE</b> below to confirm.
+          </p>
+          <input
+            value={typedConfirm}
+            onChange={(e) => setTypedConfirm(e.target.value)}
+            placeholder="Type DELETE"
+            style={{ width: '100%', maxWidth: 220, boxSizing: 'border-box', border: `1px solid ${LINE}`, borderRadius: 8, padding: '7px 10px', fontSize: 13, marginBottom: 8 }}
+          />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button disabled={deleting || typedConfirm.trim() !== 'DELETE'} onClick={() => runDelete(allTarget)} style={dangerBtn(deleting || typedConfirm.trim() !== 'DELETE')}>
+              {deleting ? 'Deleting…' : 'Delete all orders'}
+            </button>
+            <button onClick={closeDelete} style={cancelBtn}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {grouped.batchGroups.map(({ batch, orders: groupOrders }) => (
         <OrderBatchGroup
           key={batch.id}
@@ -3843,10 +4036,21 @@ function OrdersListPanel({ orders, indentBatches, onDelete }) {
           }
           orders={groupOrders}
           onDelete={onDelete}
+          selectable={deleteMode === 'select'}
+          selected={selectedGroups.has(batch.id)}
+          onToggleSelect={() => toggleGroup(batch.id)}
         />
       ))}
       {grouped.manual.length > 0 && (
-        <OrderBatchGroup label="Manually added orders" orders={grouped.manual} onDelete={onDelete} defaultOpen={grouped.batchGroups.length === 0} />
+        <OrderBatchGroup
+          label="Manually added orders"
+          orders={grouped.manual}
+          onDelete={onDelete}
+          defaultOpen={grouped.batchGroups.length === 0}
+          selectable={deleteMode === 'select'}
+          selected={selectedGroups.has(MANUAL_GROUP_KEY)}
+          onToggleSelect={() => toggleGroup(MANUAL_GROUP_KEY)}
+        />
       )}
       {orders.length === 0 && <p style={{ textAlign: 'center', color: MUTED, fontSize: 12, padding: '20px 0' }}>No orders yet.</p>}
     </Panel>
@@ -4390,7 +4594,7 @@ function OrdersPanel({ orders, items, indentBatches, onImport, onDelete, onAddIt
           </button>
         </Panel>
 
-        <OrdersListPanel orders={orders} indentBatches={indentBatches} onDelete={onDelete} />
+        <OrdersListPanel orders={orders} indentBatches={indentBatches} onDelete={onDelete} onDeleteOrders={onResetOldOrders} />
       </div>
     </div>
   );
