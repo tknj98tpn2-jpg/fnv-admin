@@ -97,11 +97,11 @@ const STATUS_COLORS = {
   neutral: { bg: '#F1EFE6', fg: MUTED },
 };
 
-const PLATFORMS = ['Blinkit', 'Flipkart', 'Zepto'];
+const PLATFORMS = ['Blinkit', 'Flipkart'];
 // Channels whose own item code is not a reliable identifier (it can be
 // reissued on a relisting, or — for Zepto — is an internal UUID rather than a
 // stable article code) — matching for these channels relies on EAN only.
-const EAN_ONLY_PLATFORMS = new Set(['Flipkart', 'Zepto']);
+const EAN_ONLY_PLATFORMS = new Set(['Flipkart']);
 
 // ── Barcode rendering — EAN-13 for numeric codes (Flipkart's EANs), Code 128
 // Set B for anything else (Blinkit's alphanumeric SKUs like "BLK-ONI-600").
@@ -2751,7 +2751,7 @@ function ItemForm({ initial, onSave, onCancel }) {
       <Panel style={{ maxWidth: 640 }}>
         <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 16, color: INK }}>{isEdit ? `Edit ${initial.name}` : 'Create item'}</p>
         <p style={{ margin: '0 0 18px', fontSize: 12, color: MUTED }}>
-          Items are generic — add an alias for each channel it's sold on (Blinkit, Flipkart, Zepto, etc.), with that channel's own item name/code and pack size.
+          Items are generic — add an alias for each channel it's sold on (Blinkit, Flipkart, etc.), with that channel's own item name/code and pack size.
         </p>
 
         <p style={label13}>ITEM NAME</p>
@@ -2789,7 +2789,7 @@ function ItemForm({ initial, onSave, onCancel }) {
         <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14, marginTop: 8 }}>
           <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 13, color: INK }}>Channel aliases</p>
           <p style={{ margin: '0 0 10px', fontSize: 11, color: MUTED }}>
-            e.g. Blinkit's 1kg Tomato pack, Flipkart's 500g pack, Zepto's 350g pack — each with its own channel item code.
+            e.g. Blinkit's 1kg Tomato pack, Flipkart's 500g pack — each with its own channel item code.
           </p>
           {aliases.length > 0 && (
             <div style={{ display: 'flex', gap: 6, marginBottom: 4, fontSize: 10, color: MUTED, fontWeight: 700 }}>
@@ -3497,7 +3497,10 @@ function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(() => {
     try {
       const saved = window.localStorage.getItem(key);
-      return saved !== null ? JSON.parse(saved) : defaultValue;
+      const parsed = saved !== null ? JSON.parse(saved) : defaultValue;
+      // Zepto is no longer a channel — a device that last had Zepto picked in a
+      // channel filter falls back to the default instead of showing nothing.
+      return parsed === 'Zepto' ? defaultValue : parsed;
     } catch {
       return defaultValue;
     }
@@ -4701,82 +4704,6 @@ function formatDateDMY(v) {
   return s;
 }
 
-// Zepto's buyer block (as captured off the PO/invoice) reads as one run of
-// text: "<legal name> <DC-CODE style name> (<code>) <street address>" — e.g.
-// "Hridya 1 Trade Enterprise Private Limited JBP-Janki Nagar (JBP001S) J/53,
-// ...". Their own invoice shows the name and the delivery-centre name+code
-// together on the "To," line, and the centre name alone (no code) in its own
-// "Delivery Center" row — both are pulled back out of that one string here
-// rather than asked for separately, since the source data only has the one.
-function splitZeptoBuyerBlock(block) {
-  const m = String(block || '').match(/^(.*?)\s*([A-Za-z]{2,5}-[^()]+?)\s*\(([A-Za-z0-9]+)\)\s*(.*)$/);
-  if (!m) return { buyerName: block || '', deliveryCenter: '', deliveryCenterFull: '', street: '' };
-  return { buyerName: m[1].trim(), deliveryCenter: m[2].trim(), deliveryCenterFull: `${m[2].trim()} (${m[3].trim()})`, street: m[4].trim() };
-}
-
-// Matches the plain bordered "INVOICE" layout the business's Zepto-facing
-// vendor (e.g. "Axis solutions") issues — see the sample the business shared.
-function zeptoInvoiceHtml(inv) {
-  const rows = sortRowsByName(inv.rows);
-  const { buyerName, deliveryCenter, deliveryCenterFull } = splitZeptoBuyerBlock(inv.buyerAddress);
-  const rowsHtml = rows.map((r, i) => `
-    <tr>
-      <td style="text-align:center;">${i + 1}</td>
-      <td style="text-align:center;">${esc(r.code)}</td>
-      <td>${esc(r.name)}</td>
-      <td style="text-align:center;">${r.qty}</td>
-      <td style="text-align:center;">${Number(r.price || 0).toFixed(2)}</td>
-      <td style="text-align:center;">${Number(r.total || 0).toFixed(2)}</td>
-    </tr>
-  `).join('');
-  return `<!DOCTYPE html>
-    <html>
-      <head>
-        <title>Invoice ${esc(inv.invoiceNumber)}</title>
-        <meta charset="utf-8" />
-        <style>
-          body { font-family: Georgia, 'Times New Roman', serif; padding: 20px; color: #000; }
-          table { width: 100%; border-collapse: collapse; }
-          td, th { border: 1px solid #000; padding: 4px 8px; font-size: 12.5px; }
-          .title { text-align: center; font-weight: 700; font-size: 15px; padding: 6px; }
-          .sub { text-align: center; font-weight: 700; padding: 2px; font-size: 12px; }
-          .label { font-weight: 700; width: 90px; }
-          .center { text-align: center; font-weight: 700; }
-          th { text-align: center; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <table>
-          <tr><td colspan="6" class="title">INVOICE</td></tr>
-          <tr><td colspan="6" class="sub">${esc(inv.vendorName || '')}</td></tr>
-          <tr><td colspan="6" style="text-align:center; font-size:11px;">Address: Plot No. 48, Cooperative Society, Deendayal, Jabalpur (482002)</td></tr>
-          <tr><td colspan="6" style="text-align:center; font-size:11px;">Email - Nilgiri790@gmail.com&nbsp;&nbsp;&nbsp;9981324558, 8269584143</td></tr>
-          <tr>
-            <td class="label" colspan="2">Invoice No.:</td>
-            <td colspan="2" style="text-align:center;">${esc(inv.invoiceNumber)}</td>
-            <td class="label">P.O. No</td>
-            <td>${esc(inv.poNumber)}</td>
-          </tr>
-          <tr>
-            <td class="label" colspan="2">Invoice Date:</td>
-            <td colspan="2" style="text-align:center;">${formatDateDMY(inv.invoiceDate)}</td>
-            <td class="label">P.O Date</td>
-            <td>${formatDateDMY(inv.poDate)}</td>
-          </tr>
-          ${deliveryCenter ? `<tr><td colspan="4"></td><td class="label">Delivery Center</td><td>${esc(deliveryCenter)}</td></tr>` : ''}
-          <tr><td colspan="6" class="center">Detail of Buyer</td></tr>
-          <tr><td class="label">To,</td><td colspan="5" style="font-weight:700;">${esc(buyerName)} ${esc(deliveryCenterFull)}</td></tr>
-          <tr>
-            <th>Sr.</th><th>Material Code</th><th>Item Description</th><th>Quantity</th><th>Unit Rate</th><th>Total(INR)</th>
-          </tr>
-          ${rowsHtml}
-          <tr><td></td><td></td><td></td><td></td><td class="center">Total</td><td class="center">${money2(inv.amount)}</td></tr>
-        </table>
-      </body>
-    </html>`;
-}
-
 // Matches Flipkart's own "TAX INVOICE" layout (Vendor/Ship-To/Bill-To panels,
 // then a line-item table with EAN/HSN/FSN and GST columns) — see the sample
 // the business shared (RMP10200132).
@@ -4914,16 +4841,13 @@ function genericInvoiceHtml(inv) {
 }
 
 // Builds and opens the printable tax invoice for a PO-generated invoice
-// record (see parseFlipkartPoHeader / parseZeptoPoText). The channel's own PO
-// terms require its number on the invoice, so it's always shown. Each
-// channel gets the layout its own invoice actually uses — Zepto's plain
-// bordered "INVOICE" table or Flipkart's "TAX INVOICE" panels — rather than
-// one generic template, since that's what the business asked to match.
+// record (see parseFlipkartPoHeader). The channel's own PO terms require its
+// number on the invoice, so it's always shown. Flipkart gets its own "TAX
+// INVOICE" panel layout, since that's what the business asked to match.
 function printInvoice(inv) {
   const hasRows = (inv.rows || []).length > 0;
   let html;
-  if (hasRows && inv.platform === 'Zepto') html = zeptoInvoiceHtml(inv);
-  else if (hasRows && inv.platform === 'Flipkart') html = flipkartInvoiceHtml(inv);
+  if (hasRows && inv.platform === 'Flipkart') html = flipkartInvoiceHtml(inv);
   else html = genericInvoiceHtml(inv);
   openHtmlInPrintWindow(html);
 }
@@ -6005,7 +5929,7 @@ function disambiguateByArticle(orderList, baseKeyFor, idFn) {
   const normName = (o) => sanitizeKeyPart(String(o.articleName || '').trim().toLowerCase().replace(/\s+/g, ' '));
   // Flipkart/Zepto re-issue their own FSN/UUID "code" on a relisting, so for them only the
   // EAN counts as the article's identity — never the code (see EAN_ONLY_PLATFORMS).
-  const idOf = idFn || ((o) => sanitizeKeyPart(o.rawEan || ((o.platform === 'Flipkart' || o.platform === 'Zepto') ? '' : (o.rawCode || ''))));
+  const idOf = idFn || ((o) => sanitizeKeyPart(o.rawEan || (EAN_ONLY_PLATFORMS.has(o.platform) ? '' : (o.rawCode || ''))));
   const idsByBase = {};
   const namesByBase = {};
   orderList.forEach((o) => {
@@ -6042,7 +5966,7 @@ function buildArticleKeyer(pricedOrders, city) {
   // that merely share an item but are named differently (Baby Banana vs Banana 3pc, Cabbage
   // vs Baby Cabbage) stay apart. Only when an order has no article name at all does its EAN
   // / code stand in as the identity.
-  const eanOnly = (p) => p === 'Flipkart' || p === 'Zepto';
+  const eanOnly = (p) => EAN_ONLY_PLATFORMS.has(p);
   const norm = (v) => sanitizeKeyPart(String(v || '').trim().toLowerCase().replace(/\s+/g, ' '));
   const idOf = (o) => {
     const n = norm(o.articleName);
@@ -6582,7 +6506,7 @@ async function extractPdfText(file) {
 }
 
 // Same as extractPdfText, but keeps each word's position instead of flattening
-// everything into one string. Zepto's GRN PDF (see parseZeptoGrnWords below)
+// everything into one string. A GRN PDF
 // wraps a multi-word item name onto two lines that straddle the row's own
 // numbers — a plain flattened-text regex reliably shreds those wrapped names
 // (a trailing word floats into the NEXT row) — so that parser reconstructs
@@ -6692,13 +6616,9 @@ function parsePoFile(file) {
   return new Promise((resolve, reject) => {
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     if (isPdf) {
-      // This app only ever sees a PDF purchase order from Zepto — Flipkart's
-      // export is always the .xlsx handled below.
-      extractPdfText(file).then((text) => {
-        const { rows, header } = parseZeptoPoText(text);
-        if (!rows.length) { reject(new Error('Could not find any priced article rows in this PDF.')); return; }
-        resolve({ platform: 'Zepto', fileName: file.name, rows, header });
-      }).catch(() => reject(new Error('Could not read this PDF.')));
+      // Only Flipkart's .xlsx purchase order is supported (Zepto, the only
+      // channel that sent a PDF PO, is no longer served).
+      reject(new Error('Please upload the Flipkart purchase order (.xlsx). PDF purchase orders are not supported.'));
       return;
     }
     const reader = new FileReader();
@@ -6954,72 +6874,6 @@ function parseBlinkitGrnTableWords(pages) {
 }
 
 
-// ── Zepto GRN report PDFs ──
-// Unlike Blinkit's, Zepto's GRN table has no item code column at all — the
-// "SKU" column is just the plain item name — and a two-word-or-longer name
-// wraps onto a second line that straddles the row's own numbers (e.g. "Pumpkin"
-// sits just above the "3 ... 60" line and "Green" sits just below it). Flattening
-// the page to one line of text and reading it left to right, the way every other
-// PDF parser above does, shifts each wrapped word into the following row's name
-// instead — so this reconstructs rows from each word's position (extractPdfWords)
-// instead of from flattened text.
-//
-// The row's own number line still parses in a fixed left-to-right order — Exp
-// qty, Recv qty, Unit Price, Taxable value, four CGST/SGST/IGST/Cess rate-and-
-// amount pairs, then Total — but only the first four and the last of those are
-// used (matches priceForCode's fallback in grnValueForBatch: qty * price = Recv
-// qty * Unit Price, which is the whole point of parsing this file — Total comes
-// along mostly to sanity-check that against Taxable value while debugging).
-function parseZeptoGrnWords(pages) {
-  const isNum = (s) => /^-?\d+(\.\d+)?$/.test(s);
-  const rows = [];
-  let expectedSr = 1;
-
-  pages.forEach((words) => {
-    if (!words.length) return;
-    const sorted = [...words].sort((a, b) => a.y - b.y || a.x - b.x);
-    // The table header repeats on every page — "SKU" marks where the item
-    // rows start, and the summary "Total" row (a lone "Total" hard against
-    // the left margin, unlike the per-row "Total(INR)" column) marks where
-    // they end. Without these, the first/last row on a page would swallow
-    // the header text above it or the grand-total line below it.
-    const headerY = words.filter((w) => w.text === 'SKU').reduce((m, w) => Math.max(m, w.y), -Infinity);
-    const footerY = words.filter((w) => w.text === 'Total' && w.x < 30).reduce((m, w) => Math.min(m, w.y), Infinity);
-
-    const anchors = [];
-    sorted.forEach((w) => {
-      if (w.x < 20 && isNum(w.text) && Number(w.text) === expectedSr) {
-        anchors.push(w);
-        expectedSr += 1;
-      }
-    });
-
-    anchors.forEach((a, i) => {
-      const prevY = i > 0 ? anchors[i - 1].y : headerY;
-      const nextY = i + 1 < anchors.length ? anchors[i + 1].y : footerY;
-      const bandLo = i > 0 ? (prevY + a.y) / 2 : Math.max(headerY, a.y - 15);
-      const bandHi = i + 1 < anchors.length ? (a.y + nextY) / 2 : Math.min(footerY, a.y + 15);
-      const bandWords = words.filter((w) => w !== a && w.y >= bandLo && w.y < bandHi);
-
-      const nameWords = bandWords
-        .filter((w) => !isNum(w.text) && w.x < 115)
-        .sort((p, q) => p.y - q.y || p.x - q.x);
-      const name = nameWords.map((w) => w.text).join(' ');
-
-      const lineNums = bandWords
-        .filter((w) => isNum(w.text) && Math.abs(w.y - a.y) < 1.5)
-        .sort((p, q) => p.x - q.x);
-      if (lineNums.length < 5) return;
-      const recvQty = Number(lineNums[1].text) || 0;
-      const unitPrice = Number(lineNums[2].text) || 0;
-      const total = Number(lineNums[lineNums.length - 1].text) || 0;
-      if (recvQty > 0 && name) rows.push({ name, qty: recvQty, price: unitPrice, total });
-    });
-  });
-
-  return rows;
-}
-
 // ── Generate-invoice-from-PO ──────────────────────────────────────────────
 // A channel's PO already carries everything a tax invoice back to them needs
 // (the PO number they require us to quote, the agreed price per article, the
@@ -7071,44 +6925,6 @@ function parseFlipkartPoHeader(rows) {
     buyerName: poLabelValue(rows, 'RETAILER NAME'),
     buyerAddress: poLabelValue(rows, 'Billed To Address'),
     buyerGstin: poLabelValue(rows, 'Biil To GSTIN'),
-  };
-}
-
-// Zepto's PO PDF flattens (via pdf.js text extraction) to one continuous
-// stream of text per page. Each article line is anchored on its SKU code — a
-// UUID that sometimes has a stray space where the PDF wraps it onto a second
-// line inside the cell — which is the one token on the line guaranteed not to
-// look like anything else, so everything between the item description and the
-// following HSN code (a clean 6-8 digit run) is swept up and cleaned after.
-const ZEPTO_PO_ROW_RE = /(\d{1,3}) (\d{4,9}) (.+?) \d{6,8} (\d{4,14}) (\d{1,4}) ([\d.]+) ([\d.]+) ([\d.]+) \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ \d+\.\d{2}% [\d.]+ [\d.]+ ([\d.]+)/g;
-function cleanZeptoDesc(raw) {
-  return raw.replace(/[0-9a-f]{6,}(?:[\s-]+[0-9a-f]{3,})+/gi, '').replace(/\s+/g, ' ').trim();
-}
-function parseZeptoPoText(text) {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  const grab = (re) => { const m = flat.match(re); return m ? m[1].trim() : ''; };
-  const rows = [];
-  let m;
-  ZEPTO_PO_ROW_RE.lastIndex = 0;
-  while ((m = ZEPTO_PO_ROW_RE.exec(flat)) !== null) {
-    const [, , code, descRaw, ean, qty, , rate, taxable, total] = m;
-    const q = Number(qty) || 0;
-    if (q <= 0) continue;
-    rows.push({ code: code.trim(), name: cleanZeptoDesc(descRaw), ean: ean.trim(), qty: q, price: Number(rate) || 0, total: Number(total) || Number(taxable) || 0 });
-  }
-  const buyerM = flat.match(/Billing Address\s+Shipping Address\s+Address:\s*(.+?)\s*GSTIN:\s*(\S+)/i);
-  return {
-    rows,
-    header: {
-      poNumber: grab(/PO\s*No\s*:?\s*([A-Za-z0-9-]+)/i),
-      poDate: grab(/PO\s*Date\s*:?\s*([\d-]+)/i),
-      vendorName: grab(/Vendor Details\s+PO Details\s+Name:\s*(.+?)\s*Address:/i),
-      vendorAddress: grab(/Name:\s*.+?\s*Address:\s*(.+?)\s*Name:/i),
-      vendorGstin: grab(/GSTIN:\s*(\S+)/i), // first GSTIN in the doc is always ours (vendor)
-      buyerName: '', // Zepto's PO doesn't label the buyer's legal name separately from its address block
-      buyerAddress: buyerM ? buyerM[1] : '',
-      buyerGstin: buyerM ? buyerM[2] : '',
-    },
   };
 }
 
@@ -9699,15 +9515,11 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     };
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     if (isPdf) {
-      if (batch.platform === 'Zepto') {
-        extractPdfText(file).then((t) => { const parsed = parseZeptoPoText(t); finish(parsed.rows, file.name, t); }).catch(() => setPoError('Could not read this PDF.'));
-      } else {
-        extractPdfText(file).then(async (t) => {
-          let rows = parsePoPdfText(t);
-          if (!rows.length) { const w = await extractPdfWords(file); rows = parseHyperpurePoWords(w); if (!rows.length) rows = parseBlinkitPoScheduleWords(w); } // Blinkit's newer PO schedule
-          finish(rows, file.name, t);
-        }).catch(() => setPoError('Could not read this PDF.'));
-      }
+      extractPdfText(file).then(async (t) => {
+        let rows = parsePoPdfText(t);
+        if (!rows.length) { const w = await extractPdfWords(file); rows = parseHyperpurePoWords(w); if (!rows.length) rows = parseBlinkitPoScheduleWords(w); } // Blinkit's newer PO schedule
+        finish(rows, file.name, t);
+      }).catch(() => setPoError('Could not read this PDF.'));
       e.target.value = '';
       return;
     }
@@ -9733,15 +9545,11 @@ function SalesBatchDetail({ bf, items, reports, onBack, onUploadGrn, onUpdateInd
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     const isCsv = file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv');
     if (isPdf) {
-      if (batch.platform === 'Zepto') {
-        extractPdfWords(file).then((pages) => finish(parseZeptoGrnWords(pages), file.name)).catch(() => setGrnError('Could not read this PDF.'));
-      } else {
-        extractPdfText(file).then(async (t) => {
-          let rows = parseGrnPdfText(t);
-          if (!rows.length) rows = parseBlinkitGrnTableWords(await extractPdfWords(file)); // Blinkit's newer GRN layout
-          finish(rows, file.name);
-        }).catch(() => setGrnError('Could not read this PDF.'));
-      }
+      extractPdfText(file).then(async (t) => {
+        let rows = parseGrnPdfText(t);
+        if (!rows.length) rows = parseBlinkitGrnTableWords(await extractPdfWords(file)); // Blinkit's newer GRN layout
+        finish(rows, file.name);
+      }).catch(() => setGrnError('Could not read this PDF.'));
       e.target.value = '';
       return;
     }
@@ -10266,12 +10074,12 @@ function GenerateInvoiceFromPo({ salesInvoices, onSaveInvoice, onClose }) {
   return (
     <Panel style={{ maxWidth: 560, marginBottom: 16 }}>
       <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: INK }}>Generate invoice from PO</p>
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Upload the Flipkart (.xlsx) or Zepto (.pdf) purchase order — the articles, PO number and amount are read straight from it.</p>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: MUTED }}>Upload the Flipkart (.xlsx) purchase order — the articles, PO number and amount are read straight from it.</p>
 
       <button onClick={() => poRef.current && poRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: LEAF, border: `1px solid ${LEAF}`, borderRadius: RADIUS.md, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>
         <Upload size={13} /> {parsed ? 'Upload a different PO' : 'Upload PO'}
       </button>
-      <input ref={poRef} type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleFile} style={{ display: 'none' }} />
+      <input ref={poRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: 'none' }} />
       {poError && <p style={{ margin: '0 0 10px', fontSize: 11, color: TOMATO }}>{poError}</p>}
 
       {parsed && (
